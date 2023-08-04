@@ -5,6 +5,8 @@
 #![warn(clippy::missing_docs_in_private_items)]
 #![allow(clippy::needless_return, clippy::while_let_on_iterator, clippy::collapsible_else_if)]
 
+//! Library for manipulating and comparing classification strings based on configuration from Assemblyline.
+
 pub mod errors;
 pub mod config;
 pub mod classification;

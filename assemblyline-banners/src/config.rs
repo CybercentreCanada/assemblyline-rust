@@ -1,8 +1,8 @@
+//! Objects for parsing configuration data from assemblyline.
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-
-
 
 /// Define sources for dynamic groups
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -247,8 +247,10 @@ pub struct ClassificationSubGroup {
     /// Assuming that this groups is the only group selected, this is the display name
     /// that will be used in the classification (that values has to be in the aliases
     /// of this group and only this group) (optional)
-    #[serde(default)]
-    pub solitary_display_name: Option<String>,
+    ///
+    /// Loaded in the python version, but not actually used
+    // #[serde(default)]
+    // pub solitary_display_name: Option<String>,
 
     /// This is a special flag that auto-select the corresponding group when
     /// this subgroup is selected (optional)
@@ -269,7 +271,7 @@ impl Default for ClassificationSubGroup {
             description: default_description(),
             name: Default::default(),
             short_name: Default::default(),
-            solitary_display_name: None,
+            // solitary_display_name: None,
             require_group: None,
             limited_to_group: None
         }

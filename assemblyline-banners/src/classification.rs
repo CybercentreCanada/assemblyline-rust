@@ -1,3 +1,4 @@
+//! Classification processing and manipulating tools
 use std::collections::{HashSet, HashMap};
 
 use itertools::Itertools;
@@ -112,6 +113,9 @@ impl ClassificationParser {
             if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&short_name[..]) {
                 return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
             }
+            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&name[..]) {
+                return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
+            }
 
             if x.lvl > MAX_LVL {
                 return Err(Errors::InvalidDefinition(format!("Level over maximum classification level of {MAX_LVL}.")))
@@ -202,10 +206,9 @@ impl ClassificationParser {
             for a in &x.aliases {
                 new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
             }
-
-            if let Some(a) = &x.solitary_display_name {
-                new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
-            }
+            // if let Some(a) = &x.solitary_display_name {
+            //     new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+            // }
             if x.auto_select {
                 new.subgroups_auto_select.push(x.name.clone());
                 new.subgroups_auto_select_short.push(x.short_name.clone());
@@ -815,7 +818,7 @@ impl ClassificationParser {
     /// , ignore_invalid: bool = False
     /// Returns:
     ///     True is the user can see the classification
-    fn is_accessible(&self, user_c12n: &str, c12n: &str) -> Result<bool> {
+    pub fn is_accessible(&self, user_c12n: &str, c12n: &str) -> Result<bool> {
         if self.invalid_mode {
             return Ok(false)
         }
@@ -979,7 +982,7 @@ impl ClassificationParser {
     ///
     /// Returns:
     ///     The most restrictive classification that we could create out of the two
-    fn max_classification(&self, c12n_1: &str, c12n_2: &str, long_format: bool) -> Result<String> {
+    pub fn max_classification(&self, c12n_1: &str, c12n_2: &str, long_format: bool) -> Result<String> {
 
         if !self.enforce || self.invalid_mode {
             return Ok(self.unrestricted.clone())
@@ -1011,7 +1014,7 @@ impl ClassificationParser {
     ///
     /// Returns:
     ///     The least restrictive classification that we could create out of the two
-    fn min_classification(&self, c12n_1: &str, c12n_2: &str, long_format: bool) -> Result<String> {
+    pub fn min_classification(&self, c12n_1: &str, c12n_2: &str, long_format: bool) -> Result<String> {
 
         if !self.enforce || self.invalid_mode {
             return Ok(self.unrestricted.clone())
@@ -1273,7 +1276,7 @@ mod test {
                 ClassificationMarking::new_required("nocon".to_owned(), "No Contractor Access".to_owned()),
             ],
             subgroups: vec![
-                ClassificationSubGroup{short_name: "R1".to_owned(), name: "Reserve One".to_owned(), ..Default::default()},
+                ClassificationSubGroup{short_name: "R1".to_owned(), name: "Reserve One".to_owned(), aliases: vec!["R0".to_owned()], ..Default::default()},
                 ClassificationSubGroup{short_name: "R2".to_owned(), name: "Reserve Two".to_owned(), require_group: Some("X".to_owned()), ..Default::default()},
             ],
             restricted: "L2".to_owned(),
@@ -1307,16 +1310,16 @@ mod test {
 
         // bad short names
         assert!(ClassificationParser::new(config.clone()).is_ok());
-        config.levels[0].short_name = "INV".to_owned();
+        config.levels[1].short_name = "INV".to_owned();
         assert!(ClassificationParser::new(config.clone()).is_err());
-        config.levels[0].short_name = "NULL".to_owned();
+        config.levels[1].short_name = "NULL".to_owned();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // bad long names
         let mut config = setup_config();
-        config.levels[0].name = "INV".to_owned();
+        config.levels[1].name = "INV".to_owned();
         assert!(ClassificationParser::new(config.clone()).is_err());
-        config.levels[0].name = "NULL".to_owned();
+        config.levels[1].name = "NULL".to_owned();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping level names
@@ -1341,6 +1344,40 @@ mod test {
         let mut config = setup_config();
         config.required[0].name = "AA".to_owned();
         config.required[1].name = "AA".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // overlapping groups names
+        let mut config = setup_config();
+        config.groups[0].short_name = "AA".to_owned();
+        config.groups[1].short_name = "AA".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // overlapping groups names
+        let mut config = setup_config();
+        config.groups[0].name = "AA".to_owned();
+        config.groups[1].name = "AA".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // overlapping subgroups names
+        let mut config = setup_config();
+        config.subgroups[0].short_name = "AA".to_owned();
+        config.subgroups[1].short_name = "AA".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // overlapping subgroups names
+        let mut config = setup_config();
+        config.subgroups[0].name = "AA".to_owned();
+        config.subgroups[1].name = "AA".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // missing restricted
+        let mut config = setup_config();
+        config.restricted = "XF".to_owned();
+        assert!(ClassificationParser::new(config.clone()).is_err());
+
+        // missing unrestricted
+        let mut config = setup_config();
+        config.unrestricted = "XF".to_owned();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // Use levels outside of range
@@ -1448,6 +1485,65 @@ mod test {
         assert_eq!(ce.max_classification("L0//R1/R2", "L1//R1/R2", false).unwrap(), "L1//XX/R1/R2");
         assert_eq!(ce.max_classification("L0//R1/R2", "L0//R1", true).unwrap(), "LEVEL 0//XX/RESERVE ONE"); // TODO ???
     }
+
+    #[test]
+    fn multi_group_alias() {
+        let mut config = setup_config();
+        config.groups[0].aliases.push("Alphabet Gang".to_owned());
+        config.groups[1].aliases.push("Alphabet Gang".to_owned());
+        let ce = ClassificationParser::new(config).unwrap();
+
+        assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::short()).unwrap(), "L0//REL A");
+        assert_eq!(ce.normalize_classification_options("L0//REL A, B", NormalizeOptions::short()).unwrap(), "L0//REL ALPHABET GANG");
+    }
+
+    #[test]
+    fn auto_select_group() {
+        let mut config = setup_config();
+        config.groups[0].auto_select = true;
+        let ce = ClassificationParser::new(config).unwrap();
+
+        assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::short()).unwrap(), "L0");
+        assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::short()).unwrap(), "L0//REL A");
+        assert_eq!(ce.normalize_classification_options("L0//REL B", NormalizeOptions::short()).unwrap(), "L0//REL A, B");
+        assert_eq!(ce.normalize_classification_options("L0//REL A, B", NormalizeOptions::short()).unwrap(), "L0//REL A, B");
+        assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::default()).unwrap(), "LEVEL 0");
+        assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A");
+        assert_eq!(ce.normalize_classification_options("L0//REL B", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A, GROUP B");
+        assert_eq!(ce.normalize_classification_options("L0//REL A, B", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A, GROUP B");
+    }
+
+    #[test]
+    fn auto_select_subgroup() {
+        let mut config = setup_config();
+        config.subgroups[0].auto_select = true;
+        let ce = ClassificationParser::new(config).unwrap();
+
+        assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::short()).unwrap(), "L0");
+        assert_eq!(ce.normalize_classification_options("L0//R0", NormalizeOptions::short()).unwrap(), "L0//R1");
+        assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
+        assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
+        assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::default()).unwrap(), "LEVEL 0");
+        assert_eq!(ce.normalize_classification_options("L0//R1", NormalizeOptions::default()).unwrap(), "LEVEL 0//RESERVE ONE");
+        assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
+        assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
+    }
+
+    // #[test]
+    // fn subgroup_single() {
+    //     let mut config = setup_config();
+    //     config.subgroups[0].solitary_display_name = Some("RR".to_owned());
+    //     let ce = ClassificationParser::new(config).unwrap();
+
+    //     assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::short()).unwrap(), "L0");
+    //     assert_eq!(ce.normalize_classification_options("L0//R0", NormalizeOptions::short()).unwrap(), "L0//RR");
+    //     assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
+    //     assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
+    //     assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::default()).unwrap(), "LEVEL 0");
+    //     assert_eq!(ce.normalize_classification_options("L0//R1", NormalizeOptions::default()).unwrap(), "LEVEL 0//RR");
+    //     assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
+    //     assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
+    // }
 
     #[test]
     fn parts() {
