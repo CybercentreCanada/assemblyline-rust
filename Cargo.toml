@@ -1,5 +1,5 @@
 [workspace]
 resolver = "2"
 members = [
-    "assemblyline-banners"
+    "assemblyline-markings"
 ]

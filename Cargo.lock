@@ -3,7 +3,7 @@
 version = 3
 
 [[package]]
-name = "assemblyline-banners"
+name = "assemblyline-markings"
 version = "0.1.0"
 dependencies = [
  "itertools",
