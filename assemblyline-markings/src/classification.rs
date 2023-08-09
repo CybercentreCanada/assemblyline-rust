@@ -1253,7 +1253,7 @@ mod test {
     use crate::classification::{NormalizeOptions, ParsedClassification};
     use crate::config::{ClassificationConfig, ClassificationLevel, ClassificationGroup, ClassificationMarking, ClassificationSubGroup};
 
-    use super::{ClassificationParser, PartsOptions};
+    use super::{ClassificationParser, PartsOptions, Result};
 
     fn setup_config() -> ClassificationConfig {
         ClassificationConfig{
@@ -1272,6 +1272,7 @@ mod test {
             ],
             required: vec![
                 ClassificationMarking::new("LE".to_owned(), "Legal Department".to_owned(), vec!["Legal"]),
+                ClassificationMarking::new("AC".to_owned(), "Accounting".to_owned(), vec!["Acc"]),
                 ClassificationMarking::new_required("orcon".to_owned(), "Originator Controlled".to_owned()),
                 ClassificationMarking::new_required("nocon".to_owned(), "No Contractor Access".to_owned()),
             ],
@@ -1595,5 +1596,45 @@ mod test {
         assert!(ce.normalize_classification("GARBO").is_err());
         // assert!(ce.normalize_classification("L1//GARBO").is_err());
         // assert!(ce.normalize_classification("L1//LE//GARBO").is_err());
+    }
+
+    #[test]
+    fn access_control() -> Result<()> {
+        let ce = setup();
+
+        // Access limits due to level
+        assert!(ce.is_accessible("L0", "L0")?);
+        assert!(!ce.is_accessible("L0", "L1")?);
+        assert!(!ce.is_accessible("L0", "L2")?);
+        assert!(ce.is_accessible("L1", "L0")?);
+        assert!(ce.is_accessible("L1", "L1")?);
+        assert!(!ce.is_accessible("L1", "L2")?);
+        assert!(ce.is_accessible("L2", "L0")?);
+        assert!(ce.is_accessible("L2", "L1")?);
+        assert!(ce.is_accessible("L2", "L2")?);
+
+        // Access limits due to control system markings
+        assert!(!ce.is_accessible("L2", "L0//LE")?);
+        assert!(ce.is_accessible("L2//LE", "L0//LE")?);
+
+        assert!(!ce.is_accessible("L2", "L2//LE/AC")?);
+        assert!(!ce.is_accessible("L2//LE", "L2//LE/AC")?);
+        assert!(!ce.is_accessible("L2//AC", "L2//LE/AC")?);
+        assert!(ce.is_accessible("L2//LE/AC", "L2//LE/AC")?);
+
+        // Access limits due to dissemination
+        assert!(!ce.is_accessible("L2", "L2//ORCON/NOCON")?);
+        assert!(!ce.is_accessible("L2//ORCON", "L2//ORCON/NOCON")?);
+        assert!(!ce.is_accessible("L2//NOCON", "L2//ORCON/NOCON")?);
+        assert!(ce.is_accessible("L2//ORCON/NOCON", "L2//ORCON/NOCON")?);
+
+        // Access limits due to releasability
+        assert!(!ce.is_accessible("L2", "L2//REL A")?);
+        assert!(!ce.is_accessible("L2//REL B", "L2//REL A")?);
+        assert!(ce.is_accessible("L2//REL B", "L2//REL A, B")?);
+        assert!(ce.is_accessible("L2//REL B", "L2//REL B")?);
+        assert!(ce.is_accessible("L2//REL B", "L2")?);
+
+        Ok(())
     }
 }
