@@ -715,41 +715,46 @@ impl ClassificationParser {
 //         out.pop('_classification_cache_short', None)
 //         return out
 
-//     def get_access_control_parts(self, c12n: str, user_classification: bool = False) -> Dict:
-//         """
-//         Returns a dictionary containing the different access parameters Lucene needs to build it's queries
+    /// Returns a dictionary containing the different access parameters Lucene needs to build it's queries
+    ///
+    /// Args:
+    ///     c12n: The classification to get the parts from
+    ///     user_classification: Is a user classification, (old default = false)
+    pub fn get_access_control_parts(&self, c12n: &str, user_classification: bool) -> Result<serde_json::Value> {
+        let c12n = if !self.enforce || self.invalid_mode {
+            self.unrestricted.clone()
+        } else {
+            c12n.to_owned()
+        };
 
-//         Args:
-//             c12n: The classification to get the parts from
-//             user_classification: Is a user classification
-//         """
-//         if not self.enforce or self.invalid_mode:
-//             c12n = self.UNRESTRICTED
+        let result: Result<serde_json::Value> = (||{
+            // Normalize the classification before gathering the parts
+            let c12n = self.normalize_classification_options(&c12n, NormalizeOptions { skip_auto_select: user_classification, ..Default::default()})?;
 
-//         try:
-//             # Normalize the classification before gathering the parts
-//             c12n = self.normalize_classification(c12n, skip_auto_select=user_classification)
+            let access_lvl = self._get_c12n_level_index(&c12n)?;
+            let access_req = self._get_c12n_required_option(&c12n, false);
+            let (access_grp1, access_grp2) = self._get_c12n_groups_options(&c12n, false, true)?;
 
-//             access_lvl = self._get_c12n_level_index(c12n)
-//             access_req = self._get_c12n_required(c12n, long_format=False)
-//             access_grp1, access_grp2 = self._get_c12n_groups(c12n, long_format=False)
+            return Ok(serde_json::json!({
+                "__access_lvl__": access_lvl,
+                "__access_req__": access_req,
+                "__access_grp1__": if access_grp1.is_empty() { vec!["__EMPTY__".to_owned()] } else { access_grp1 },
+                "__access_grp2__": if access_grp2.is_empty() { vec!["__EMPTY__".to_owned()] } else { access_grp2 }
+            }))
+        })();
 
-//             return {
-//                 '__access_lvl__': access_lvl,
-//                 '__access_req__': access_req,
-//                 '__access_grp1__': access_grp1 or ['__EMPTY__'],
-//                 '__access_grp2__': access_grp2 or ['__EMPTY__']
-//             }
-//         except InvalidClassification:
-//             if not self.enforce or self.invalid_mode:
-//                 return {
-//                     '__access_lvl__': self.NULL_LVL,
-//                     '__access_req__': [],
-//                     '__access_grp1__': ['__EMPTY__'],
-//                     '__access_grp2__': ['__EMPTY__']
-//                 }
-//             else:
-//                 raise
+        if let Err(Errors::InvalidClassification(_)) = &result {
+            if !self.enforce || self.invalid_mode {
+                return Ok(serde_json::json!({
+                    "__access_lvl__": NULL_LVL,
+                    "__access_req__": [],
+                    "__access_grp1__": ["__EMPTY__"],
+                    "__access_grp2__": ["__EMPTY__"]
+                }))
+            }
+        }
+        return result
+    }
 
 //     def get_access_control_req(self) -> Union[KeysView, List]:
 //         """
@@ -1114,12 +1119,6 @@ impl ClassificationParser {
 //                                                         long_format=long_format, skip_auto_select=True)
 
 
-// if __name__ == "__main__":
-//     from pprint import pprint
-//     from assemblyline.common import forge
-//     classification = forge.get_classification()
-//     pprint(classification._classification_cache)
-//     pprint(classification._classification_cache_short)
 
 }
 
