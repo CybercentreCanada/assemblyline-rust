@@ -1040,6 +1040,8 @@ impl ClassificationParser {
         return self._get_normalized_classification_text(parts, long_format, false)
     }
 
+    // pub fn normalize(&self) -> NormalizeBuilder { NormalizeBuilder { ce: self, ..Default::default() }}
+
     /// call normalize_classification_options with default arguments
     pub fn normalize_classification(&self, c12n: &str) -> Result<String> {
         self.normalize_classification_options(c12n, Default::default())
@@ -1080,51 +1082,49 @@ impl ClassificationParser {
         return Ok(new_c12n)
     }
 
-//     def build_user_classification(self, c12n_1: str, c12n_2: str, long_format: bool = True) -> str:
-//         """
-//         Mixes to classification and return the classification marking that would give access to the most data
+    /// Mixes two classification and return the classification marking that would give access to the most data
+    ///
+    /// Args:
+    ///     c12n_1: First classification
+    ///     c12n_2: Second classification
+    ///     long_format: True/False in long format
+    ///
+    /// Returns:
+    ///     The classification that would give access to the most data
+    pub fn build_user_classification(&self, c12n_1: &str, c12n_2: &str, long_format: impl IBool) -> Result<String> {
+        let long_format = long_format.into().unwrap_or(true);
 
-//         Args:
-//             c12n_1: First classification
-//             c12n_2: Second classification
-//             long_format: True/False in long format
+        if !self.enforce || self.invalid_mode {
+            return Ok(self.unrestricted.clone())
+        }
 
-//         Returns:
-//             The classification that would give access to the most data
-//         """
-//         if not self.enforce or self.invalid_mode:
-//             return self.UNRESTRICTED
+        // Normalize classifications before comparing them
+        let c12n_1 = self.normalize_classification_options(c12n_1, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
+        let c12n_2 = self.normalize_classification_options(c12n_2, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
 
-//         # Normalize classifications before comparing them
-//         if c12n_1 is not None:
-//             c12n_1 = self.normalize_classification(c12n_1, skip_auto_select=True)
-//         if c12n_2 is not None:
-//             c12n_2 = self.normalize_classification(c12n_2, skip_auto_select=True)
+        let parts1 = self.get_classification_parts(&c12n_1, long_format, None)?;
+        let parts2 = self.get_classification_parts(&c12n_2, long_format, None)?;
 
-//         if c12n_1 is None:
-//             return c12n_2
-//         if c12n_2 is None:
-//             return c12n_1
+        let level = parts1.level.max(parts2.level);
+        let required = union(&parts1.required, &parts2.required);
+        let groups = union(&parts1.groups, &parts2.groups);
+        let subgroups = union(&parts1.subgroups, &parts2.subgroups);
 
-//         lvl_idx_1, req_1, groups_1, subgroups_1 = self._get_classification_parts(c12n_1, long_format=long_format)
-//         lvl_idx_2, req_2, groups_2, subgroups_2 = self._get_classification_parts(c12n_2, long_format=long_format)
-
-//         req = list(set(req_1) | set(req_2))
-//         groups = list(set(groups_1) | set(groups_2))
-//         subgroups = list(set(subgroups_1) | set(subgroups_2))
-
-//         return self._get_normalized_classification_text(max(lvl_idx_1, lvl_idx_2), req, groups, subgroups,
-//                                                         long_format=long_format, skip_auto_select=True)
-
-
+        return self._get_normalized_classification_text(ParsedClassification { level, required, groups, subgroups }, long_format, true)
+    }
 
 }
 
+/// values describing a classification string after parsing
 #[derive(Debug, PartialEq, Default)]
 pub struct ParsedClassification {
+    /// Classification level
     pub level: i32,
+    /// Required access system flags
     pub required: Vec<String>,
+    /// Groups that may be disseminated to
     pub groups: Vec<String>,
+    /// Subgroups
     pub subgroups: Vec<String>,
 }
 
@@ -1134,8 +1134,8 @@ fn intersection(a: &Vec<String>, b: &Vec<String>) -> Vec<String> {
 }
 
 /// Gather the union of two string vectors
-fn union(a: &Vec<String>, b: &Vec<String>) -> Vec<String> {
-    let mut out = a.clone();
+fn union(a: &[String], b: &[String]) -> Vec<String> {
+    let mut out = a.to_owned();
     out.extend(b.iter().cloned());
     out.sort_unstable();
     out.dedup();
@@ -1168,8 +1168,9 @@ impl ParsedClassification {
         }
     }
 
+    /// Helper function for max to process groups
     fn _max_groups(groups_1: &Vec<String>, groups_2: &Vec<String>) -> Result<Vec<String>> {
-        let groups = if groups_1.len() > 0 && groups_2.len() > 0 {
+        let groups = if !groups_1.is_empty() && !groups_2.is_empty() {
             intersection(groups_1, groups_2)
             // set(groups_1) & set(groups_2)
         } else {
@@ -1177,7 +1178,7 @@ impl ParsedClassification {
             // set(groups_1) | set(groups_2)
         };
 
-        if groups_1.len() > 0 && groups_2.len() > 0 && groups.len() == 0 {
+        if !groups_1.is_empty() && !groups_2.is_empty() && groups.is_empty() {
             // NOTE: Intersection generated nothing, we will raise an InvalidClassification exception
             return Err(Errors::InvalidClassification(format!("Could not find any intersection between the groups. {groups_1:?} & {groups_2:?}")))
         }
@@ -1185,6 +1186,7 @@ impl ParsedClassification {
         return Ok(groups)
     }
 
+    /// Parse the maximally restrictive combination of these values with another set
     pub fn max(&self, other: &Self) -> Result<Self> {
         let level = self.level.max(other.level);
         let required = union(&self.required, &other.required);
@@ -1218,6 +1220,19 @@ impl NormalizeOptions {
         Self{long_format: false, ..Default::default()}
     }
 }
+
+// pub struct NormalizeBuilder<'a> {
+//     ce: &'a ClassificationParser,
+//     _long_format: bool,
+//     _skip_auto_select: bool,
+//     _get_dynamic_groups: bool
+// }
+
+// impl<'a> NormalizeBuilder<'a> {
+//     pub fn classification(&self, c12n: &str) -> Result<String> {
+//         self.ce.normalize_classification_options(c12n, options)
+//     }
+// }
 
 #[cfg(test)]
 mod test {
