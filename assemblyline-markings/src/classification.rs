@@ -38,12 +38,7 @@ pub struct ClassificationParser {
     dynamic_groups_type: DynamicGroupType,
 
     levels: HashMap<i32, ClassificationLevel>,
-    levels_map: HashMap<i32, String>,
     levels_scores_map: HashMap<String, i32>,
-    levels_map_stl: HashMap<String, String>,
-    levels_map_lts: HashMap<String, String>,
-    levels_styles_map: HashMap<String, HashMap<String, String>>,
-    levels_aliases: HashMap<String, String>,
 
     access_req: HashMap<String, ClassificationMarking>,
     access_req_map_lts: HashMap<String, String>,
@@ -98,55 +93,28 @@ impl ClassificationParser {
         };
 
         // Add Invalid classification
-        new.levels_scores_map.insert(INVALID_SHORT_CLASSIFICATION.to_owned(), INVALID_LVL);
-        new.levels_map.insert(INVALID_LVL, INVALID_SHORT_CLASSIFICATION.to_owned());
-        new.levels_map_stl.insert(INVALID_SHORT_CLASSIFICATION.to_owned(), INVALID_CLASSIFICATION.to_owned());
-        new.levels_map_lts.insert(INVALID_CLASSIFICATION.to_owned(), INVALID_SHORT_CLASSIFICATION.to_owned());
+        new.insert_level(ClassificationLevel {
+            aliases: vec![],
+            css: Default::default(),
+            description: INVALID_CLASSIFICATION.to_owned(),
+            lvl: INVALID_LVL,
+            name: INVALID_CLASSIFICATION.to_owned(),
+            short_name: INVALID_SHORT_CLASSIFICATION.to_owned()
+        }, true)?;
 
         // Add null classification
-        new.levels_scores_map.insert(NULL_CLASSIFICATION.to_owned(), NULL_LVL);
-        new.levels_map.insert(NULL_LVL, NULL_CLASSIFICATION.to_owned());
-        new.levels_map_stl.insert(NULL_CLASSIFICATION.to_owned(), NULL_CLASSIFICATION.to_owned());
-        new.levels_map_lts.insert(NULL_CLASSIFICATION.to_owned(), NULL_CLASSIFICATION.to_owned());
+        new.insert_level(ClassificationLevel {
+            aliases: vec![],
+            css: Default::default(),
+            description: NULL_CLASSIFICATION.to_owned(),
+            lvl: NULL_LVL,
+            name: NULL_CLASSIFICATION.to_owned(),
+            short_name: NULL_CLASSIFICATION.to_owned()
+        }, true)?;
 
         // Convert the levels
-        for x in definition.levels {
-            let short_name = x.short_name.trim().to_uppercase();
-            let name = x.name.trim().to_uppercase();
-
-            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&short_name[..]) {
-                return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
-            }
-            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&name[..]) {
-                return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
-            }
-
-            if x.lvl > MAX_LVL {
-                return Err(Errors::InvalidDefinition(format!("Level over maximum classification level of {MAX_LVL}.")))
-            }
-            if x.lvl < MIN_LVL {
-                return Err(Errors::InvalidDefinition(format!("Level under minimum classification level of {MIN_LVL}.")))
-            }
-
-            if new.levels_scores_map.insert(short_name.to_owned(), x.lvl).is_some() {
-                return Err(Errors::InvalidDefinition(format!("Duplicate classification name: {}", short_name)))
-            }
-            new.levels_map.insert(x.lvl, short_name.to_owned());
-            new.levels_map_stl.insert(short_name.to_owned(), name.to_owned());
-            new.levels_map_lts.insert(name.to_owned(), short_name.to_owned());
-            for a in &x.aliases {
-                new.levels_aliases.insert(a.trim().to_uppercase(), short_name.to_owned());
-            }
-            // new.params_map.insert(short_name.clone(), x.other_fields); // {k: v for k, v in x.items() if k not in banned_params_keys}
-            // new.params_map[name] = new.params_map[short_name]
-            new.levels_styles_map.insert(short_name.to_owned(), x.css.clone());
-            new.levels_styles_map.insert(name.to_owned(),  x.css.clone());
-            new.description.insert(short_name.to_owned(), x.description.clone());
-            new.description.insert(name.to_owned(), x.description.clone());
-
-            if let Some(old) = new.levels.insert(x.lvl, x) {
-                return Err(Errors::InvalidDefinition(format!("Duplicate classification level: {}", old.lvl)))
-            }
+        for level in definition.levels {
+            new.insert_level(level, false)?;
         }
 
         for mut x in definition.required {
@@ -253,6 +221,51 @@ impl ClassificationParser {
         Ok(new)
     }
 
+    /// Add a classification level to a classification engine under construction
+    fn insert_level(&mut self, mut ll: ClassificationLevel, force: bool) -> Result<()> {
+        // normalize the names
+        ll.short_name = ll.short_name.trim().to_uppercase();
+        ll.name = ll.name.trim().to_uppercase();
+        for alias in ll.aliases.iter_mut() {
+            *alias = alias.trim().to_uppercase()
+        }
+
+        // Check for bounds and reserved words
+        if !force {
+            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&ll.short_name[..]) {
+                return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
+            }
+            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&ll.name[..]) {
+                return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
+            }
+
+            if ll.lvl > MAX_LVL {
+                return Err(Errors::InvalidDefinition(format!("Level over maximum classification level of {MAX_LVL}.")))
+            }
+            if ll.lvl < MIN_LVL {
+                return Err(Errors::InvalidDefinition(format!("Level under minimum classification level of {MIN_LVL}.")))
+            }
+        }
+
+        // Get a uniqued list of all names this level uses
+        let mut all_names = ll.aliases.clone();
+        all_names.push(ll.short_name.clone());
+        all_names.push(ll.name.clone());
+        all_names.sort_unstable();
+        all_names.dedup();
+
+        // insert each name
+        for name in all_names {
+            if let Some(level) = self.levels_scores_map.insert(name.clone(), ll.lvl) {
+                return Err(Errors::InvalidDefinition(format!("Name clash between classification levels: {name} on {level} and {}", ll.lvl)))
+            }
+        }
+
+        if let Some(old) = self.levels.insert(ll.lvl, ll) {
+            return Err(Errors::InvalidDefinition(format!("Duplicate classification level: {}", old.lvl)))
+        }
+        return Ok(())
+    }
 
 //     ############################
 //     # Private functions
@@ -298,24 +311,18 @@ impl ClassificationParser {
         let (lvl, _) = c12n.split_once("//").unwrap_or((&c12n, ""));
         if let Some(value) = self.levels_scores_map.get(lvl) {
             return Ok(*value)
-        } else if let Some(lvl) = self.levels_map_lts.get(lvl) {
-            return Ok(*self.levels_scores_map.get(lvl).unwrap())
-        } else if let Some(lvl) = self.levels_aliases.get(lvl) {
-            return Ok(*self.levels_scores_map.get(lvl).unwrap())
         }
         Err(Errors::InvalidClassification(format!("Classification level '{lvl}' was not found in your classification definition.")))
     }
 
     /// convert a level number to a text form
     fn _get_c12n_level_text(&self, lvl_idx: i32, long_format: bool) -> Result<String> {
-        if let Some(short_name) = self.levels_map.get(&lvl_idx) {
+        if let Some(data) = self.levels.get(&lvl_idx) {
             if long_format {
-                match self.levels_map_stl.get(short_name) {
-                    Some(long) => return Ok(long.clone()),
-                    None => return Err(Errors::InvalidClassification(format!("Error finding long name of: {short_name}")))
-                }
+                return Ok(data.name.clone())
+            } else {
+                return Ok(data.short_name.clone())
             }
-            return Ok(short_name.clone())
         }
 
         Err(Errors::InvalidClassification(format!("Classification level number '{lvl_idx}' was not found in your classification definition.")))
@@ -413,8 +420,6 @@ impl ClassificationParser {
                 && !self.access_req_map_stl.contains_key(o)
                 && !self.access_req_aliases.contains_key(o)
                 && !self.levels_scores_map.contains_key(o)
-                && !self.levels_map_lts.contains_key(o)
-                && !self.levels_aliases.contains_key(o)
                 {
                     g1_set.push(o)
                 }
@@ -925,7 +930,7 @@ impl ClassificationParser {
             Some(part) => part,
             None => return false,
         };
-        if !self.levels_aliases.contains_key(first) & !self.levels_map_lts.contains_key(first) & !self.levels_map_stl.contains_key(first) {
+        if !self.levels_scores_map.contains_key(first) {
             return false;
         }
 
@@ -1216,6 +1221,7 @@ impl Default for NormalizeOptions {
 }
 
 impl NormalizeOptions {
+    /// shortcut to create an options set with the short format
     pub fn short() -> Self {
         Self{long_format: false, ..Default::default()}
     }
