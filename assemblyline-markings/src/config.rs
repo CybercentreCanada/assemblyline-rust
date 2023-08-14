@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
 
 /// Define sources for dynamic groups
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -69,7 +69,7 @@ pub struct ClassificationConfig {
 #[serde(deny_unknown_fields)]
 pub struct ClassificationLevel {
     /// List of alternate names for the current marking
-    #[serde(default)]
+    #[serde(default, deserialize_with="deserialize_normalized_names")]
     pub aliases: Vec<String>,
 
     /// Stylesheet applied in the UI for the different levels
@@ -84,9 +84,11 @@ pub struct ClassificationLevel {
     pub lvl: i32,
 
     /// Long name of the classification item
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub name: String,
 
     /// Short name of the classification item
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub short_name: String,
 
     // #[serde(flatten)]
@@ -96,15 +98,24 @@ pub struct ClassificationLevel {
 
 impl ClassificationLevel {
     #[cfg(test)]
-    pub fn new(lvl: i32, short_name: String, name: String, aliases: Vec<&str>) -> Self {
+    pub fn new(lvl: i32, short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         ClassificationLevel {
-            aliases: aliases.into_iter().map(|x|x.to_owned()).collect(),
+            aliases: aliases.into_iter().map(|x|x.trim().to_uppercase()).collect(),
             css: default_css(),
             description: default_description(),
             lvl,
-            name,
-            short_name
+            name: name.trim().to_uppercase(),
+            short_name: short_name.trim().to_uppercase()
         }
+    }
+
+    /// Get all of the unique names used by this item
+    pub fn unique_names(&self) -> Vec<String> {
+        let mut names = vec![self.name.clone(), self.short_name.clone()];
+        names.extend(self.aliases.iter().cloned());
+        names.sort_unstable();
+        names.dedup();
+        return names
     }
 }
 
@@ -119,7 +130,7 @@ fn default_description() -> String {"N/A".to_owned()}
 #[serde(deny_unknown_fields)]
 pub struct ClassificationMarking {
     /// List of alternate names for the current marking
-    #[serde(default)]
+    #[serde(default, deserialize_with="deserialize_normalized_names")]
     pub aliases: Vec<String>,
 
     /// Long form description of marking
@@ -127,9 +138,11 @@ pub struct ClassificationMarking {
     pub description: String,
 
     /// Long form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub name: String,
 
     /// Short form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub short_name: String,
 
     /// The minimum classification level an item must have for this token to be valid. (optional)
@@ -144,27 +157,31 @@ pub struct ClassificationMarking {
 
 impl ClassificationMarking {
     #[cfg(test)]
-    pub fn new(short_name: String, name: String, aliases: Vec<&str>) -> Self {
+    pub fn new(short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         Self {
-            aliases: aliases.into_iter().map(|x|x.to_owned()).collect(),
+            aliases: aliases.into_iter().map(|x|x.trim().to_uppercase()).collect(),
             description: default_description(),
-            name,
-            short_name,
+            name: name.trim().to_uppercase(),
+            short_name: short_name.trim().to_uppercase(),
             require_lvl: None,
             is_required_group: false,
         }
     }
 
     #[cfg(test)]
-    pub fn new_required(short_name: String, name: String) -> Self {
-        Self {
-            aliases: vec![],
-            description: default_description(),
-            name,
-            short_name,
-            require_lvl: None,
-            is_required_group: true,
-        }
+    pub fn new_required(short_name: &str, name: &str) -> Self {
+        let mut new = Self::new(short_name, name, vec![]);
+        new.is_required_group = true;
+        new
+    }
+
+    /// Get all of the unique names used by this item
+    pub fn unique_names(&self) -> Vec<String> {
+        let mut names = vec![self.name.clone(), self.short_name.clone()];
+        names.extend(self.aliases.iter().cloned());
+        names.sort_unstable();
+        names.dedup();
+        return names
     }
 }
 
@@ -172,7 +189,7 @@ impl ClassificationMarking {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ClassificationGroup {
     /// List of alternate names for this group
-    #[serde(default)]
+    #[serde(default, deserialize_with="deserialize_normalized_names")]
     pub aliases: Vec<String>,
 
     /// This is a special flag that when set to true, if any groups are selected
@@ -185,15 +202,17 @@ pub struct ClassificationGroup {
     pub description: String,
 
     /// Long form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub name: String,
 
     /// Short form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub short_name: String,
 
     /// Assuming that this groups is the only group selected, this is the display name
     /// that will be used in the classification (that values has to be in the aliases
     /// of this group and only this group) (optional)
-    #[serde(default)]
+    #[serde(default, deserialize_with="deserialize_optional_normalized_name")]
     pub solitary_display_name: Option<String>,
 }
 
@@ -212,12 +231,28 @@ impl Default for ClassificationGroup {
 
 impl ClassificationGroup {
     #[cfg(test)]
-    pub fn new(short_name: String, name: String) -> Self {
+    pub fn new(short_name: &str, name: &str) -> Self {
         Self {
-            name,
-            short_name,
+            name: name.trim().to_uppercase(),
+            short_name: short_name.trim().to_uppercase(),
             ..Default::default()
         }
+    }
+
+    #[cfg(test)]
+    pub fn new_solitary(short_name: &str, name: &str, solitary_display: &str) -> Self {
+        let mut new = Self::new(short_name, name);
+        new.solitary_display_name = Some(solitary_display.trim().to_uppercase());
+        return new
+    }
+
+    /// Get all of the unique names used by this item
+    pub fn unique_names(&self) -> Vec<String> {
+        let mut names = vec![self.name.clone(), self.short_name.clone()];
+        names.extend(self.aliases.iter().cloned());
+        names.sort_unstable();
+        names.dedup();
+        return names
     }
 }
 
@@ -226,7 +261,7 @@ impl ClassificationGroup {
 #[serde(deny_unknown_fields)]
 pub struct ClassificationSubGroup {
     /// List of alternate names for the current marking
-    #[serde(default)]
+    #[serde(default, deserialize_with="deserialize_normalized_names")]
     pub aliases: Vec<String>,
 
     /// This is a special flag that when set to true, if any groups are selected
@@ -239,9 +274,11 @@ pub struct ClassificationSubGroup {
     pub description: String,
 
     /// Long form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub name: String,
 
     /// Short form canonical name of marking
+    #[serde(deserialize_with="deserialize_normalized_name")]
     pub short_name: String,
 
     /// Assuming that this groups is the only group selected, this is the display name
@@ -274,6 +311,37 @@ impl Default for ClassificationSubGroup {
             // solitary_display_name: None,
             require_group: None,
             limited_to_group: None
+        }
+    }
+}
+
+impl ClassificationSubGroup {
+    /// Get all of the unique names used by this item
+    pub fn unique_names(&self) -> Vec<String> {
+        let mut names = vec![self.name.clone(), self.short_name.clone()];
+        names.extend(self.aliases.iter().cloned());
+        names.sort_unstable();
+        names.dedup();
+        return names
+    }
+
+    #[cfg(test)]
+    pub fn new_aliased(short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
+        Self {
+            short_name: short_name.trim().to_uppercase(),
+            name: name.trim().to_uppercase(),
+            aliases: aliases.iter().map(|item|item.trim().to_uppercase()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_with_required(short_name: &str, name: &str, required: &str) -> Self {
+        Self {
+            short_name: short_name.trim().to_uppercase(),
+            name: name.trim().to_uppercase(),
+            require_group: Some(required.trim().to_uppercase()),
+            ..Default::default()
         }
     }
 }
@@ -323,3 +391,29 @@ impl Default for ClassificationSubGroup {
     // }
 
 // }
+
+/// Deserialize a normalized name.
+/// That is a name with no leading or trailing whitespace and is all uppercase
+fn deserialize_normalized_name<'de, D>(deserializer: D) -> Result<String, D::Error> where D: Deserializer<'de> {
+    let name = String::deserialize(deserializer)?;
+    let name = name.trim().to_uppercase();
+    return Ok(name)
+}
+
+/// Get a collection of normalized names
+fn deserialize_normalized_names<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error> where D: Deserializer<'de> {
+    let mut names = Vec::<String>::deserialize(deserializer)?;
+    for name in names.iter_mut() {
+        *name = name.trim().to_uppercase()
+    }
+    names.retain(|item|!item.is_empty());
+    names.sort_unstable();
+    names.dedup();
+    return Ok(names)
+}
+
+/// Optionally get a normalized name
+fn deserialize_optional_normalized_name<'de, D>(deserializer: D) -> Result<Option<String>, D::Error> where D: Deserializer<'de> {
+    let name = Option::<String>::deserialize(deserializer)?;
+    Ok(name.map(|name|name.trim().to_uppercase()))
+}

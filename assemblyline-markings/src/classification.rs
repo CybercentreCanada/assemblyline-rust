@@ -1,5 +1,6 @@
 //! Classification processing and manipulating tools
 use std::collections::{HashSet, HashMap};
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -40,10 +41,7 @@ pub struct ClassificationParser {
     levels: HashMap<i32, ClassificationLevel>,
     levels_scores_map: HashMap<String, i32>,
 
-    access_req: HashMap<String, ClassificationMarking>,
-    access_req_map_lts: HashMap<String, String>,
-    access_req_map_stl: HashMap<String, String>,
-    access_req_aliases: HashMap<String, HashSet<String>>,
+    access_req: HashMap<String, Arc<ClassificationMarking>>,
 
     groups: HashMap<String, ClassificationGroup>,
     groups_map_lts: HashMap<String, String>,
@@ -117,26 +115,24 @@ impl ClassificationParser {
             new.insert_level(level, false)?;
         }
 
-        for mut x in definition.required {
-            x.short_name = x.short_name.trim().to_uppercase();
-            x.name = x.name.trim().to_uppercase();
-            new.access_req_map_lts.insert(x.name.clone(), x.short_name.clone());
-            new.access_req_map_stl.insert(x.short_name.clone(), x.name.clone());
-            for a in &x.aliases {
-                new.access_req_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
-            }
+        for x in definition.required {
+            // x.short_name = x.short_name.trim().to_uppercase();
+            // x.name = x.name.trim().to_uppercase();
+            // new.access_req_map_lts.insert(x.name.clone(), x.short_name.clone());
+            // new.access_req_map_stl.insert(x.short_name.clone(), x.name.clone());
+            // for a in &x.aliases {
+            //     new.access_req_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+            // }
             // new.params_map[short_name] = {k: v for k, v in x.items() if k not in banned_params_keys}
             // new.params_map[name] = new.params_map[short_name]
             new.description.insert(x.short_name.clone(), x.description.clone());
             new.description.insert(x.name.clone(), x.description.clone());
+            let x = Arc::new(x);
 
-            if x.name != x.short_name {
-                if let Some(old) = new.access_req.insert(x.name.clone(), x.clone()) {
+            for name in x.unique_names() {
+                if let Some(old) = new.access_req.insert(name, x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate required name: {}", old.name)))
                 }
-            }
-            if let Some(old) = new.access_req.insert(x.short_name.clone(), x) {
-                return Err(Errors::InvalidDefinition(format!("Duplicate required name: {}", old.short_name)))
             }
         }
 
@@ -222,14 +218,7 @@ impl ClassificationParser {
     }
 
     /// Add a classification level to a classification engine under construction
-    fn insert_level(&mut self, mut ll: ClassificationLevel, force: bool) -> Result<()> {
-        // normalize the names
-        ll.short_name = ll.short_name.trim().to_uppercase();
-        ll.name = ll.name.trim().to_uppercase();
-        for alias in ll.aliases.iter_mut() {
-            *alias = alias.trim().to_uppercase()
-        }
-
+    fn insert_level(&mut self, ll: ClassificationLevel, force: bool) -> Result<()> {
         // Check for bounds and reserved words
         if !force {
             if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&ll.short_name[..]) {
@@ -248,14 +237,14 @@ impl ClassificationParser {
         }
 
         // Get a uniqued list of all names this level uses
-        let mut all_names = ll.aliases.clone();
-        all_names.push(ll.short_name.clone());
-        all_names.push(ll.name.clone());
-        all_names.sort_unstable();
-        all_names.dedup();
+        // let mut all_names = ll.aliases.clone();
+        // all_names.push(ll.short_name.clone());
+        // all_names.push(ll.name.clone());
+        // all_names.sort_unstable();
+        // all_names.dedup();
 
         // insert each name
-        for name in all_names {
+        for name in ll.unique_names() {
             if let Some(level) = self.levels_scores_map.insert(name.clone(), ll.lvl) {
                 return Err(Errors::InvalidDefinition(format!("Name clash between classification levels: {name} on {level} and {}", ll.lvl)))
             }
@@ -335,31 +324,38 @@ impl ClassificationParser {
         // Parse classifications in uppercase mode only
         let c12n = c12n.trim().to_uppercase();
 
-        let mut return_set: Vec<&str> = vec![];
+        let mut return_set: Vec<String> = vec![];
 
         for p in c12n.split('/') {
-            if let Some(part) = self.access_req_map_lts.get(p) {
-                return_set.push(part)
-            } else if self.access_req_map_stl.contains_key(p) {
-                return_set.push(p)
-            }  else if let Some(aliases) = self.access_req_aliases.get(p) {
-                for a in aliases {
-                    return_set.push(a)
+            if let Some(data) = self.access_req.get(p) {
+                if long_format {
+                    return_set.push(data.name.clone());
+                } else {
+                    return_set.push(data.short_name.clone());
                 }
             }
+            // if let Some(part) = self.access_req_map_lts.get(p) {
+            //     return_set.push(part)
+            // } else if self.access_req_map_stl.contains_key(p) {
+            //     return_set.push(p)
+            // }  else if let Some(aliases) = self.access_req_aliases.get(p) {
+            //     for a in aliases {
+            //         return_set.push(a)
+            //     }
+            // }
         }
 
-        let mut return_set = if long_format {
-            return_set
-            .into_iter()
-            .filter_map(|i| self.access_req_map_stl.get(i))
-            .cloned().collect_vec()
-        } else {
-            return_set
-            .into_iter()
-            .map(str::to_owned)
-            .collect_vec()
-        };
+        // let mut return_set = if long_format {
+        //     return_set
+        //     .into_iter()
+        //     .filter_map(|i| self.access_req_map_stl.get(i))
+        //     .cloned().collect_vec()
+        // } else {
+        //     return_set
+        //     .into_iter()
+        //     .map(str::to_owned)
+        //     .collect_vec()
+        // };
 
         return_set.sort_unstable();
         return_set.dedup();
@@ -416,11 +412,7 @@ impl ClassificationParser {
 
         if self.dynamic_groups && get_dynamic_groups {
             for o in others {
-                if !self.access_req_map_lts.contains_key(o)
-                && !self.access_req_map_stl.contains_key(o)
-                && !self.access_req_aliases.contains_key(o)
-                && !self.levels_scores_map.contains_key(o)
-                {
+                if !self.access_req.contains_key(o) && !self.levels_scores_map.contains_key(o) {
                     g1_set.push(o)
                 }
             }
@@ -959,10 +951,7 @@ impl ClassificationParser {
             for i in items {
                 if !check_groups {
                     // If current item not found in access req, we might already be dealing with groups
-                    if !self.access_req_aliases.contains_key(i) &&
-                       !self.access_req_map_stl.contains_key(i) &&
-                       !self.access_req_map_lts.contains_key(i)
-                    {
+                    if !self.access_req.contains_key(i) {
                         check_groups = true
                     }
                 }
@@ -1261,24 +1250,24 @@ mod test {
             dynamic_groups: false,
             dynamic_groups_type: crate::config::DynamicGroupType::All,
             levels: vec![
-                ClassificationLevel::new(1, "L0".to_owned(), "Level 0".to_owned(), vec!["Open"]),
-                ClassificationLevel::new(5, "L1".to_owned(), "Level 1".to_owned(), vec![]),
-                ClassificationLevel::new(15, "L2".to_owned(), "Level 2".to_owned(), vec![]),
+                ClassificationLevel::new(1, "L0", "Level 0", vec!["Open"]),
+                ClassificationLevel::new(5, "L1", "Level 1", vec![]),
+                ClassificationLevel::new(15, "L2", "Level 2", vec![]),
             ],
             groups: vec![
-                ClassificationGroup::new("A".to_owned(), "Group A".to_owned()),
-                ClassificationGroup::new("B".to_owned(), "Group B".to_owned()),
-                ClassificationGroup{short_name: "X".to_owned(), name: "Group X".to_owned(), solitary_display_name: Some("XX".to_owned()), ..Default::default()},
+                ClassificationGroup::new("A", "Group A"),
+                ClassificationGroup::new("B", "Group B"),
+                ClassificationGroup::new_solitary("X", "Group X", "XX"),
             ],
             required: vec![
-                ClassificationMarking::new("LE".to_owned(), "Legal Department".to_owned(), vec!["Legal"]),
-                ClassificationMarking::new("AC".to_owned(), "Accounting".to_owned(), vec!["Acc"]),
-                ClassificationMarking::new_required("orcon".to_owned(), "Originator Controlled".to_owned()),
-                ClassificationMarking::new_required("nocon".to_owned(), "No Contractor Access".to_owned()),
+                ClassificationMarking::new("LE", "Legal Department", vec!["Legal"]),
+                ClassificationMarking::new("AC", "Accounting", vec!["Acc"]),
+                ClassificationMarking::new_required("orcon", "Originator Controlled"),
+                ClassificationMarking::new_required("nocon", "No Contractor Access"),
             ],
             subgroups: vec![
-                ClassificationSubGroup{short_name: "R1".to_owned(), name: "Reserve One".to_owned(), aliases: vec!["R0".to_owned()], ..Default::default()},
-                ClassificationSubGroup{short_name: "R2".to_owned(), name: "Reserve Two".to_owned(), require_group: Some("X".to_owned()), ..Default::default()},
+                ClassificationSubGroup::new_aliased("R1", "Reserve One", vec!["R0"]),
+                ClassificationSubGroup::new_with_required("R2", "Reserve Two", "X"),
             ],
             restricted: "L2".to_owned(),
             unrestricted: "L0".to_owned(),
