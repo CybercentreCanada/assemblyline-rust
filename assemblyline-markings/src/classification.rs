@@ -1426,9 +1426,8 @@ mod test {
     #[test]
     fn typo_errors() {
         let ce = setup();
-        // todo, these aren't rejected, instead produce bad outputs
         assert!(ce.normalize_classification("L1//REL A, B/ORCON,NOCON").is_err());
-        // assert!(ce.normalize_classification("L1//ORCON,NOCON/REL A, B").is_err());
+        assert!(ce.normalize_classification("L1//ORCON,NOCON/REL A, B").is_err());
     }
 
     #[test]
