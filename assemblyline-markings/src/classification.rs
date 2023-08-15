@@ -285,13 +285,13 @@ impl ClassificationParser {
 //         return items
 
     /// From the classification string get the level number
-    fn _get_c12n_level_index(&self, c12n: &str) -> Result<i32> {
+    fn _get_c12n_level_index(&self, c12n: &str) -> Result<(i32, String)> {
         // Parse classifications in uppercase mode only
         let c12n = c12n.trim().to_uppercase();
 
-        let (lvl, _) = c12n.split_once("//").unwrap_or((&c12n, ""));
+        let (lvl, remain) = c12n.split_once("//").unwrap_or((&c12n, ""));
         if let Some(value) = self.levels_scores_map.get(lvl) {
-            return Ok(*value)
+            return Ok((*value, remain.to_string()))
         }
         Err(Errors::InvalidClassification(format!("Classification level '{lvl}' was not found in your classification definition.")))
     }
@@ -310,21 +310,28 @@ impl ClassificationParser {
     }
 
     /// Get required section items
-    fn _get_c12n_required(&self, c12n: &str, long_format: impl IBool) -> Vec<String> {
+    fn _get_c12n_required(&self, c12n: &str, long_format: impl IBool) -> (Vec<String>, Vec<String>) {
         let long_format = long_format.into().unwrap_or(true);
 
         // Parse classifications in uppercase mode only
         let c12n = c12n.trim().to_uppercase();
 
         let mut return_set: Vec<String> = vec![];
+        let mut others: Vec<String> = vec![];
 
         for p in c12n.split('/') {
+            if p.is_empty() {
+                continue
+            }
+
             if let Some(data) = self.access_req.get(p) {
                 if long_format {
                     return_set.push(data.name.to_string());
                 } else {
                     return_set.push(data.short_name.to_string());
                 }
+            } else {
+                others.push(p.to_owned())
             }
             // if let Some(part) = self.access_req_map_lts.get(p) {
             //     return_set.push(part)
@@ -351,19 +358,19 @@ impl ClassificationParser {
 
         return_set.sort_unstable();
         return_set.dedup();
-        return return_set
+        return (return_set, others)
     }
 
     /// Get the groups and subgroups for a classification
-    fn _get_c12n_groups(&self, c12n: &str,
+    fn _get_c12n_groups(&self, c12n_parts: Vec<String>,
         long_format: impl IBool,
         get_dynamic_groups: impl IBool
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let long_format = long_format.into().unwrap_or(true);
         let get_dynamic_groups = get_dynamic_groups.into().unwrap_or(true);
 
         // Parse classifications in uppercase mode only
-        let c12n = c12n.trim().to_uppercase();
+        // let c12n = c12n.trim().to_uppercase();
 
         let mut g1_set: Vec<&str> = vec![];
         let mut g2_set: Vec<&str> = vec![];
@@ -371,12 +378,17 @@ impl ClassificationParser {
 
 
         let mut groups = vec![];
-        for gp in c12n.split("//") {
-            let gp = gp.replace("REL TO ", "");
-            let gp = gp.replace("REL ", "");
-            // TODO check if these splits are the right way round
-            for t in gp.split(',') {
-                groups.extend(t.trim().split('/').map(|x|x.trim().to_owned()));
+        for gp in c12n_parts {
+            if gp.starts_with("REL ") {
+                // Commas may only be used in REL TO controls
+                let gp = gp.replace("REL TO ", "");
+                let gp = gp.replace("REL ", "");
+                for t in gp.split(',') {
+                    groups.extend(t.trim().split('/').map(|x|x.trim().to_owned()));
+                }
+            } else {
+                // Everything else has to be taken as is
+                groups.push(gp)
             }
         }
 
@@ -402,13 +414,16 @@ impl ClassificationParser {
             }
         }
 
-        if self.dynamic_groups && get_dynamic_groups {
+        let others = if self.dynamic_groups && get_dynamic_groups {
             for o in others {
                 if !self.access_req.contains_key(o) && !self.levels_scores_map.contains_key(o) {
                     g1_set.push(o)
                 }
             }
-        }
+            vec![]
+        } else {
+            others.into_iter().cloned().collect()
+        };
 
         let (mut g1_set, mut g2_set) = if long_format {
             let g1: Result<Vec<&String>> = g1_set.into_iter()
@@ -427,7 +442,7 @@ impl ClassificationParser {
         g1_set.dedup();
         g2_set.sort_unstable();
         g2_set.dedup();
-        return Ok((g1_set, g2_set))
+        return Ok((g1_set, g2_set, others))
     }
 
     /// check if the user's access controls match the requirements
@@ -586,9 +601,17 @@ impl ClassificationParser {
 
     /// Break a classification into its parts
     pub fn get_classification_parts(&self, c12n: &str, long_format: impl IBool, get_dynamic_groups: impl IBool) -> Result<ParsedClassification> {
-        let level = self._get_c12n_level_index(c12n)?;
-        let required = self._get_c12n_required(c12n, long_format);
-        let (groups, subgroups) = self._get_c12n_groups(c12n, long_format, get_dynamic_groups)?;
+        let (level, remain) = self._get_c12n_level_index(c12n)?;
+        let (required, unparsed_required) = self._get_c12n_required(&remain, long_format);
+        let (groups, subgroups, unparsed_groups) = self._get_c12n_groups(unparsed_required, long_format, get_dynamic_groups)?;
+
+        // let unparsed = intersection(&unparsed_groups, &unparsed_required);
+        // println!("unparsed_required: {:?}", unparsed_required);
+        // println!("unparsed_groups: {:?}", unparsed_groups);
+        // println!("unparsed: {:?}", unparsed);
+        if !unparsed_groups.is_empty() {
+            return Err(Errors::InvalidClassification(format!("Unknown parts: {}", unparsed_groups.join(", "))))
+        }
 
         Ok(ParsedClassification { level, required, groups, subgroups })
     }
@@ -720,15 +743,16 @@ impl ClassificationParser {
             // Normalize the classification before gathering the parts
             let c12n = self.normalize_classification_options(&c12n, NormalizeOptions { skip_auto_select: user_classification, ..Default::default()})?;
 
-            let access_lvl = self._get_c12n_level_index(&c12n)?;
-            let access_req = self._get_c12n_required(&c12n, false);
-            let (access_grp1, access_grp2) = self._get_c12n_groups(&c12n, false, true)?;
+            let parts = self.get_classification_parts(&c12n, false, true)?;
+            // let access_lvl = self._get_c12n_level_index(&c12n)?;
+            // let access_req = self._get_c12n_required(&c12n, false);
+            // let (access_grp1, access_grp2) = self._get_c12n_groups(&c12n, false, true)?;
 
             return Ok(serde_json::json!({
-                "__access_lvl__": access_lvl,
-                "__access_req__": access_req,
-                "__access_grp1__": if access_grp1.is_empty() { vec!["__EMPTY__".to_owned()] } else { access_grp1 },
-                "__access_grp2__": if access_grp2.is_empty() { vec!["__EMPTY__".to_owned()] } else { access_grp2 }
+                "__access_lvl__": parts.level,
+                "__access_req__": parts.required,
+                "__access_grp1__": if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
+                "__access_grp2__": if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups }
             }))
         })();
 
@@ -829,19 +853,21 @@ impl ClassificationParser {
         let user_c12n = self.normalize_classification_options(user_c12n, NormalizeOptions{skip_auto_select: true, ..Default::default()})?;
         let c12n = self.normalize_classification_options(c12n, NormalizeOptions{skip_auto_select: true, ..Default::default()})?;
 
-        let user_req = self._get_c12n_required(&user_c12n, None);
-        let (user_groups, user_subgroups) = self._get_c12n_groups(&user_c12n, None, None)?;
-        let req = self._get_c12n_required(&c12n, None);
-        let (groups, subgroups) = self._get_c12n_groups(&c12n, None, None)?;
+        let parts = self.get_classification_parts(&c12n, None, None)?;
+        let user = self.get_classification_parts(&user_c12n, None, None)?;
+        // let (user_req, _) = self._get_c12n_required(&user_c12n, None);
+        // let (user_groups, user_subgroups, _) = self._get_c12n_groups(&user_c12n, None, None)?;
+        // let (req, _) = self._get_c12n_required(&c12n, None);
+        // let (groups, subgroups, _) = self._get_c12n_groups(&c12n, None, None)?;
 
         if self._get_c12n_level_index(&user_c12n)? >= self._get_c12n_level_index(&c12n)? {
-            if !Self::_can_see_required(&user_req, &req) {
+            if !Self::_can_see_required(&user.required, &parts.required) {
                 return Ok(false)
             }
-            if !Self::_can_see_groups(&user_groups, &groups) {
+            if !Self::_can_see_groups(&user.groups, &parts.groups) {
                 return Ok(false)
             }
-            if !Self::_can_see_groups(&user_subgroups, &subgroups) {
+            if !Self::_can_see_groups(&user.subgroups, &parts.subgroups) {
                 return Ok(false)
             }
             return Ok(true)
@@ -1058,6 +1084,7 @@ impl ClassificationParser {
         //     return c12n
 
         let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups)?;
+        println!("{:?}", parts);
         let new_c12n = self._get_normalized_classification_text(parts, long_format, skip_auto_select)?;
         // if long_format {
         //     self._classification_cache.add(new_c12n)
@@ -1394,9 +1421,13 @@ mod test {
         assert!(!ce.is_valid("L1//ORCON,NOCON/REL A, B"));
 
         assert_eq!(ce.normalize_classification_options("L1//REL A, B/ORCON/NOCON", NormalizeOptions::short()).unwrap(), "L1//NOCON/ORCON/REL A, B");
+    }
 
+    #[test]
+    fn typo_errors() {
+        let ce = setup();
         // todo, these aren't rejected, instead produce bad outputs
-        // assert!(ce.normalize_classification("L1//REL A, B/ORCON,NOCON").is_err());
+        assert!(ce.normalize_classification("L1//REL A, B/ORCON,NOCON").is_err());
         // assert!(ce.normalize_classification("L1//ORCON,NOCON/REL A, B").is_err());
     }
 
@@ -1575,8 +1606,8 @@ mod test {
         // bad inputs
         assert!(ce.normalize_classification("GARBO").is_err());
         assert!(ce.normalize_classification("GARBO").unwrap_err().to_string().contains("invalid"));
-        // assert!(ce.normalize_classification("L1//GARBO").is_err());
-        // assert!(ce.normalize_classification("L1//LE//GARBO").is_err());
+        assert!(ce.normalize_classification("L1//GARBO").is_err());
+        assert!(ce.normalize_classification("L1//LE//GARBO").is_err());
     }
 
     #[test]
