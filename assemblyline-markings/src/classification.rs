@@ -35,12 +35,19 @@ pub struct ClassificationParser {
     /// Should this parser enforce access control
     enforce: bool,
 
+    /// Are dynamic groups allowed
     dynamic_groups: bool,
+
+    /// What kinds of dynamic groups can be generated
     dynamic_groups_type: DynamicGroupType,
 
+    /// Classification data by level
     levels: HashMap<i32, ClassificationLevel>,
+
+    /// Mapping from names and aliases to level
     levels_scores_map: HashMap<String, i32>,
 
+    /// information about classification markings by name
     access_req: HashMap<String, Arc<ClassificationMarking>>,
 
     groups: HashMap<String, ClassificationGroup>,
@@ -96,8 +103,8 @@ impl ClassificationParser {
             css: Default::default(),
             description: INVALID_CLASSIFICATION.to_owned(),
             lvl: INVALID_LVL,
-            name: INVALID_CLASSIFICATION.to_owned(),
-            short_name: INVALID_SHORT_CLASSIFICATION.to_owned()
+            name: INVALID_CLASSIFICATION.parse()?,
+            short_name: INVALID_SHORT_CLASSIFICATION.parse()?
         }, true)?;
 
         // Add null classification
@@ -106,8 +113,8 @@ impl ClassificationParser {
             css: Default::default(),
             description: NULL_CLASSIFICATION.to_owned(),
             lvl: NULL_LVL,
-            name: NULL_CLASSIFICATION.to_owned(),
-            short_name: NULL_CLASSIFICATION.to_owned()
+            name: NULL_CLASSIFICATION.parse()?,
+            short_name: NULL_CLASSIFICATION.parse()?
         }, true)?;
 
         // Convert the levels
@@ -116,81 +123,66 @@ impl ClassificationParser {
         }
 
         for x in definition.required {
-            // x.short_name = x.short_name.trim().to_uppercase();
-            // x.name = x.name.trim().to_uppercase();
-            // new.access_req_map_lts.insert(x.name.clone(), x.short_name.clone());
-            // new.access_req_map_stl.insert(x.short_name.clone(), x.name.clone());
-            // for a in &x.aliases {
-            //     new.access_req_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
-            // }
-            // new.params_map[short_name] = {k: v for k, v in x.items() if k not in banned_params_keys}
-            // new.params_map[name] = new.params_map[short_name]
-            new.description.insert(x.short_name.clone(), x.description.clone());
-            new.description.insert(x.name.clone(), x.description.clone());
+            new.description.insert(x.short_name.to_string(), x.description.clone());
+            new.description.insert(x.name.to_string(), x.description.clone());
             let x = Arc::new(x);
 
             for name in x.unique_names() {
-                if let Some(old) = new.access_req.insert(name, x.clone()) {
+                if let Some(old) = new.access_req.insert(name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate required name: {}", old.name)))
                 }
             }
         }
 
-        for mut x in definition.groups {
-            x.short_name = x.short_name.trim().to_uppercase();
-            x.name = x.name.trim().to_uppercase();
-            new.groups_map_lts.insert(x.name.clone(), x.short_name.clone());
-            new.groups_map_stl.insert(x.short_name.clone(), x.name.clone());
+        for x in definition.groups {
+            new.groups_map_lts.insert(x.name.to_string(), x.short_name.to_string());
+            new.groups_map_stl.insert(x.short_name.to_string(), x.name.to_string());
             for a in &x.aliases {
-                new.groups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+                new.groups_aliases.entry(a.to_string()).or_default().insert(x.short_name.to_string());
             }
             if let Some(a) = &x.solitary_display_name {
-                new.groups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+                new.groups_aliases.entry(a.to_string()).or_default().insert(x.short_name.to_string());
             }
             if x.auto_select {
-                new.groups_auto_select.push(x.name.clone());
-                new.groups_auto_select_short.push(x.short_name.clone());
+                new.groups_auto_select.push(x.name.to_string());
+                new.groups_auto_select_short.push(x.short_name.to_string());
             }
-            // new.params_map[x.short_name] = {k: v for k, v in x.items() if k not in banned_params_keys}
-            // new.params_map[name] = new.params_map[x.short_name]
-            new.description.insert(x.short_name.clone(), x.description.clone());
-            new.description.insert(x.name.clone(), x.description.clone());
+
+            new.description.insert(x.short_name.to_string(), x.description.to_string());
+            new.description.insert(x.name.to_string(), x.description.to_string());
 
             if x.name != x.short_name {
-                if let Some(old) = new.groups.insert(x.name.clone(), x.clone()) {
+                if let Some(old) = new.groups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate group name: {}", old.name)))
                 }
             }
-            if let Some(old) = new.groups.insert(x.short_name.clone(), x) {
+            if let Some(old) = new.groups.insert(x.short_name.to_string(), x) {
                 return Err(Errors::InvalidDefinition(format!("Duplicate group name: {}", old.short_name)))
             }
         }
 
-        for mut x in definition.subgroups {
-            x.short_name = x.short_name.trim().to_uppercase();
-            x.name = x.name.trim().to_uppercase();
-            new.subgroups_map_lts.insert(x.name.clone(), x.short_name.clone());
-            new.subgroups_map_stl.insert(x.short_name.clone(), x.name.clone());
+        for x in definition.subgroups {
+            new.subgroups_map_lts.insert(x.name.to_string(), x.short_name.to_string());
+            new.subgroups_map_stl.insert(x.short_name.to_string(), x.name.to_string());
             for a in &x.aliases {
-                new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+                new.subgroups_aliases.entry(a.to_string()).or_default().insert(x.short_name.to_string());
             }
             // if let Some(a) = &x.solitary_display_name {
-            //     new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.clone());
+            //     new.subgroups_aliases.entry(a.trim().to_uppercase()).or_default().insert(x.short_name.to_string());
             // }
             if x.auto_select {
-                new.subgroups_auto_select.push(x.name.clone());
-                new.subgroups_auto_select_short.push(x.short_name.clone());
+                new.subgroups_auto_select.push(x.name.to_string());
+                new.subgroups_auto_select_short.push(x.short_name.to_string());
             }
-            // new.params_map[x.short_name] = {k: v for k, v in x.items() if k not in banned_params_keys}
-            // new.params_map[name] = new.params_map[x.short_name]
-            new.description.insert(x.short_name.clone(), x.description.clone());
-            new.description.insert(x.name.clone(), x.description.clone());
+
+            new.description.insert(x.short_name.to_string(), x.description.to_string());
+            new.description.insert(x.name.to_string(), x.description.to_string());
             if x.name != x.short_name {
-                if let Some(old) = new.subgroups.insert(x.name.clone(), x.clone()) {
+                if let Some(old) = new.subgroups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate subgroup name: {}", old.name)))
                 }
             }
-            if let Some(old) = new.subgroups.insert(x.short_name.clone(), x) {
+            if let Some(old) = new.subgroups.insert(x.short_name.to_string(), x) {
                 return Err(Errors::InvalidDefinition(format!("Duplicate subgroup name: {}", old.short_name)))
             }
         }
@@ -221,10 +213,10 @@ impl ClassificationParser {
     fn insert_level(&mut self, ll: ClassificationLevel, force: bool) -> Result<()> {
         // Check for bounds and reserved words
         if !force {
-            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&ll.short_name[..]) {
+            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&ll.short_name.as_str()) {
                 return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
             }
-            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&&ll.name[..]) {
+            if [INVALID_CLASSIFICATION, INVALID_SHORT_CLASSIFICATION, NULL_CLASSIFICATION].contains(&ll.name.as_str()) {
                 return Err(Errors::InvalidDefinition("You cannot use reserved words NULL, INVALID or INV in your classification definition.".to_owned()));
             }
 
@@ -245,7 +237,7 @@ impl ClassificationParser {
 
         // insert each name
         for name in ll.unique_names() {
-            if let Some(level) = self.levels_scores_map.insert(name.clone(), ll.lvl) {
+            if let Some(level) = self.levels_scores_map.insert(name.to_string(), ll.lvl) {
                 return Err(Errors::InvalidDefinition(format!("Name clash between classification levels: {name} on {level} and {}", ll.lvl)))
             }
         }
@@ -308,9 +300,9 @@ impl ClassificationParser {
     fn _get_c12n_level_text(&self, lvl_idx: i32, long_format: bool) -> Result<String> {
         if let Some(data) = self.levels.get(&lvl_idx) {
             if long_format {
-                return Ok(data.name.clone())
+                return Ok(data.name.to_string())
             } else {
-                return Ok(data.short_name.clone())
+                return Ok(data.short_name.to_string())
             }
         }
 
@@ -329,9 +321,9 @@ impl ClassificationParser {
         for p in c12n.split('/') {
             if let Some(data) = self.access_req.get(p) {
                 if long_format {
-                    return_set.push(data.name.clone());
+                    return_set.push(data.name.to_string());
                 } else {
-                    return_set.push(data.short_name.clone());
+                    return_set.push(data.short_name.to_string());
                 }
             }
             // if let Some(part) = self.access_req_map_lts.get(p) {
@@ -558,7 +550,7 @@ impl ClassificationParser {
                 let grp = &groups[0];
                 if let Some(group_data) = self.groups.get(grp) {
                     if let Some(display_name) = &group_data.solitary_display_name {
-                        out += display_name;
+                        out += display_name.as_str();
                     } else {
                         out += group_delim;
                         out += grp;
@@ -1197,6 +1189,7 @@ impl ParsedClassification {
     }
 }
 
+/// Parameter struct for the normalize command
 pub struct NormalizeOptions {
     pub long_format: bool,
     pub skip_auto_select: bool,
@@ -1238,6 +1231,8 @@ mod test {
     //     assert!(!option.long_format);
     //     assert!(option.get_dynamic_groups);
     // }
+
+    use std::path::Path;
 
     use crate::classification::{NormalizeOptions, ParsedClassification};
     use crate::config::{ClassificationConfig, ClassificationLevel, ClassificationGroup, ClassificationMarking, ClassificationSubGroup};
@@ -1295,27 +1290,39 @@ mod test {
     }
 
     #[test]
+    fn bad_files() {
+        assert!(ClassificationParser::load(Path::new("/not-a-file/not-a-file")).is_err());
+        assert!(ClassificationParser::load(Path::new("/not-a-file/not-a-file")).unwrap_err().to_string().contains("invalid"));
+        assert!(format!("{:?}", ClassificationParser::load(Path::new("/not-a-file/not-a-file"))).contains("InvalidDefinition"));
+
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "{}").unwrap();
+        assert!(ClassificationParser::load(file.path()).is_err());
+        assert!(ClassificationParser::load(file.path()).unwrap_err().to_string().contains("invalid"));
+    }
+
+    #[test]
     fn invalid_classifications() {
         let mut config = setup_config();
 
         // bad short names
         assert!(ClassificationParser::new(config.clone()).is_ok());
-        config.levels[1].short_name = "INV".to_owned();
+        config.levels[1].short_name = "INV".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
-        config.levels[1].short_name = "NULL".to_owned();
+        config.levels[1].short_name = "NULL".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // bad long names
         let mut config = setup_config();
-        config.levels[1].name = "INV".to_owned();
+        config.levels[1].name = "INV".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
-        config.levels[1].name = "NULL".to_owned();
+        config.levels[1].name = "NULL".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping level names
         let mut config = setup_config();
-        config.levels[0].short_name = "L0".to_owned();
-        config.levels[1].short_name = "L0".to_owned();
+        config.levels[0].short_name = "L0".parse().unwrap();
+        config.levels[1].short_name = "L0".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping level
@@ -1326,38 +1333,38 @@ mod test {
 
         // overlapping required names
         let mut config = setup_config();
-        config.required[0].short_name = "AA".to_owned();
-        config.required[1].short_name = "AA".to_owned();
+        config.required[0].short_name = "AA".parse().unwrap();
+        config.required[1].short_name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping required names
         let mut config = setup_config();
-        config.required[0].name = "AA".to_owned();
-        config.required[1].name = "AA".to_owned();
+        config.required[0].name = "AA".parse().unwrap();
+        config.required[1].name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping groups names
         let mut config = setup_config();
-        config.groups[0].short_name = "AA".to_owned();
-        config.groups[1].short_name = "AA".to_owned();
+        config.groups[0].short_name = "AA".parse().unwrap();
+        config.groups[1].short_name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping groups names
         let mut config = setup_config();
-        config.groups[0].name = "AA".to_owned();
-        config.groups[1].name = "AA".to_owned();
+        config.groups[0].name = "AA".parse().unwrap();
+        config.groups[1].name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping subgroups names
         let mut config = setup_config();
-        config.subgroups[0].short_name = "AA".to_owned();
-        config.subgroups[1].short_name = "AA".to_owned();
+        config.subgroups[0].short_name = "AA".parse().unwrap();
+        config.subgroups[1].short_name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // overlapping subgroups names
         let mut config = setup_config();
-        config.subgroups[0].name = "AA".to_owned();
-        config.subgroups[1].name = "AA".to_owned();
+        config.subgroups[0].name = "AA".parse().unwrap();
+        config.subgroups[1].name = "AA".parse().unwrap();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // missing restricted
@@ -1479,8 +1486,8 @@ mod test {
     #[test]
     fn multi_group_alias() {
         let mut config = setup_config();
-        config.groups[0].aliases.push("Alphabet Gang".to_owned());
-        config.groups[1].aliases.push("Alphabet Gang".to_owned());
+        config.groups[0].aliases.push("Alphabet Gang".parse().unwrap());
+        config.groups[1].aliases.push("Alphabet Gang".parse().unwrap());
         let ce = ClassificationParser::new(config).unwrap();
 
         assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::short()).unwrap(), "L0//REL A");
@@ -1518,22 +1525,6 @@ mod test {
         assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
         assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
     }
-
-    // #[test]
-    // fn subgroup_single() {
-    //     let mut config = setup_config();
-    //     config.subgroups[0].solitary_display_name = Some("RR".to_owned());
-    //     let ce = ClassificationParser::new(config).unwrap();
-
-    //     assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::short()).unwrap(), "L0");
-    //     assert_eq!(ce.normalize_classification_options("L0//R0", NormalizeOptions::short()).unwrap(), "L0//RR");
-    //     assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
-    //     assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::short()).unwrap(), "L0//XX/R1/R2");
-    //     assert_eq!(ce.normalize_classification_options("L0", NormalizeOptions::default()).unwrap(), "LEVEL 0");
-    //     assert_eq!(ce.normalize_classification_options("L0//R1", NormalizeOptions::default()).unwrap(), "LEVEL 0//RR");
-    //     assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
-    //     assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
-    // }
 
     #[test]
     fn parts() {
@@ -1583,6 +1574,7 @@ mod test {
 
         // bad inputs
         assert!(ce.normalize_classification("GARBO").is_err());
+        assert!(ce.normalize_classification("GARBO").unwrap_err().to_string().contains("invalid"));
         // assert!(ce.normalize_classification("L1//GARBO").is_err());
         // assert!(ce.normalize_classification("L1//LE//GARBO").is_err());
     }
