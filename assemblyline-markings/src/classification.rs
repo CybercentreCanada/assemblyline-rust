@@ -47,17 +47,11 @@ pub struct ClassificationParser {
     /// Mapping from names and aliases to level
     levels_scores_map: HashMap<String, i32>,
 
-    /// information about classification markings by name
+    /// information about classification markings by all names and aliases
     access_req: HashMap<String, Rc<ClassificationMarking>>,
 
     /// Store the details about a group by name and short_name
-    groups: HashMap<String, ClassificationGroup>,
-
-    /// Groups name to short_name
-    groups_map_lts: HashMap<String, String>,
-
-    /// Groups short_name to name
-    groups_map_stl: HashMap<String, String>,
+    groups: HashMap<String, Rc<ClassificationGroup>>,
 
     /// Mapping from alias to all groups known by that alias
     groups_aliases: HashMap<String, HashSet<String>>,
@@ -69,13 +63,7 @@ pub struct ClassificationParser {
     groups_auto_select_short: Vec<String>,
 
     /// Store the details about subgroups by name and short_name
-    subgroups: HashMap<String, ClassificationSubGroup>,
-
-    /// Subgroups name to short_name
-    subgroups_map_lts: HashMap<String, String>,
-
-    /// Subgroups short_name to name
-    subgroups_map_stl: HashMap<String, String>,
+    subgroups: HashMap<String, Rc<ClassificationSubGroup>>,
 
     /// Mapping from alias to all subgroups known by that alias
     subgroups_aliases: HashMap<String, HashSet<String>>,
@@ -162,8 +150,6 @@ impl ClassificationParser {
         }
 
         for x in definition.groups {
-            new.groups_map_lts.insert(x.name.to_string(), x.short_name.to_string());
-            new.groups_map_stl.insert(x.short_name.to_string(), x.name.to_string());
             for a in &x.aliases {
                 new.groups_aliases.entry(a.to_string()).or_default().insert(x.short_name.to_string());
             }
@@ -178,6 +164,7 @@ impl ClassificationParser {
             new.description.insert(x.short_name.to_string(), x.description.to_string());
             new.description.insert(x.name.to_string(), x.description.to_string());
 
+            let x = Rc::new(x);
             if x.name != x.short_name {
                 if let Some(old) = new.groups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate group name: {}", old.name)))
@@ -189,8 +176,6 @@ impl ClassificationParser {
         }
 
         for x in definition.subgroups {
-            new.subgroups_map_lts.insert(x.name.to_string(), x.short_name.to_string());
-            new.subgroups_map_stl.insert(x.short_name.to_string(), x.name.to_string());
             for a in &x.aliases {
                 new.subgroups_aliases.entry(a.to_string()).or_default().insert(x.short_name.to_string());
             }
@@ -204,6 +189,8 @@ impl ClassificationParser {
 
             new.description.insert(x.short_name.to_string(), x.description.to_string());
             new.description.insert(x.name.to_string(), x.description.to_string());
+
+            let x = Rc::new(x);
             if x.name != x.short_name {
                 if let Some(old) = new.subgroups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate subgroup name: {}", old.name)))
@@ -254,13 +241,6 @@ impl ClassificationParser {
                 return Err(Errors::InvalidDefinition(format!("Level under minimum classification level of {MIN_LVL}.")))
             }
         }
-
-        // Get a uniqued list of all names this level uses
-        // let mut all_names = ll.aliases.clone();
-        // all_names.push(ll.short_name.clone());
-        // all_names.push(ll.name.clone());
-        // all_names.sort_unstable();
-        // all_names.dedup();
 
         // insert each name
         for name in ll.unique_names() {
@@ -399,10 +379,8 @@ impl ClassificationParser {
         }
 
         for g in &groups {
-            if let Some(g) = self.groups_map_lts.get(g) {
-                g1_set.push(g);
-            } else if self.groups_map_stl.contains_key(g) {
-                g1_set.push(g);
+            if let Some(data) = self.groups.get(g) {
+                g1_set.push(data.short_name.as_str());
             } else if let Some(aliases) = self.groups_aliases.get(g) {
                 for a in aliases {
                     g1_set.push(a)
@@ -413,10 +391,8 @@ impl ClassificationParser {
         }
 
         for g in &subgroups {
-         if let Some(g) = self.subgroups_map_lts.get(g) {
-                g2_set.push(g);
-            } else if self.subgroups_map_stl.contains_key(g) {
-                g2_set.push(g);
+         if let Some(g) = self.subgroups.get(g) {
+                g2_set.push(g.short_name.as_str());
             } else if let Some(aliases) = self.groups_aliases.get(g) {
                 // solitary display names may be here
                 for a in aliases {
@@ -464,14 +440,16 @@ impl ClassificationParser {
         }
 
         let (mut g1_set, mut g2_set) = if long_format {
-            let g1: Result<Vec<&String>> = g1_set.into_iter()
-                .map(|r| self.groups_map_stl.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
+            let g1: Result<Vec<String>> = g1_set.into_iter()
+                .map(|r| self.groups.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
+                .map_ok(|r|r.name.to_string())
                 .collect();
-            let g2: Result<Vec<&String>> = g2_set.into_iter()
-                .map(|r| self.subgroups_map_stl.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
+            let g2: Result<Vec<String>> = g2_set.into_iter()
+                .map(|r| self.subgroups.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
+                .map_ok(|r|r.name.to_string())
                 .collect();
 
-            (g1?.into_iter().cloned().collect_vec(), g2?.into_iter().cloned().collect_vec())
+            (g1?, g2?)
         } else {
             (g1_set.into_iter().map(|r|r.to_owned()).collect_vec(), g2_set.into_iter().map(|r| r.to_owned()).collect_vec())
         };
@@ -577,10 +555,14 @@ impl ClassificationParser {
         }
 
         for g in &temp_groups {
-            if long_format {
-                groups.push(self.groups_map_stl.get(g.as_str()).unwrap_or(&g.to_string()).clone())
+            if let Some(data) = self.groups.get(g.as_str()) {
+                if long_format {
+                    groups.push(data.name.to_string())
+                } else {
+                    groups.push(data.short_name.to_string())
+                }
             } else {
-                groups.push(self.groups_map_lts.get(g.as_str()).unwrap_or(&g.to_string()).clone())
+                groups.push(g.to_string())
             }
         }
 
@@ -1005,11 +987,9 @@ impl ClassificationParser {
                 if check_groups && !self.dynamic_groups {
                     // If not groups. That stuff does not exists...
                     if !self.groups_aliases.contains_key(i) &&
-                       !self.groups_map_stl.contains_key(i) &&
-                       !self.groups_map_lts.contains_key(i) &&
+                       !self.groups.contains_key(i) &&
                        !self.subgroups_aliases.contains_key(i) &&
-                       !self.subgroups_map_stl.contains_key(i) &&
-                       !self.subgroups_map_lts.contains_key(i)
+                       !self.subgroups.contains_key(i)
                     {
                         return false
                     }
