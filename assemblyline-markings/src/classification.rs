@@ -64,13 +64,15 @@ pub struct ClassificationParser {
     subgroups_auto_select: Vec<String>,
     subgroups_auto_select_short: Vec<String>,
 
-    // params_map: HashMap<String, String>,
     description: HashMap<String, String>,
     invalid_mode: bool,
     _classification_cache: HashSet<String>,
     _classification_cache_short: HashSet<String>,
 
+    /// Classification for minimally controlled data
     unrestricted: String,
+
+    /// Classification for maximally controlled data
     restricted: String,
 }
 
@@ -376,8 +378,8 @@ impl ClassificationParser {
         let mut g2_set: Vec<&str> = vec![];
         let mut others = vec![];
 
-
         let mut groups = vec![];
+        let mut subgroups = vec![];
         for gp in c12n_parts {
             if gp.starts_with("REL ") {
                 // Commas may only be used in REL TO controls
@@ -387,8 +389,8 @@ impl ClassificationParser {
                     groups.extend(t.trim().split('/').map(|x|x.trim().to_owned()));
                 }
             } else {
-                // Everything else has to be taken as is
-                groups.push(gp)
+                // Everything else has to be taken as a potential subgroup (or solitary display name of a group)
+                subgroups.push(gp)
             }
         }
 
@@ -401,16 +403,27 @@ impl ClassificationParser {
                 for a in aliases {
                     g1_set.push(a)
                 }
-            } else if let Some(g) = self.subgroups_map_lts.get(g) {
+            } else {
+                others.push(g);
+            }
+        }
+
+        for g in &subgroups {
+         if let Some(g) = self.subgroups_map_lts.get(g) {
                 g2_set.push(g);
             } else if self.subgroups_map_stl.contains_key(g) {
                 g2_set.push(g);
+            } else if let Some(aliases) = self.groups_aliases.get(g) {
+                // solitary display names may be here
+                for a in aliases {
+                    g1_set.push(a)
+                }
             } else if let Some(aliases) = self.subgroups_aliases.get(g) {
                 for a in aliases {
                     g2_set.push(a)
                 }
             } else {
-                others.push(g)
+                return Err(Errors::InvalidClassification(format!("Unrecognized classification part: {g}")))
             }
         }
 
@@ -1084,7 +1097,7 @@ impl ClassificationParser {
         //     return c12n
 
         let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups)?;
-        println!("{:?}", parts);
+        // println!("{:?}", parts);
         let new_c12n = self._get_normalized_classification_text(parts, long_format, skip_auto_select)?;
         // if long_format {
         //     self._classification_cache.add(new_c12n)
@@ -1218,8 +1231,11 @@ impl ParsedClassification {
 
 /// Parameter struct for the normalize command
 pub struct NormalizeOptions {
+    /// Should this normalization output the long format
     pub long_format: bool,
+    /// Should auto select of groups be skipped
     pub skip_auto_select: bool,
+    /// Should dynamic groups be applied
     pub get_dynamic_groups: bool
 }
 

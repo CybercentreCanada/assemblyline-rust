@@ -317,6 +317,13 @@ impl ClassificationSubGroup {
         new.require_group = Some(required.parse().unwrap());
         return new
     }
+
+    #[cfg(test)]
+    pub fn new_with_limited(short_name: &str, name: &str, limited: &str) -> Self {
+        let mut new = Self::new_aliased(short_name, name, vec![]);
+        new.limited_to_group = Some(limited.parse().unwrap());
+        return new
+    }
 }
 
 
