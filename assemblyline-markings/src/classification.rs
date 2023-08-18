@@ -50,24 +50,49 @@ pub struct ClassificationParser {
     /// information about classification markings by name
     access_req: HashMap<String, Arc<ClassificationMarking>>,
 
+    /// Store the details about a group by name and short_name
     groups: HashMap<String, ClassificationGroup>,
+
+    /// Groups name to short_name
     groups_map_lts: HashMap<String, String>,
+
+    /// Groups short_name to name
     groups_map_stl: HashMap<String, String>,
+
+    /// Mapping from alias to all groups known by that alias
     groups_aliases: HashMap<String, HashSet<String>>,
+
+    /// Groups that should automatically be selected and added to all classifications
     groups_auto_select: Vec<String>,
+
+    /// Groups that should automatically be selected and added to all classifications (short names)
     groups_auto_select_short: Vec<String>,
 
+    /// Store the details about subgroups by name and short_name
     subgroups: HashMap<String, ClassificationSubGroup>,
+
+    /// Subgroups name to short_name
     subgroups_map_lts: HashMap<String, String>,
+
+    /// Subgroups short_name to name
     subgroups_map_stl: HashMap<String, String>,
+
+    /// Mapping from alias to all subgroups known by that alias
     subgroups_aliases: HashMap<String, HashSet<String>>,
+
+    /// Subgroups that should automatically by selected in all classifications
     subgroups_auto_select: Vec<String>,
+
+    /// Subgroups that should automatically by selected in all classifications (short names)
     subgroups_auto_select_short: Vec<String>,
 
+    /// Description for any given element by name
     description: HashMap<String, String>,
+
+    /// A flag indicating an invalid classification definition was loaded (not currently used)
     invalid_mode: bool,
-    _classification_cache: HashSet<String>,
-    _classification_cache_short: HashSet<String>,
+    // _classification_cache: HashSet<String>,
+    // _classification_cache_short: HashSet<String>,
 
     /// Classification for minimally controlled data
     unrestricted: String,

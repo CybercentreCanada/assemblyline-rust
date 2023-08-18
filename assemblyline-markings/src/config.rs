@@ -234,15 +234,6 @@ impl ClassificationGroup {
         new.solitary_display_name = Some(solitary_display.parse().unwrap());
         return new
     }
-
-    // Get all of the unique names used by this item
-    // pub fn unique_names(&self) -> Vec<String> {
-    //     let mut names = vec![self.name.clone(), self.short_name.clone()];
-    //     names.extend(self.aliases.iter().cloned());
-    //     names.sort_unstable();
-    //     names.dedup();
-    //     return names
-    // }
 }
 
 /// A subgroup granted access to an object
@@ -289,15 +280,6 @@ pub struct ClassificationSubGroup {
 
 
 impl ClassificationSubGroup {
-    /// Get all of the unique names used by this item
-    // pub fn unique_names(&self) -> Vec<String> {
-    //     let mut names = vec![self.name.clone(), self.short_name.clone()];
-    //     names.extend(self.aliases.iter().cloned());
-    //     names.sort_unstable();
-    //     names.dedup();
-    //     return names
-    // }
-
     #[cfg(test)]
     pub fn new_aliased(short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         Self {
