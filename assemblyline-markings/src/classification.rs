@@ -1,6 +1,6 @@
 //! Classification processing and manipulating tools
 use std::collections::{HashSet, HashMap};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use itertools::Itertools;
 
@@ -48,7 +48,7 @@ pub struct ClassificationParser {
     levels_scores_map: HashMap<String, i32>,
 
     /// information about classification markings by name
-    access_req: HashMap<String, Arc<ClassificationMarking>>,
+    access_req: HashMap<String, Rc<ClassificationMarking>>,
 
     /// Store the details about a group by name and short_name
     groups: HashMap<String, ClassificationGroup>,
@@ -152,7 +152,7 @@ impl ClassificationParser {
         for x in definition.required {
             new.description.insert(x.short_name.to_string(), x.description.clone());
             new.description.insert(x.name.to_string(), x.description.clone());
-            let x = Arc::new(x);
+            let x = Rc::new(x);
 
             for name in x.unique_names() {
                 if let Some(old) = new.access_req.insert(name.to_string(), x.clone()) {
