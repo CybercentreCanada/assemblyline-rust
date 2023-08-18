@@ -1713,4 +1713,29 @@ mod test {
         assert!(ce.normalize_classification("L1//R3/REL A, X").is_err());
         Ok(())
     }
+
+    #[test]
+    fn build_user_classification() -> Result<()> {
+        let ce = setup();
+
+        let class = ce.build_user_classification("L1", "L0//LE", false)?;
+        assert_eq!(class, "L1//LE");
+
+        let class = ce.build_user_classification(&class, "L0//REL A", false)?;
+        assert_eq!(class, "L1//LE//REL A");
+
+        let class = ce.build_user_classification(&class, "L0//XX", false)?;
+        assert_eq!(class, "L1//LE//REL A, X");
+
+        let class = ce.build_user_classification(&class, "L0//AC", false)?;
+        assert_eq!(class, "L1//AC/LE//REL A, X");
+
+        let class = ce.build_user_classification(&class, "L2//R1", false)?;
+        assert_eq!(class, "L2//AC/LE//REL A, X/R1");
+
+        let class = ce.build_user_classification(&class, "L0//R2", false)?;
+        assert_eq!(class, "L2//AC/LE//REL A, X/R1/R2");
+
+        Ok(())
+    }
 }
