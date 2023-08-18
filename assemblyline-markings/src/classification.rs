@@ -335,28 +335,7 @@ impl ClassificationParser {
             } else {
                 others.push(p.to_owned())
             }
-            // if let Some(part) = self.access_req_map_lts.get(p) {
-            //     return_set.push(part)
-            // } else if self.access_req_map_stl.contains_key(p) {
-            //     return_set.push(p)
-            // }  else if let Some(aliases) = self.access_req_aliases.get(p) {
-            //     for a in aliases {
-            //         return_set.push(a)
-            //     }
-            // }
         }
-
-        // let mut return_set = if long_format {
-        //     return_set
-        //     .into_iter()
-        //     .filter_map(|i| self.access_req_map_stl.get(i))
-        //     .cloned().collect_vec()
-        // } else {
-        //     return_set
-        //     .into_iter()
-        //     .map(str::to_owned)
-        //     .collect_vec()
-        // };
 
         return_set.sort_unstable();
         return_set.dedup();
@@ -438,6 +417,27 @@ impl ClassificationParser {
             others.into_iter().cloned().collect()
         };
 
+        g1_set.sort_unstable();
+        g1_set.dedup();
+        g2_set.sort_unstable();
+        g2_set.dedup();
+
+        // Check if there are any forbidden group assignments
+        for subgroup in &g2_set {
+            match self.subgroups.get(*subgroup) {
+                Some(data) => {
+                    if let Some(limited) = &data.limited_to_group {
+                        if g1_set.len() > 1 || (g1_set.len() == 1 && g1_set[0] != limited.as_str()) {
+                            return Err(Errors::InvalidClassification(format!("Subgroup {subgroup} is limited to group {limited} (found: {})", g1_set.join(", "))))
+                        }
+                    }
+                },
+                None => {
+                    return Err(Errors::InvalidClassification(format!("Unknown subgroup: {subgroup}")))
+                }
+            }
+        }
+
         let (mut g1_set, mut g2_set) = if long_format {
             let g1: Result<Vec<&String>> = g1_set.into_iter()
                 .map(|r| self.groups_map_stl.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
@@ -455,6 +455,7 @@ impl ClassificationParser {
         g1_set.dedup();
         g2_set.sort_unstable();
         g2_set.dedup();
+
         return Ok((g1_set, g2_set, others))
     }
 
@@ -552,9 +553,9 @@ impl ClassificationParser {
 
         for g in &temp_groups {
             if long_format {
-                groups.push(self.groups_map_stl.get(g).unwrap_or(g).clone())
+                groups.push(self.groups_map_stl.get(g.as_str()).unwrap_or(&g.to_string()).clone())
             } else {
-                groups.push(self.groups_map_lts.get(g).unwrap_or(g).clone())
+                groups.push(self.groups_map_lts.get(g.as_str()).unwrap_or(&g.to_string()).clone())
             }
         }
 
@@ -618,10 +619,6 @@ impl ClassificationParser {
         let (required, unparsed_required) = self._get_c12n_required(&remain, long_format);
         let (groups, subgroups, unparsed_groups) = self._get_c12n_groups(unparsed_required, long_format, get_dynamic_groups)?;
 
-        // let unparsed = intersection(&unparsed_groups, &unparsed_required);
-        // println!("unparsed_required: {:?}", unparsed_required);
-        // println!("unparsed_groups: {:?}", unparsed_groups);
-        // println!("unparsed: {:?}", unparsed);
         if !unparsed_groups.is_empty() {
             return Err(Errors::InvalidClassification(format!("Unknown parts: {}", unparsed_groups.join(", "))))
         }
@@ -757,9 +754,6 @@ impl ClassificationParser {
             let c12n = self.normalize_classification_options(&c12n, NormalizeOptions { skip_auto_select: user_classification, ..Default::default()})?;
 
             let parts = self.get_classification_parts(&c12n, false, true)?;
-            // let access_lvl = self._get_c12n_level_index(&c12n)?;
-            // let access_req = self._get_c12n_required(&c12n, false);
-            // let (access_grp1, access_grp2) = self._get_c12n_groups(&c12n, false, true)?;
 
             return Ok(serde_json::json!({
                 "__access_lvl__": parts.level,
@@ -868,10 +862,6 @@ impl ClassificationParser {
 
         let parts = self.get_classification_parts(&c12n, None, None)?;
         let user = self.get_classification_parts(&user_c12n, None, None)?;
-        // let (user_req, _) = self._get_c12n_required(&user_c12n, None);
-        // let (user_groups, user_subgroups, _) = self._get_c12n_groups(&user_c12n, None, None)?;
-        // let (req, _) = self._get_c12n_required(&c12n, None);
-        // let (groups, subgroups, _) = self._get_c12n_groups(&c12n, None, None)?;
 
         if self._get_c12n_level_index(&user_c12n)? >= self._get_c12n_level_index(&c12n)? {
             if !Self::_can_see_required(&user.required, &parts.required) {
@@ -1306,6 +1296,7 @@ mod test {
             subgroups: vec![
                 ClassificationSubGroup::new_aliased("R1", "Reserve One", vec!["R0"]),
                 ClassificationSubGroup::new_with_required("R2", "Reserve Two", "X"),
+                ClassificationSubGroup::new_with_limited("R3", "Reserve Three", "X"),
             ],
             restricted: "L2".to_owned(),
             unrestricted: "L0".to_owned(),
@@ -1526,7 +1517,7 @@ mod test {
         assert_eq!(ce.max_classification("L0//R1/R2", "L0", false).unwrap(), "L0//XX/R1/R2");
         assert_eq!(ce.max_classification("L0//R1", "L0", true).unwrap(), "LEVEL 0//RESERVE ONE");
         assert_eq!(ce.max_classification("L0//R1/R2", "L1//R1/R2", false).unwrap(), "L1//XX/R1/R2");
-        assert_eq!(ce.max_classification("L0//R1/R2", "L0//R1", true).unwrap(), "LEVEL 0//XX/RESERVE ONE"); // TODO ???
+        assert_eq!(ce.max_classification("L0//R1/R2", "L0//R1", true).unwrap(), "LEVEL 0//XX/RESERVE ONE");
     }
 
     #[test]
@@ -1662,6 +1653,64 @@ mod test {
         assert!(ce.is_accessible("L2//REL B", "L2//REL B")?);
         assert!(ce.is_accessible("L2//REL B", "L2")?);
 
+        Ok(())
+    }
+
+    // Unexpected subcompartment
+    #[test]
+    fn unexpected_subcompartment() -> Result<()> {
+        let ce = setup();
+        assert_eq!(ce.normalize_classification("L1//LE")?, "LEVEL 1//LEGAL DEPARTMENT");
+        assert!(ce.normalize_classification("L1//LE-").is_err());
+        assert!(ce.normalize_classification("L1//LE-O").is_err());
+        Ok(())
+    }
+
+    // Group names should only be valid inside a REL clause, otherwise
+    #[test]
+    fn group_outside_rel() -> Result<()> {
+        let ce = setup();
+        assert!(ce.normalize_classification("L1//REL A/G").is_err());
+        assert!(ce.normalize_classification("L1//REL A/B").is_err());
+        Ok(())
+    }
+
+    // make sure the bad classification strings are also rejected when dynamic groups are turned on
+    #[test]
+    fn dynamic_group_error() -> Result<()> {
+        let mut config = setup_config();
+        config.dynamic_groups = true;
+        let ce = ClassificationParser::new(config)?;
+
+        assert!(ce.normalize_classification("GARBO").is_err());
+        assert!(ce.normalize_classification("GARBO").unwrap_err().to_string().contains("invalid"));
+        assert!(ce.normalize_classification("L1//GARBO").is_err());
+        assert!(ce.normalize_classification("L1//LE//GARBO").is_err());
+
+        assert!(ce.normalize_classification("L1//REL A, B/ORCON,NOCON").is_err());
+        assert!(ce.normalize_classification("L1//ORCON,NOCON/REL A, B").is_err());
+
+        assert!(ce.normalize_classification("L1//REL A/G").is_err());
+        assert!(ce.normalize_classification("L1//REL A/B").is_err());
+
+        return Ok(())
+    }
+
+    #[test]
+    fn require_group() -> Result<()> {
+        let ce = setup();
+        assert_eq!(ce.normalize_classification("L1//R1")?, "LEVEL 1//RESERVE ONE");
+        assert_eq!(ce.normalize_classification("L1//R2")?, "LEVEL 1//XX/RESERVE TWO");
+        Ok(())
+    }
+
+    #[test]
+    fn limited_to_group() -> Result<()> {
+        let ce = setup();
+        assert_eq!(ce.normalize_classification("L1//R3")?, "LEVEL 1//RESERVE THREE");
+        assert_eq!(ce.normalize_classification("L1//R3/REL X")?, "LEVEL 1//XX/RESERVE THREE");
+        assert!(ce.normalize_classification("L1//R3/REL A").is_err());
+        assert!(ce.normalize_classification("L1//R3/REL A, X").is_err());
         Ok(())
     }
 }

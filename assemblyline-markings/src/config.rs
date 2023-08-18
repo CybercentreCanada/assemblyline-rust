@@ -279,12 +279,12 @@ pub struct ClassificationSubGroup {
     /// This is a special flag that auto-select the corresponding group when
     /// this subgroup is selected (optional)
     #[serde(default)]
-    pub require_group: Option<String>,
+    pub require_group: Option<NameString>,
 
     /// This is a special flag that makes sure that none other then the
     /// corresponding group is selected when this subgroup is selected (optional)
     #[serde(default)]
-    pub limited_to_group: Option<String>,
+    pub limited_to_group: Option<NameString>,
 }
 
 
