@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 
 
 /// A value that contains one of the ways to authenticate to Assemblyline
@@ -18,11 +20,14 @@ pub enum Authentication {
     },
     /// Authenticate with an oauth token
     OAuth{
+        /// Oauth provider
         provider: String,
+        /// Oauth token
         token: String
     }
 }
 
+/// sha256 hash of a file
 pub struct Sha256 {
     hex: String
 }
@@ -41,19 +46,46 @@ impl std::ops::Deref for Sha256 {
     }
 }
 
+impl FromStr for Sha256 {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let hex = s.trim().to_ascii_lowercase();
+        if hex.len() != 64 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
+            return Err(Error::InvalidSha256)
+        }
+        return Ok(Sha256{ hex })
+    }
+}
+
 /// Short name for serde json's basic map type
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
-
+/// Set of possible errors returned by client
 pub enum Error {
-    Client{message: String, status: u32, api_version: Option<String>, api_response: Option<String>},
+    /// An error produced by the client's communication with the server
+    Client{
+        /// A message describing the error
+        message: String,
+        /// HTTP status code associated
+        status: u32,
+        /// Server's API version if available
+        api_version: Option<String>,
+        /// Server's response details if available
+        api_response: Option<String>
+    },
+    /// An error that occured during a failed communication with the server
     TransportError(String),
+    /// An invalid HTTP header name or value was provided
     InvalidHeader,
+    /// The server's response was truncated, corrupted, or malformed
     MalformedResponse,
+    /// A string could not be converted into a sha256
+    InvalidSha256,
 }
 
 impl Error {
-    pub fn client_error(message: String, status: u32) -> Self {
+    pub (crate) fn client_error(message: String, status: u32) -> Self {
         return Error::Client { message, status, api_response: None, api_version: None }
     }
 }

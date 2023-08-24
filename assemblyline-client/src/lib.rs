@@ -17,7 +17,7 @@ use std::sync::Arc;
 use connection::Connection;
 use modules::file::File;
 use modules::search::Search;
-use types::{Authentication, Error};
+pub use types::{Authentication, Error, Sha256, JsonMap};
 
 
 /// A client to communicate with the Assemblyline API
