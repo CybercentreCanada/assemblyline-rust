@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::str::FromStr;
 
 
@@ -62,6 +63,7 @@ impl FromStr for Sha256 {
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// Set of possible errors returned by client
+#[derive(Debug)]
 pub enum Error {
     /// An error produced by the client's communication with the server
     Client{
@@ -90,6 +92,23 @@ impl Error {
     }
 }
 
+impl Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Client { message, status, .. } =>
+                f.write_fmt(format_args!("Client error [{status}]: {message}")),
+            Error::TransportError(message) =>
+                f.write_fmt(format_args!("Error communicating with server: {message}")),
+            Error::InvalidHeader =>
+                f.write_str("An invalid HTTP header name or value was encountered"),
+            Error::MalformedResponse =>
+                f.write_str("A server response was malformed"),
+            Error::InvalidSha256 =>
+                f.write_str("An invalid SHA256 string was provided"),
+        }
+    }
+}
+
 impl From<reqwest::Error> for Error {
     fn from(value: reqwest::Error) -> Self {
         if let Some(code) = value.status() {
@@ -110,4 +129,8 @@ impl From<reqwest::header::InvalidHeaderValue> for Error {
     fn from(_value: reqwest::header::InvalidHeaderValue) -> Self {
         Self::InvalidHeader
     }
+}
+
+impl std::error::Error for Error {
+
 }
