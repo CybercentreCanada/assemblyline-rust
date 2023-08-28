@@ -128,7 +128,7 @@ impl Connection {
     pub async fn get<Resp, F>(&self, path: &str, con: F) -> Result<Resp, Error>
         where F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request::<()>(reqwest::Method::GET, path, None, None).await?;
+        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
@@ -137,16 +137,16 @@ impl Connection {
         where Req: serde::Serialize,
               F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request(reqwest::Method::GET, path, Some(body), None).await?;
+        let resp = self.request(reqwest::Method::GET, path, Body::Json(body), None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
 
-    pub async fn post<Req, Resp, F>(&self, path: &str, body: Req, con: F) -> Result<Resp, Error>
+    pub async fn post<Req, Resp, F>(&self, path: &str, body: Body<Req>, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
               F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request(reqwest::Method::POST, path, Some(body), None).await?;
+        let resp = self.request(reqwest::Method::POST, path, body, None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
@@ -155,7 +155,7 @@ impl Connection {
 //     return self.request(self.session.put, path, convert_api_output, **kw)
 
     /// Detailed method to make an http request
-    pub async fn request<Req>(&self, method: reqwest::Method, path: &str, body: Option<Req>, timeout: Option<f64>) -> Result<reqwest::Response, Error>
+    pub async fn request<Req>(&self, method: reqwest::Method, path: &str, mut body: Body<Req>, timeout: Option<f64>) -> Result<reqwest::Response, Error>
         where Req: serde::Serialize
     {
         // Apply default timeout parameter if not passed elsewhere
@@ -178,9 +178,16 @@ impl Connection {
             let url = format!("{}/{}", self.server, path);
             let mut request = self.client.request(method.clone(), url);
 
-
-            if let Some(body) = &body {
-                request = request.json(body);
+            match body {
+                Body::None => {},
+                Body::Json(json) => {
+                    request = request.json(&json);
+                    body = Body::Json(json);
+                },
+                Body::Multipart(form) => {
+                    request = request.multipart(form);
+                    body = Body::None;
+                }
             }
 
             // set timeout
@@ -279,11 +286,11 @@ impl Connection {
 //     }
 // }
 
-// enum Body<T> {
-//     None,
-//     Json(T),
-// }
-
+pub (crate) enum Body<T: serde::Serialize> {
+    None,
+    Json(T),
+    Multipart(reqwest::multipart::Form)
+}
 
 fn is_session_error(error: &str) -> bool {
     matches!(error,

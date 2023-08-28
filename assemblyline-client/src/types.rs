@@ -84,6 +84,10 @@ pub enum Error {
     MalformedResponse,
     /// A string could not be converted into a sha256
     InvalidSha256,
+    InvalidSubmitFilePath,
+    InvalidSubmitUrl,
+    IO(std::io::Error),
+    Serialization(serde_json::Error),
 }
 
 impl Error {
@@ -105,6 +109,14 @@ impl Display for Error {
                 f.write_str("A server response was malformed"),
             Error::InvalidSha256 =>
                 f.write_str("An invalid SHA256 string was provided"),
+            Error::InvalidSubmitFilePath =>
+                f.write_str("An invalid path was given for submission"),
+            Error::InvalidSubmitUrl =>
+                f.write_str("An invalid URL was given for submission"),
+            Error::IO(error) =>
+                f.write_fmt(format_args!("An IO error ocurred: {error}")),
+            Error::Serialization(error) =>
+                f.write_fmt(format_args!("An error occurred serializing a body: {error}")),
         }
     }
 }
@@ -128,6 +140,24 @@ impl From<reqwest::header::InvalidHeaderName> for Error {
 impl From<reqwest::header::InvalidHeaderValue> for Error {
     fn from(_value: reqwest::header::InvalidHeaderValue) -> Self {
         Self::InvalidHeader
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Serialization(value)
+    }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::IO(value)
+    }
+}
+
+impl From<url::ParseError> for Error {
+    fn from(_value: url::ParseError) -> Self {
+        Self::InvalidSubmitUrl
     }
 }
 

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::connection::{Connection, convert_api_output_map};
+use crate::connection::{Connection, convert_api_output_map, Body};
 use crate::types::{JsonMap, Error};
 
 use super::api_path;
@@ -197,6 +197,6 @@ impl SearchBuilder {
         }
 
         let path = api_path!("search", self.index.to_string());
-        self.connection.post(&path, data, convert_api_output_map).await
+        self.connection.post(&path, Body::Json(data), convert_api_output_map).await
     }
 }

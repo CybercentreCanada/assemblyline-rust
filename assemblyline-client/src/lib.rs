@@ -17,6 +17,7 @@ use std::sync::Arc;
 use connection::Connection;
 use modules::file::File;
 use modules::search::Search;
+use modules::submit::Submit;
 pub use types::{Authentication, Error, Sha256, JsonMap};
 
 
@@ -45,7 +46,7 @@ pub struct Client {
     // self.signature = Signature(self._connection)
     // self.socketio = SocketIO(self._connection)
     // self.submission = Submission(self._connection)
-    // self.submit = Submit(self._connection)
+    pub submit: Submit,
     // self.system = System(self._connection)
     // self.user = User(self._connection)
     // self.workflow = Workflow(self._connection)
@@ -58,6 +59,7 @@ impl Client {
         Ok(Self {
             file: File::new(connection.clone()),
             search: Search::new(connection.clone()),
+            submit: Submit::new(connection)
             // _connection,
         })
     }

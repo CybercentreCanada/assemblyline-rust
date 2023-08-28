@@ -1,32 +1,13 @@
 pub mod file;
 pub mod search;
+pub mod submit;
 
-
-// macro_rules! add_parts {
-//     ($builder:ident) => (
-//         $builder
-//     );
-//     ($builder:ident, $part:expr) => {
-//         {
-//             $builder.push('/');
-//             $builder.push_str(&$part);
-//             $builder
-//         }
-//     };
-//     ($builder:ident, $part:expr, $($tail:expr),*) => {
-//         {
-//             $builder.push('/');
-//             $builder.push_str(&$part);
-//             add_parts!($builder, $($tail),*)
-//         }
-//     }
-// }
-// pub (crate) use add_parts;
+use serde::Serialize;
 
 macro_rules! api_path {
-    ($component:expr) => (
+    ($component:expr) => {
         format!("api/v4/{}", $component)
-    );
+    };
     ($component:expr, $($part:expr),+) => {
         {
             let mut root = format!("api/v4/{}", $component);
@@ -54,3 +35,7 @@ macro_rules! api_path {
 
 pub (crate) use api_path;
 
+#[derive(Serialize)]
+struct Params {
+
+}
