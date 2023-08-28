@@ -57,7 +57,6 @@ pub struct ClassificationConfig {
     /// of one the subgroup the item is part of to gain access
     pub subgroups: Vec<ClassificationSubGroup>,
 
-
     /// Default restricted classification
     pub restricted: String,
 

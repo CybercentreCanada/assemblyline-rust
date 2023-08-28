@@ -350,10 +350,12 @@ impl ClassificationParser {
     /// Get the groups and subgroups for a classification
     fn _get_c12n_groups(&self, c12n_parts: Vec<String>,
         long_format: impl IBool,
-        get_dynamic_groups: impl IBool
+        get_dynamic_groups: impl IBool,
+        auto_select: impl IBool
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let long_format = long_format.into().unwrap_or(true);
         let get_dynamic_groups = get_dynamic_groups.into().unwrap_or(true);
+        let auto_select = auto_select.into().unwrap_or(false);
 
         // Parse classifications in uppercase mode only
         // let c12n = c12n.trim().to_uppercase();
@@ -393,14 +395,17 @@ impl ClassificationParser {
         for g in &subgroups {
          if let Some(g) = self.subgroups.get(g) {
                 g2_set.push(g.short_name.as_str());
-            } else if let Some(aliases) = self.groups_aliases.get(g) {
-                // solitary display names may be here
-                for a in aliases {
-                    g1_set.push(a)
-                }
             } else if let Some(aliases) = self.subgroups_aliases.get(g) {
                 for a in aliases {
                     g2_set.push(a)
+                }
+            } else if let Some(aliases) = self.groups_aliases.get(g) {
+                // this alias may be a solitary display names, check for that
+                if aliases.len() != 1 {
+                    return Err(Errors::InvalidClassification(format!("Name used ambiguously: {g}")))
+                }
+                for a in aliases {
+                    g1_set.push(a)
                 }
             } else {
                 return Err(Errors::InvalidClassification(format!("Unrecognized classification part: {g}")))
@@ -408,20 +413,30 @@ impl ClassificationParser {
         }
 
         let others = if self.dynamic_groups && get_dynamic_groups {
-            for o in others {
-                if !self.access_req.contains_key(o) && !self.levels_scores_map.contains_key(o) {
-                    g1_set.push(o)
-                }
-            }
+            g1_set.extend(others.iter().map(|s|s.as_str()));
             vec![]
         } else {
-            others.into_iter().cloned().collect()
+            others.iter().map(|s|s.to_string()).collect()
         };
 
         g1_set.sort_unstable();
         g1_set.dedup();
         g2_set.sort_unstable();
         g2_set.dedup();
+
+        // Check if there are any required group assignments
+        for subgroup in &g2_set {
+            match self.subgroups.get(*subgroup) {
+                Some(data) => {
+                    if let Some(limited) = &data.require_group {
+                        g1_set.push(limited.as_str())
+                    }
+                },
+                None => {
+                    return Err(Errors::InvalidClassification(format!("Unknown subgroup: {subgroup}")))
+                }
+            }
+        }
 
         // Check if there are any forbidden group assignments
         for subgroup in &g2_set {
@@ -437,6 +452,14 @@ impl ClassificationParser {
                     return Err(Errors::InvalidClassification(format!("Unknown subgroup: {subgroup}")))
                 }
             }
+        }
+
+        // Do auto select
+        if auto_select && !g1_set.is_empty() {
+            g1_set.extend(self.groups_auto_select_short.iter().map(String::as_str))
+        }
+        if auto_select && !g2_set.is_empty() {
+            g2_set.extend(self.subgroups_auto_select_short.iter().map(String::as_str))
         }
 
         let (mut g1_set, mut g2_set) = if long_format {
@@ -621,10 +644,10 @@ impl ClassificationParser {
     }
 
     /// Break a classification into its parts
-    pub fn get_classification_parts(&self, c12n: &str, long_format: impl IBool, get_dynamic_groups: impl IBool) -> Result<ParsedClassification> {
+    pub fn get_classification_parts(&self, c12n: &str, long_format: impl IBool, get_dynamic_groups: impl IBool, auto_select: impl IBool) -> Result<ParsedClassification> {
         let (level, remain) = self._get_c12n_level_index(c12n)?;
         let (required, unparsed_required) = self._get_c12n_required(&remain, long_format);
-        let (groups, subgroups, unparsed_groups) = self._get_c12n_groups(unparsed_required, long_format, get_dynamic_groups)?;
+        let (groups, subgroups, unparsed_groups) = self._get_c12n_groups(unparsed_required, long_format, get_dynamic_groups, auto_select)?;
 
         if !unparsed_groups.is_empty() {
             return Err(Errors::InvalidClassification(format!("Unknown parts: {}", unparsed_groups.join(", "))))
@@ -758,9 +781,7 @@ impl ClassificationParser {
 
         let result: Result<serde_json::Value> = (||{
             // Normalize the classification before gathering the parts
-            let c12n = self.normalize_classification_options(&c12n, NormalizeOptions { skip_auto_select: user_classification, ..Default::default()})?;
-
-            let parts = self.get_classification_parts(&c12n, false, true)?;
+            let parts = self.get_classification_parts(&c12n, false, true, !user_classification)?;
 
             return Ok(serde_json::json!({
                 "__access_lvl__": parts.level,
@@ -827,11 +848,8 @@ impl ClassificationParser {
         }
 
         // Normalize classifications before comparing them
-        let user_c12n_1 = self.normalize_classification_options(user_c12n_1, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
-        let user_c12n_2 = self.normalize_classification_options(user_c12n_2, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
-
-        let parts1 = self.get_classification_parts(&user_c12n_1, long_format, None)?;
-        let parts2 = self.get_classification_parts(&user_c12n_2, long_format, None)?;
+        let parts1 = self.get_classification_parts(user_c12n_1, long_format, None, false)?;
+        let parts2 = self.get_classification_parts(user_c12n_2, long_format, None, false)?;
 
         let parts = ParsedClassification {
             level: parts1.level.min(parts2.level),
@@ -860,17 +878,10 @@ impl ClassificationParser {
             return Ok(true)
         }
 
-        // if c12n is None:
-        //     return True
+        let parts = self.get_classification_parts(c12n, None, None, false)?;
+        let user = self.get_classification_parts(user_c12n, None, None, false)?;
 
-        // Normalize classifications before comparing them
-        let user_c12n = self.normalize_classification_options(user_c12n, NormalizeOptions{skip_auto_select: true, ..Default::default()})?;
-        let c12n = self.normalize_classification_options(c12n, NormalizeOptions{skip_auto_select: true, ..Default::default()})?;
-
-        let parts = self.get_classification_parts(&c12n, None, None)?;
-        let user = self.get_classification_parts(&user_c12n, None, None)?;
-
-        if self._get_c12n_level_index(&user_c12n)? >= self._get_c12n_level_index(&c12n)? {
+        if user.level >= parts.level {
             if !Self::_can_see_required(&user.required, &parts.required) {
                 return Ok(false)
             }
@@ -903,7 +914,6 @@ impl ClassificationParser {
             return true;
         }
 
-
         // Classification normalization test
         let n_c12n = match self.normalize_classification_options(c12n, NormalizeOptions{skip_auto_select, ..Default::default()}) {
             Ok(n_c12n) => n_c12n,
@@ -911,11 +921,11 @@ impl ClassificationParser {
         };
 
         // parse the classification + normal form into parts
-        let ParsedClassification{level: lvl_idx, required: mut req, mut groups, mut subgroups} = match self.get_classification_parts(c12n, None, None) {
+        let ParsedClassification{level: lvl_idx, required: mut req, mut groups, mut subgroups} = match self.get_classification_parts(c12n, None, None, !skip_auto_select) {
             Ok(row) => row,
             Err(_) => return false,
         };
-        let ParsedClassification{level: n_lvl_idx, required: mut n_req, groups: mut n_groups, subgroups: mut n_subgroups} = match self.get_classification_parts(&n_c12n, None, None) {
+        let ParsedClassification{level: n_lvl_idx, required: mut n_req, groups: mut n_groups, subgroups: mut n_subgroups} = match self.get_classification_parts(&n_c12n, None, None, !skip_auto_select) {
             Ok(row) => row,
             Err(_) => return false,
         };
@@ -1015,12 +1025,8 @@ impl ClassificationParser {
             return Ok(self.unrestricted.clone())
         }
 
-        // Normalize classifications before comparing them
-        let c12n_1 = self.normalize_classification(c12n_1)?;
-        let c12n_2 = self.normalize_classification(c12n_2)?;
-
-        let parts1 = self.get_classification_parts(&c12n_1, long_format, None)?;
-        let parts2 = self.get_classification_parts(&c12n_2, long_format, None)?;
+        let parts1 = self.get_classification_parts(c12n_1, long_format, None, true)?;
+        let parts2 = self.get_classification_parts(c12n_2, long_format, None, true)?;
 
         let parts = parts1.max(&parts2)?;
 
@@ -1043,17 +1049,8 @@ impl ClassificationParser {
             return Ok(self.unrestricted.clone())
         }
 
-        // Normalize classifications before comparing them
-        let c12n_1 = self.normalize_classification(c12n_1)?;
-        let c12n_2  = self.normalize_classification(c12n_2)?;
-
-        // if c12n_1 is None:
-        //     return c12n_2
-        // if c12n_2 is None:
-        //     return c12n_1
-
-        let parts1 = self.get_classification_parts(&c12n_1, long_format, None)?;
-        let parts2 = self.get_classification_parts(&c12n_2, long_format, None)?;
+        let parts1 = self.get_classification_parts(c12n_1, long_format, None, true)?;
+        let parts2 = self.get_classification_parts(c12n_2, long_format, None, true)?;
 
         let parts = parts1.min(&parts2);
 
@@ -1091,7 +1088,7 @@ impl ClassificationParser {
         // if not long_format and c12n in self._classification_cache_short and get_dynamic_groups:
         //     return c12n
 
-        let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups)?;
+        let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups, !skip_auto_select)?;
         // println!("{:?}", parts);
         let new_c12n = self._get_normalized_classification_text(parts, long_format, skip_auto_select)?;
         // if long_format {
@@ -1120,11 +1117,8 @@ impl ClassificationParser {
         }
 
         // Normalize classifications before comparing them
-        let c12n_1 = self.normalize_classification_options(c12n_1, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
-        let c12n_2 = self.normalize_classification_options(c12n_2, NormalizeOptions { skip_auto_select: true, ..Default::default() })?;
-
-        let parts1 = self.get_classification_parts(&c12n_1, long_format, None)?;
-        let parts2 = self.get_classification_parts(&c12n_2, long_format, None)?;
+        let parts1 = self.get_classification_parts(c12n_1, long_format, None, false)?;
+        let parts2 = self.get_classification_parts(c12n_2, long_format, None, false)?;
 
         let level = parts1.level.max(parts2.level);
         let required = union(&parts1.required, &parts2.required);
@@ -1534,6 +1528,7 @@ mod test {
 
         assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::short()).unwrap(), "L0//REL A");
         assert_eq!(ce.normalize_classification_options("L0//REL A, B", NormalizeOptions::short()).unwrap(), "L0//REL ALPHABET GANG");
+        assert!(ce.normalize_classification("L0//ALPHABET GANG").is_err())
     }
 
     #[test]
@@ -1550,6 +1545,8 @@ mod test {
         assert_eq!(ce.normalize_classification_options("L0//REL A", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A");
         assert_eq!(ce.normalize_classification_options("L0//REL B", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A, GROUP B");
         assert_eq!(ce.normalize_classification_options("L0//REL A, B", NormalizeOptions::default()).unwrap(), "LEVEL 0//REL TO GROUP A, GROUP B");
+        assert_eq!(ce.min_classification("L1", "L0//REL B", false).unwrap(), "L0");
+        assert_eq!(ce.max_classification("L1", "L0//REL B", false).unwrap(), "L1//REL A, B");
     }
 
     #[test]
@@ -1566,6 +1563,8 @@ mod test {
         assert_eq!(ce.normalize_classification_options("L0//R1", NormalizeOptions::default()).unwrap(), "LEVEL 0//RESERVE ONE");
         assert_eq!(ce.normalize_classification_options("L0//R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
         assert_eq!(ce.normalize_classification_options("L0//R1/R2", NormalizeOptions::default()).unwrap(), "LEVEL 0//XX/RESERVE ONE/RESERVE TWO");
+        assert_eq!(ce.min_classification("L1", "L0//R2", false).unwrap(), "L0");
+        assert_eq!(ce.max_classification("L1", "L0//R2", false).unwrap(), "L1//XX/R1/R2");
     }
 
     #[test]
@@ -1573,20 +1572,26 @@ mod test {
         let ce = setup();
 
         // level only
-        assert_eq!(ce.get_classification_parts("L0", None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 0", None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("L1", None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 1", None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("L0", false, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 0", false, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("L1", false, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 1", false, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L0", None, None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 0", None, None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L1", None, None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 1", None, None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L0", false, None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 0", false, None, None).unwrap(), ParsedClassification{level: 1, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L1", false, None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 1", false, None, None).unwrap(), ParsedClassification{level: 5, ..Default::default()});
 
         // Group operations
-        assert_eq!(ce.get_classification_parts("L0//REL A", None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["GROUP A".to_owned()], ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 0//REL Group A", None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["GROUP A".to_owned()], ..Default::default()});
-        assert_eq!(ce.get_classification_parts("L0//REL A", false, None).unwrap(), ParsedClassification{level: 1, groups: vec!["A".to_owned()], ..Default::default()});
-        assert_eq!(ce.get_classification_parts("LEVEL 0//REL Group A", false, None).unwrap(), ParsedClassification{level: 1, groups: vec!["A".to_owned()], ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L0//REL A", None, None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["GROUP A".to_owned()], ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 0//REL Group A", None, None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["GROUP A".to_owned()], ..Default::default()});
+        assert_eq!(ce.get_classification_parts("L0//REL A", false, None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["A".to_owned()], ..Default::default()});
+        assert_eq!(ce.get_classification_parts("LEVEL 0//REL Group A", false, None, None).unwrap(), ParsedClassification{level: 1, groups: vec!["A".to_owned()], ..Default::default()});
+
+        // interaction with required groups
+        for auto in [true, false] {
+            assert_eq!(ce.get_classification_parts("L0//R1/R2", false, None, auto).unwrap(), ParsedClassification{level: 1, groups: vec!["X".to_owned()], subgroups: vec!["R1".to_owned(), "R2".to_owned()], ..Default::default()});
+            assert_eq!(ce.get_classification_parts("L0//R1", false, None, auto).unwrap(), ParsedClassification{level: 1, subgroups: vec!["R1".to_owned()], ..Default::default()});
+        }
     }
 
     #[test]
