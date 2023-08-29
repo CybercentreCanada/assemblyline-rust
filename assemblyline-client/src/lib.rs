@@ -46,6 +46,7 @@ pub struct Client {
     // self.signature = Signature(self._connection)
     // self.socketio = SocketIO(self._connection)
     // self.submission = Submission(self._connection)
+    /// File submission API endpoints
     pub submit: Submit,
     // self.system = System(self._connection)
     // self.user = User(self._connection)

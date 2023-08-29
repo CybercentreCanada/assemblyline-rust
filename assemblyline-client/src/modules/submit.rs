@@ -88,7 +88,20 @@ impl SubmitBuilder {
     }
 
     // metadata   : Metadata to include with submission. (dict)
+    pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
+        self.metadata.extend(metadata.into_iter()); self
+    }
+    pub fn metadata_item(mut self, key: String, value: String) -> Self {
+        self.metadata.insert(key, value); self
+    }
+
     // params  : Additional submission parameters. (dict)
+    pub fn params(mut self, params: Params) -> Self {
+        self.params = Some(params); self
+    }
+    pub fn parameter(mut self, name: String, value: serde_json::Value) -> Self {
+        self.extra_params.insert(name, value); self
+    }
 
     // path    : Path/name of file. (string)
     pub async fn path(self, path: &std::path::Path) -> Result<JsonMap, Error> {
@@ -126,22 +139,46 @@ pub struct NamedSubmitBuilder {
 }
 
 impl NamedSubmitBuilder {
+
     // metadata   : Metadata to include with submission. (dict)
+    pub fn metadata(self, metadata: HashMap<String, String>) -> Self {
+        Self { parent: self.parent.metadata(metadata), fname: self.fname }
+    }
+    pub fn metadata_item(self, key: String, value: String) -> Self {
+        Self { parent: self.parent.metadata_item(key, value), fname: self.fname }
+    }
+
     // params  : Additional submission parameters. (dict)
+    pub fn params(self, params: Params) -> Self {
+        Self { parent: self.parent.params(params), fname: self.fname }
+    }
+    pub fn parameter(self, name: String, value: serde_json::Value) -> Self {
+        Self { parent: self.parent.parameter(name, value), fname: self.fname }
+    }
 
     fn prepare_request(&self) -> Result<JsonMap, Error> {
         let mut request: JsonMap = [
             ("name".to_owned(), self.fname.clone().into())
         ].into_iter().collect();
 
-        if let Some(params) = &self.parent.params {
-            request.insert("params".to_owned(), serde_json::to_value(params)?);
+
+        if self.parent.params.is_some() || !self.parent.extra_params.is_empty() {
+            let params = if let Some(params) = &self.parent.params {
+                if let serde_json::Value::Object(mut obj) = serde_json::to_value(params)? {
+                    obj.extend(self.parent.extra_params.clone().into_iter());
+                    obj
+                } else {
+                    return Err(Error::ParameterSerialization)
+                }
+            } else {
+                self.parent.extra_params.clone()
+            };
+
+            request.insert("params".to_owned(), serde_json::Value::Object(params));
         }
 
-        todo!("Extra params");
-
         if !self.parent.metadata.is_empty() {
-            request.insert("metadata".to_owned(), serde_json::to_value(self.parent.metadata)?);
+            request.insert("metadata".to_owned(), serde_json::to_value(self.parent.metadata.clone())?);
         }
 
         Ok(request)

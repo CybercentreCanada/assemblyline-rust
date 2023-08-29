@@ -84,10 +84,16 @@ pub enum Error {
     MalformedResponse,
     /// A string could not be converted into a sha256
     InvalidSha256,
+    /// A path was provided for submission that couldn't be used
     InvalidSubmitFilePath,
+    /// A url was provided for submission and a file name couldn't be parsed
     InvalidSubmitUrl,
+    /// An error that has bubbled up from an IO call
     IO(std::io::Error),
+    /// An error caused by failing to serialize or deserialize a message
     Serialization(serde_json::Error),
+    /// An unexpected state was reached serializing submission parameters
+    ParameterSerialization,
 }
 
 impl Error {
@@ -112,11 +118,13 @@ impl Display for Error {
             Error::InvalidSubmitFilePath =>
                 f.write_str("An invalid path was given for submission"),
             Error::InvalidSubmitUrl =>
-                f.write_str("An invalid URL was given for submission"),
+                f.write_str("An invalid URL was given for submission, try setting the file name explicitly"),
             Error::IO(error) =>
                 f.write_fmt(format_args!("An IO error ocurred: {error}")),
             Error::Serialization(error) =>
                 f.write_fmt(format_args!("An error occurred serializing a body: {error}")),
+            Error::ParameterSerialization =>
+                f.write_str("Parameter serialization yielded unexpected type."),
         }
     }
 }
