@@ -1,8 +1,10 @@
 
 use std::collections::HashMap;
 
+use log::{debug, error};
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
 use crate::types::{Authentication, JsonMap, Error};
@@ -72,6 +74,7 @@ impl Connection {
         };
 
         // check API version
+        debug!("Get version");
         let versions = con.get("api/", convert_api_output_list).await?;
         let found = versions.into_iter()
             .map(|version| match version.as_str() {None => false, Some(version) => version == "v4"})
@@ -81,6 +84,7 @@ impl Connection {
         }
 
         // Login
+        debug!("login");
         let _auth_details = con.authenticate().await?;
         // session.timeout = auth_session_detail['session_duration']
 
@@ -124,11 +128,24 @@ impl Connection {
     //     // return self.request(self.session.get, path, convert_api_output, **kw)
     //     todo!()
     // }
+    pub async fn get_params<Resp, F>(&self, path: &str, params: HashMap<String, String>, con: F) -> Result<Resp, Error>
+        where F: Fn(JsonMap) -> Result<Resp, Error>
+    {
+        let params = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
+
+        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None, params).await?;
+        let body: JsonMap = resp.json().await?;
+        return con(body)
+    }
 
     pub async fn get<Resp, F>(&self, path: &str, con: F) -> Result<Resp, Error>
         where F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None).await?;
+        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None, None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
@@ -137,7 +154,7 @@ impl Connection {
         where Req: serde::Serialize,
               F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request(reqwest::Method::GET, path, Body::Json(body), None).await?;
+        let resp = self.request(reqwest::Method::GET, path, Body::Json(body), None, None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
@@ -146,7 +163,7 @@ impl Connection {
         where Req: serde::Serialize,
               F: Fn(JsonMap) -> Result<Resp, Error>
     {
-        let resp = self.request(reqwest::Method::POST, path, body, None).await?;
+        let resp = self.request(reqwest::Method::POST, path, body, None, None).await?;
         let body: JsonMap = resp.json().await?;
         return con(body)
     }
@@ -155,7 +172,13 @@ impl Connection {
 //     return self.request(self.session.put, path, convert_api_output, **kw)
 
     /// Detailed method to make an http request
-    pub async fn request<Req>(&self, method: reqwest::Method, path: &str, mut body: Body<Req>, timeout: Option<f64>) -> Result<reqwest::Response, Error>
+    pub async fn request<Req>(&self,
+        method: reqwest::Method,
+        path: &str,
+        mut body: Body<Req>,
+        timeout: Option<f64>,
+        params: Option<HashMap<String, String>>
+    ) -> Result<reqwest::Response, Error>
         where Req: serde::Serialize
     {
         // Apply default timeout parameter if not passed elsewhere
@@ -198,6 +221,10 @@ impl Connection {
             // attach the session header
             if let Some(token) = self.session_token.read().await.as_ref() {
                 request = request.header(self.session_header_label.clone(), token);
+            }
+
+            if let Some(params) = &params {
+                request = request.query(params);
             }
 
             // let request = match body {
@@ -270,6 +297,8 @@ impl Connection {
                 }
                 return Err(Error::client_error(body, status.as_u16() as u32));
             }
+
+            error!("{}", response.text().await?);
         }
 
         return Err(Error::client_error("Max retry reached, could not perform the request.".to_owned(), 429))
@@ -312,6 +341,13 @@ pub fn convert_api_output_string(mut obj: JsonMap) -> Result<String, Error> {
 pub fn convert_api_output_map(mut obj: JsonMap) -> Result<JsonMap, Error> {
     if let Some(Value::Object(map)) = obj.remove("api_response") {
         return Ok(map)
+    }
+    return Err(Error::MalformedResponse)
+}
+
+pub fn convert_api_output_obj<T: DeserializeOwned>(mut obj: JsonMap) -> Result<T, Error> {
+    if let Some(obj) = obj.remove("api_response") {
+        return Ok(serde_json::from_value(obj)?)
     }
     return Err(Error::MalformedResponse)
 }

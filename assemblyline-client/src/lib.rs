@@ -11,12 +11,14 @@
 mod types;
 mod connection;
 mod modules;
+mod models;
 
 use std::sync::Arc;
 
 use connection::Connection;
 use modules::file::File;
 use modules::search::Search;
+use modules::ingest::Ingest;
 use modules::submit::Submit;
 pub use types::{Authentication, Error, Sha256, JsonMap};
 
@@ -34,7 +36,8 @@ pub struct Client {
     // self.hash_search = HashSearch(self._connection)
     // self.help = Help(self._connection)
     // self.heuristics = Heuristics(self._connection)
-    // self.ingest = Ingest(self._connection)
+    /// Ingest API endpoints
+    pub ingest: Ingest,
     // self.live = Live(self._connection)
     // self.ontology = Ontology(self._connection)
     // self.replay = Replay(self._connection)
@@ -59,6 +62,7 @@ impl Client {
         let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), None, None).await?);
         Ok(Self {
             file: File::new(connection.clone()),
+            ingest: Ingest::new(connection.clone()),
             search: Search::new(connection.clone()),
             submit: Submit::new(connection)
             // _connection,
@@ -66,3 +70,87 @@ impl Client {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+
+    use rand::{thread_rng, Rng};
+
+    use crate::models::submission::{SubmissionState, SubmissionParams, ServiceSelection};
+    use crate::{Authentication, Client};
+
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    async fn prepare_client() -> Client {
+        init();
+        let url = std::env::var("ASSEMBLYLINE_URL").unwrap();
+        let username = std::env::var("ASSEMBLYLINE_USER").unwrap();
+        let key = std::env::var("ASSEMBLYLINE_KEY").unwrap();
+        Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
+    }
+
+    fn random_body() -> Vec<u8> {
+        let mut out = vec![];
+        let mut prng = thread_rng();
+        let length = 128 + prng.gen_range(0..256);
+        while out.len() < length {
+            out.push(prng.gen());
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn submit_content() {
+        let client = prepare_client().await;
+
+        let result = client.submit.single()
+            .metadata_item("testbatch".to_owned(), "0".to_owned())
+            .params(SubmissionParams{ ttl: 1, ..Default::default()})
+            .fname("test-file".to_owned())
+            .content(random_body()).await.unwrap();
+
+        assert_eq!(result.state, SubmissionState::Submitted);
+    }
+
+
+    #[tokio::test]
+    async fn search_single_page() {
+        let client = prepare_client().await;
+        let batch: u64 = thread_rng().gen();
+        let batch: String = batch.to_string();
+
+        let _result = client.ingest.single()
+            .metadata_item("testbatch".to_owned(), batch.clone())
+            .notification_queue(batch.clone())
+            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: Some(vec!["Characterize".to_owned()]), ..Default::default()}, ..Default::default()})
+            .fname("test-file".to_owned())
+            .content(random_body()).await.unwrap();
+
+        for _ in 0..100 {
+            match client.ingest.get_message(&batch).await.unwrap() {
+                Some(message) => {
+                    assert_eq!(message.submission.metadata.get("testbatch").unwrap(), &batch);
+                    break;
+                },
+                None => { tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; },
+            }
+        }
+
+        for _ in 0..10 {
+            let result = client.search.submission(format!("metadata.testbatch: {batch}"))
+                .search().await.unwrap();
+
+            if result.items.len() == 1 {
+                return
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+        panic!()
+    }
+
+
+
+}

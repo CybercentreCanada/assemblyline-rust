@@ -10,12 +10,22 @@
 
 use std::sync::Arc;
 
+use serde::Deserialize;
 use serde_json::json;
 
-use crate::connection::{Connection, convert_api_output_map, Body};
+use crate::connection::{Connection, Body, convert_api_output_obj};
 use crate::types::{JsonMap, Error};
 
 use super::api_path;
+
+#[derive(Deserialize, Debug)]
+pub struct SearchResult {
+    pub items: Vec<JsonMap>,
+    pub offset: i64,
+    pub rows: i64,
+    pub total: i64,
+}
+
 
 enum Searchable {
     Alert,
@@ -179,7 +189,7 @@ impl SearchBuilder {
         self.track_total_hits = Some(value); self
     }
 
-    pub async fn search(self) -> Result<JsonMap, Error> {
+    pub async fn search(self) -> Result<SearchResult, Error> {
         let mut data = json!({
             "query": self.query,
             "filters": self.filters,
@@ -197,6 +207,6 @@ impl SearchBuilder {
         }
 
         let path = api_path!("search", self.index.to_string());
-        self.connection.post(&path, Body::Json(data), convert_api_output_map).await
+        self.connection.post(&path, Body::Json(data), convert_api_output_obj).await
     }
 }

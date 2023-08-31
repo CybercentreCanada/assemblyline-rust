@@ -1,6 +1,8 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+use serde::Deserialize;
+
 
 
 /// A value that contains one of the ways to authenticate to Assemblyline
@@ -29,6 +31,7 @@ pub enum Authentication {
 }
 
 /// sha256 hash of a file
+#[derive(Debug)]
 pub struct Sha256 {
     hex: String
 }
@@ -56,6 +59,15 @@ impl FromStr for Sha256 {
             return Err(Error::InvalidSha256)
         }
         return Ok(Sha256{ hex })
+    }
+}
+
+impl<'de> Deserialize<'de> for Sha256 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+        let content = String::deserialize(deserializer)?;
+        content.parse().map_err(serde::de::Error::custom)
     }
 }
 
