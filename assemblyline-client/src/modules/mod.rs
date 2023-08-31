@@ -1,4 +1,5 @@
 pub mod file;
+pub mod help;
 pub mod search;
 pub mod submit;
 pub mod ingest;

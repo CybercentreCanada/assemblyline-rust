@@ -43,8 +43,9 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-client"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
+ "assemblyline-markings",
  "async-recursion",
  "chrono",
  "env_logger",

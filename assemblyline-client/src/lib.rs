@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use connection::Connection;
 use modules::file::File;
+use modules::help::Help;
 use modules::search::Search;
 use modules::ingest::Ingest;
 use modules::submit::Submit;
@@ -34,7 +35,8 @@ pub struct Client {
     /// file specific API endpoints
     pub file: File,
     // self.hash_search = HashSearch(self._connection)
-    // self.help = Help(self._connection)
+    /// Help API endpoints
+    pub help: Help,
     // self.heuristics = Heuristics(self._connection)
     /// Ingest API endpoints
     pub ingest: Ingest,
@@ -62,6 +64,7 @@ impl Client {
         let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), None, None).await?);
         Ok(Self {
             file: File::new(connection.clone()),
+            help: Help::new(connection.clone()),
             ingest: Ingest::new(connection.clone()),
             search: Search::new(connection.clone()),
             submit: Submit::new(connection)
@@ -83,7 +86,7 @@ mod tests {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
-    async fn prepare_client() -> Client {
+    pub (crate) async fn prepare_client() -> Client {
         init();
         let url = std::env::var("ASSEMBLYLINE_URL").unwrap();
         let username = std::env::var("ASSEMBLYLINE_USER").unwrap();

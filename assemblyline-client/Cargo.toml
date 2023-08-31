@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-client"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "MIT"
 description = """A client for the Assemblyline malware analysis platform."""
@@ -21,3 +21,4 @@ chrono = { version = "0.4", features = ["serde"] }
 [dev-dependencies]
 rand = "0.8"
 env_logger = "0.10"
+assemblyline-markings = { path = "../assemblyline-markings" }
