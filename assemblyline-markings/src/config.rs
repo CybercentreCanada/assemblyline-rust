@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::errors::Errors;
 
@@ -310,7 +309,7 @@ impl ClassificationSubGroup {
 
 /// A string restricted to the conditions required for the name of a classification element.
 /// Non-zero length and uppercase.
-#[derive(DeserializeFromStr, SerializeDisplay, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NameString(String);
 
 impl std::str::FromStr for NameString {
@@ -335,5 +334,21 @@ impl NameString {
     /// Access the raw string data behind this object
     pub (crate) fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for NameString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de> {
+        let data = <&str>::deserialize(deserializer)?;
+        data.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for NameString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        self.0.serialize(serializer)
     }
 }

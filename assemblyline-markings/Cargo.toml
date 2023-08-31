@@ -9,12 +9,10 @@ publish = false
 
 # Serialization framework
 serde = { version = "1.0", features = ["derive", "std"] }
-serde_with = { version = "3.2" }
 serde_json = "1.0"
 serde_yaml = { version = "0.9" }
 
 # Utilities
-# lazy_static = "1.4"
 itertools = "0.11"
 
 [dev-dependencies]
