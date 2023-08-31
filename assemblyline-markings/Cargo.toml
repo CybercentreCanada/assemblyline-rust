@@ -18,4 +18,4 @@ serde_yaml = { version = "0.9" }
 itertools = "0.11"
 
 [dev-dependencies]
-tempfile = "*"
+tempfile = "3"
