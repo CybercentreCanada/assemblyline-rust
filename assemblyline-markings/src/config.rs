@@ -340,7 +340,7 @@ impl NameString {
 impl<'de> Deserialize<'de> for NameString {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where D: serde::Deserializer<'de> {
-        let data = <&str>::deserialize(deserializer)?;
+        let data = String::deserialize(deserializer)?;
         data.parse().map_err(serde::de::Error::custom)
     }
 }
