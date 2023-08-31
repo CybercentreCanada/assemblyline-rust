@@ -3,6 +3,8 @@ name = "assemblyline-client"
 version = "0.1.4"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
 description = """A client for the Assemblyline malware analysis platform."""
 
 [dependencies]

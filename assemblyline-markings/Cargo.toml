@@ -3,6 +3,9 @@ name = "assemblyline-markings"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
+description = """Library for using access control strings with the Assemblyline malware analysis platform."""
 
 [dependencies]
 
