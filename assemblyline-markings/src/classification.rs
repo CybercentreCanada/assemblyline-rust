@@ -303,19 +303,6 @@ impl ClassificationParser {
         Err(Errors::InvalidClassification(format!("Classification level '{lvl}' was not found in your classification definition.")))
     }
 
-    /// convert a level number to a text form
-    fn _get_c12n_level_text(&self, lvl_idx: i32, long_format: bool) -> Result<String> {
-        if let Some(data) = self.levels.get(&lvl_idx) {
-            if long_format {
-                return Ok(data.name.to_string())
-            } else {
-                return Ok(data.short_name.to_string())
-            }
-        }
-
-        Err(Errors::InvalidClassification(format!("Classification level number '{lvl_idx}' was not found in your classification definition.")))
-    }
-
     /// Get required section items
     fn _get_c12n_required(&self, c12n: &str, long_format: impl IBool) -> (Vec<String>, Vec<String>) {
         let long_format = long_format.into().unwrap_or(true);
@@ -522,7 +509,7 @@ impl ClassificationParser {
                 required_lvl_idx = required_lvl_idx.max(params.require_lvl.unwrap_or_default())
             }
         }
-        let mut out = self._get_c12n_level_text(lvl_idx.max(required_lvl_idx), long_format)?;
+        let mut out = self.get_classification_level_text(lvl_idx.max(required_lvl_idx), long_format)?;
 
         // 2. Check for all required items if they should be shown inside the groups display part
         let mut req_grp = vec![];
@@ -641,6 +628,19 @@ impl ClassificationParser {
         }
 
         return Ok(out)
+    }
+
+    /// convert a level number to a text form
+    pub fn get_classification_level_text(&self, lvl_idx: i32, long_format: bool) -> Result<String> {
+        if let Some(data) = self.levels.get(&lvl_idx) {
+            if long_format {
+                return Ok(data.name.to_string())
+            } else {
+                return Ok(data.short_name.to_string())
+            }
+        }
+
+        Err(Errors::InvalidClassification(format!("Classification level number '{lvl_idx}' was not found in your classification definition.")))
     }
 
     /// Break a classification into its parts
