@@ -1,6 +1,6 @@
 //! Classification processing and manipulating tools
 use std::collections::{HashSet, HashMap};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
@@ -48,10 +48,10 @@ pub struct ClassificationParser {
     levels_scores_map: HashMap<String, i32>,
 
     /// information about classification markings by all names and aliases
-    access_req: HashMap<String, Rc<ClassificationMarking>>,
+    access_req: HashMap<String, Arc<ClassificationMarking>>,
 
     /// Store the details about a group by name and short_name
-    groups: HashMap<String, Rc<ClassificationGroup>>,
+    groups: HashMap<String, Arc<ClassificationGroup>>,
 
     /// Mapping from alias to all groups known by that alias
     groups_aliases: HashMap<String, HashSet<String>>,
@@ -63,7 +63,7 @@ pub struct ClassificationParser {
     groups_auto_select_short: Vec<String>,
 
     /// Store the details about subgroups by name and short_name
-    subgroups: HashMap<String, Rc<ClassificationSubGroup>>,
+    subgroups: HashMap<String, Arc<ClassificationSubGroup>>,
 
     /// Mapping from alias to all subgroups known by that alias
     subgroups_aliases: HashMap<String, HashSet<String>>,
@@ -140,7 +140,7 @@ impl ClassificationParser {
         for x in definition.required {
             new.description.insert(x.short_name.to_string(), x.description.clone());
             new.description.insert(x.name.to_string(), x.description.clone());
-            let x = Rc::new(x);
+            let x = Arc::new(x);
 
             for name in x.unique_names() {
                 if let Some(old) = new.access_req.insert(name.to_string(), x.clone()) {
@@ -164,7 +164,7 @@ impl ClassificationParser {
             new.description.insert(x.short_name.to_string(), x.description.to_string());
             new.description.insert(x.name.to_string(), x.description.to_string());
 
-            let x = Rc::new(x);
+            let x = Arc::new(x);
             if x.name != x.short_name {
                 if let Some(old) = new.groups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate group name: {}", old.name)))
@@ -190,7 +190,7 @@ impl ClassificationParser {
             new.description.insert(x.short_name.to_string(), x.description.to_string());
             new.description.insert(x.name.to_string(), x.description.to_string());
 
-            let x = Rc::new(x);
+            let x = Arc::new(x);
             if x.name != x.short_name {
                 if let Some(old) = new.subgroups.insert(x.name.to_string(), x.clone()) {
                     return Err(Errors::InvalidDefinition(format!("Duplicate subgroup name: {}", old.name)))
