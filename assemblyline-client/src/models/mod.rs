@@ -8,6 +8,7 @@ pub mod alert;
 pub mod workflow;
 pub mod result;
 pub mod tagging;
+pub mod file;
 
 
 /// Uppercase String

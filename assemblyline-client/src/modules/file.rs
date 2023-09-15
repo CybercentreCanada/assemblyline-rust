@@ -1,7 +1,14 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::connection::{Connection, convert_api_output_string};
-use crate::types::{Sha256, Error};
+use serde::Deserialize;
+
+use crate::connection::{Connection, convert_api_output_string, convert_api_output_obj, convert_api_output_stream};
+use crate::models::Classification;
+use crate::types::{Sha256, IBool};
+use crate::types::Result;
+use crate::models::file::File as FileModel;
+use crate::models::result::Result as ResultModel;
 
 use super::api_path;
 
@@ -11,6 +18,51 @@ pub struct File {
     connection: Arc<Connection>,
 }
 
+#[derive(Deserialize)]
+pub struct Child {
+    pub name: String,
+    pub sha256: Sha256,
+}
+
+#[derive(Deserialize)]
+pub struct FileResults {
+    /// File info Block
+    pub file_info: FileModel,
+    /// Full result list
+    pub results: Vec<ResultModel>,
+    /// Full error list
+    pub errors: Vec<String>,
+    /// List of possible parents
+    pub parents: Vec<String>,
+    /// List of children files
+    pub childrens: Vec<Child>,
+    /// List tags generated
+    pub tags: HashMap<String, Vec<(String, String, bool, Classification)>>,
+    /// Metadata facets results
+    pub metadata: HashMap<String, FacetResult>,
+    /// UI switch to disable features
+    pub file_viewer_only: bool,
+}
+
+#[derive(Deserialize)]
+pub struct FileResultForService {
+    /// File info Block
+    pub file_info: FileModel,
+    /// Full result list
+    pub results: Vec<ResultModel>,
+}
+
+#[derive(Deserialize)]
+pub struct FileScore {
+    /// File info Block
+    pub file_info: FileModel,
+    /// List of keys used to compute the score
+    pub result_keys: Vec<String>,
+    /// Latest score for the file
+    pub score: i64,
+}
+
+
 impl File {
     pub (crate) fn new(connection: Arc<Connection>) -> Self {
         Self {connection}
@@ -18,106 +70,99 @@ impl File {
 
     /// Return an ascii representation of the file.
     /// Throws a Client exception if the file does not exist.
-    pub async fn ascii(&self, hash: &Sha256) -> Result<String, Error> {
+    pub async fn ascii(&self, hash: &Sha256) -> Result<String> {
         let path = api_path!(FILE_INDEX, "ascii", hash);
         self.connection.get(&path, convert_api_output_string).await
     }
 
     // Return the list of children for the file with the given sha256.
     // Throws a Client exception if the file does not exist.
-//     def children(self, sha256):
-//         return self._connection.get(api_path_by_module(self, sha256))
+    pub async fn children(&self, sha256: &Sha256) -> Result<Vec<Child>> {
+        self.connection.get(&api_path!(FILE_INDEX, "children", sha256), convert_api_output_obj).await
+    }
 
-//     # noinspection PyUnusedLocal
-//     def download(self, sha256, encoding=None, sid=None, output=None, password=None):
-//         """\
-// Download the file with the given sha256.
+    // Download the file with the given sha256.
+    //
+    // Required:
+    // sha256     : File key (string)
+    //
+    // Optional:
+    // encoding : Which file encoding do you want for the file (string)
+    // output   : Path or file handle (string or file-like object)
+    // sid      : ID of the submission the download is for
+    //            If carted the file will inherit the submission metadata (string)
+    //
+    // Throws a Client exception if the file does not exist.
+    pub async fn download(&self, sha256: &Sha256, encoding: Option<String>, sid: Option<String>, password: Option<String>) -> Result<impl futures::Stream> {
+        let mut params = vec![];
+        if let Some(encoding) = encoding {
+            params.push(("encoding".to_owned(), encoding));
+        }
+        if let Some(sid) = sid {
+            params.push(("sid".to_owned(), sid));
+        }
+        if let Some(password) = password {
+            params.push(("password".to_owned(), password));
+        }
+        let path = api_path!(FILE_INDEX, "download", sha256);
+        return self.connection.get_params(&path, params, convert_api_output_stream).await
+    }
 
-// Required:
-// sha256     : File key (string)
+    /// Return an hexadecimal representation of the file.
+    pub async fn hex(&self, sha256: &Sha256, bytes_only: impl IBool, length: Option<usize>) -> Result<String> {
+        let bytes_only = bytes_only.into().unwrap_or(false);
+        let mut params = vec![];
+        if bytes_only {
+            params.push(("bytes_only".to_owned(), "".to_owned()));
+        }
+        if let Some(length) = length {
+            params.push(("length".to_owned(), length.to_string()));
+        }
+        self.connection.get_params(&api_path!(FILE_INDEX, "hex", sha256), params, convert_api_output_string).await
+    }
 
-// Optional:
-// encoding : Which file encoding do you want for the file (string)
-// output   : Path or file handle (string or file-like object)
-// sid      : ID of the submission the download is for
-//            If carted the file will inherit the submission metadata (string)
+    // Return info for the the file with the given sha256.
+    //
+    // Required:
+    // sha256     : File key (string)
+    //
+    // Throws a Client exception if the file does not exist.
+    pub async fn info(&self, sha256: &Sha256) -> Result<FileModel> {
+        return self.connection.get(&api_path!(FILE_INDEX, "info", sha256), convert_api_output_obj).await
+    }
 
-// If output is not specified the content is returned.
+    // Return all the results for the given sha256.
+    //
+    // Required:
+    // sha256     : File key (string)
+    pub async fn result(&self, sha256: &Sha256) -> Result<FileResults> {
+        return self.connection.get(&api_path!(FILE_INDEX, "result", sha256), convert_api_output_obj).await
+    }
 
-// Throws a Client exception if the file does not exist.
-// """
-//         kw = get_function_kwargs('output', 'sid', 'sha256')
-//         path = api_path_by_module(self, sha256, **kw)
-//         if output:
-//             return self._connection.download(path, stream_output(output))
-//         return self._connection.download(path, raw_output)
+    // Return all the results for the given sha256.
+    //
+    // Required:
+    // sha256     : File key (string)
+    // service : Service name (string)
+    pub async fn result_for_service(&self, sha256: &Sha256, service: &str) -> Result<FileResultForService> {
+        return self.connection.get(&api_path!(FILE_INDEX, "result", sha256, service), convert_api_output_obj).await
+    }
+        
+    // Return the latest score for the given sha256.
+    //
+    // Required:
+    // sha256     : File key (string)
+    pub async fn score(&self, sha256: &Sha256) -> Result<FileScore> {
+        return self.connection.get(&api_path!(FILE_INDEX, "score", sha256), convert_api_output_obj).await
+    }
 
-//     def hex(self, sha256, bytes_only=False, length=None):
-//         """\
-// Return an hexadecimal representation of the file.
-
-// Required:
-// sha256     : File key (string)
-
-// Throws a Client exception if the file does not exist.
-// """
-//         kw = {}
-//         if bytes_only:
-//             kw['bytes_only'] = ''
-//         if length:
-//             kw['length'] = length
-
-//         return self._connection.get(api_path_by_module(self, sha256, **kw))
-
-//     def info(self, sha256):
-//         """\
-// Return info for the the file with the given sha256.
-
-// Required:
-// sha256     : File key (string)
-
-// Throws a Client exception if the file does not exist.
-// """
-//         return self._connection.get(api_path_by_module(self, sha256))
-
-//     def result(self, sha256, service=None):
-//         """\
-// Return all the results for the given sha256.
-
-// Required:
-// sha256     : File key (string)
-
-// Optional:
-// service : Service name (string)
-
-// If a service is specified, results are limited to that service.
-
-// Throws a Client exception if the file does not exist.
-// """
-//         args = [service] if service else []
-//         return self._connection.get(api_path_by_module(self, sha256, *args))
-
-//     def score(self, sha256):
-//         """\
-// Return the latest score for the given sha256.
-
-// Required:
-// sha256     : File key (string)
-
-// Throws a Client exception if the file does not exist.
-// """
-//         return self._connection.get(api_path_by_module(self, sha256))
-
-//     def strings(self, sha256):
-//         """\
-// Return all strings found in the file.
-
-// Required:
-// sha256     : File key (string)
-
-// Throws a Client exception if the file does not exist.
-// """
-//         return self._connection.get(api_path_by_module(self, sha256))
+    // Return all strings found in the file.
+    //
+    // Required:
+    // sha256     : File key (string)
+    pub async fn strings(&self, sha256: &Sha256) -> Result<impl futures::Stream> {
+        return self.connection.get(&api_path!(FILE_INDEX, "strings", sha256), convert_api_output_stream).await
+    }
 
 }
 

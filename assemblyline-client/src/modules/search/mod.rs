@@ -1,7 +1,6 @@
-// import json
+mod facet;
 
-// from assemblyline_client.v4_client.common.utils import SEARCHABLE, ClientError, api_path
-// from assemblyline_client.v4_client.module.search.facet import Facet
+
 // from assemblyline_client.v4_client.module.search.fields import Fields
 // from assemblyline_client.v4_client.module.search.grouped import Grouped
 // from assemblyline_client.v4_client.module.search.histogram import Histogram
@@ -15,6 +14,8 @@ use serde_json::json;
 
 use crate::connection::{Connection, Body, convert_api_output_obj};
 use crate::types::{JsonMap, Error};
+
+use self::facet::Facet;
 
 use super::api_path;
 
@@ -58,7 +59,7 @@ impl std::fmt::Display for Searchable {
 pub struct Search {
     connection: Arc<Connection>,
 
-//         self.facet = Facet(connection)
+    pub facet: Facet,
 //         self.fields = Fields(connection)
 //         self.grouped = Grouped(connection)
 //         self.histogram = Histogram(connection)
@@ -69,7 +70,10 @@ pub struct Search {
 
 impl Search {
     pub (crate) fn new(connection: Arc<Connection>) -> Self {
-        Self {connection}
+        Self {
+            facet: Facet::new(connection.clone()),
+            connection,
+        }
     }
 
     /// Search alerts with a lucene query.

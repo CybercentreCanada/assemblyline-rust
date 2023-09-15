@@ -178,7 +178,7 @@ struct ResponseBody {
 
 /// Result Model
 #[derive(Serialize, Deserialize, Debug)]
-struct Result {
+pub struct Result {
     /// Aggregate classification for the result
     pub classification: Classification,
     /// Date at which the result object got created
