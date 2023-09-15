@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{JsonMap, Sha256};
 
+use super::{Classification, Uuid};
+
 
 /// Model of Submission
 #[derive(Deserialize, Debug)]
@@ -15,7 +17,7 @@ pub struct Submission {
     /// Document is present in the malware archive
     pub archived: bool,
     /// Classification of the submission
-    pub classification: String,
+    pub classification: Classification,
     /// Total number of errors in the submission
     pub error_count: i32,
     /// List of error keys
@@ -35,7 +37,7 @@ pub struct Submission {
     /// List of result keys
     pub results: Vec<String>,
     /// Submission ID
-    pub sid: String,
+    pub sid: Uuid,
     /// Status of the submission
     pub state: SubmissionState,
     /// This document is going to be deleted as soon as it finishes
@@ -59,7 +61,7 @@ pub struct Submission {
 pub struct SubmissionParams {
     /// classification of the submission
     #[serde(skip_serializing_if = "String::is_empty")]
-    pub classification: String,
+    pub classification: Classification,
     /// Should a deep scan be performed?
     pub deep_scan: bool,
     /// Description of the submission
