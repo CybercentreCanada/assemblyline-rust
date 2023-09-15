@@ -4,11 +4,13 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde_with::{SerializeDisplay, DeserializeFromStr};
 
 use crate::JsonMap;
-use crate::connection::{Connection, convert_api_output_obj, convert_api_output_map};
+use crate::connection::{Connection, convert_api_output_obj, convert_api_output_map, Body};
+use crate::models::workflow::{Priorities, Statuses};
 use crate::types::Result;
 use crate::models::alert::Alert as AlertModel;
 
@@ -21,6 +23,12 @@ pub struct Alert {
     connection: Arc<Connection>,
 
     pub batch: Batch,
+}
+
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString)]
+#[strum(serialize_all = "snake_case")]
+pub enum Verdict {
+    Malicious, NonMalicious
 }
 
 impl Alert {
@@ -71,21 +79,12 @@ impl Alert {
     ///
     /// Throws a Client exception if the alert does not exist.
     pub async fn label(&self, alert_id: &str, labels: Vec<String>) -> Result<JsonMap> {
-        return self.connection.post(&api_path!(ALERT_INDEX, "label", alert_id), crate::connection::Body::Json(labels), convert_api_output_map).await
+        return self.connection.post(&api_path!(ALERT_INDEX, "label", alert_id), Body::Json(labels), convert_api_output_map).await
     }
 
     /// Find the different labels matching the query.
     pub async fn labels(&self) -> AlertQuery<JsonMap> {
-        AlertQuery {
-            connection: self.connection.clone(),
-            path: api_path!(ALERT_INDEX, "labels"),
-            _type: PhantomData,
-            filters: vec![],
-            query: None,
-            tc_start: None,
-            tc: None,
-            no_delay: false,
-        }
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "labels"))
     }
 
     /// List all alerts in the system (per page)
@@ -106,144 +105,56 @@ impl Alert {
         }
     }
 
-//     def ownership(self, alert_id):
-//         """\
-// Set the ownership of the alert with the given alert_id to the current user.
+    // Set the ownership of the alert with the given alert_id to the current user.
+    // Required:
+    // alert_id: Alert key (string)
+    // Throws a Client exception if the alert does not exist.
+    pub async fn ownership(&self, alert_id: String) -> Result<JsonMap> {
+        return self.connection.get(&api_path!(ALERT_INDEX, "ownership", alert_id), convert_api_output_map).await
+    }
 
-// Required:
-// alert_id: Alert key (string)
+    // Set the priority of the alert with the given alert_id.
+    // Required:
+    // alert_id: Alert key (string)
+    // priority: Priority (enum: LOW, MEDIUM, HIGH, CRITICAL)
+    // Throws a Client exception if the alert does not exist.
+    pub async fn priority(&self, alert_id: String, priority: Priorities) -> Result<JsonMap> {
+        return self.connection.post(&api_path!(ALERT_INDEX, "priority", alert_id), Body::Json(priority), convert_api_output_map).await
+    }
 
-// Throws a Client exception if the alert does not exist.
-// """
-//         return self._connection.get(api_path_by_module(self, alert_id))
+    /// Find the different priorities matching the query.
+    pub async fn priorities(&self) -> AlertQuery<JsonMap> {
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "priorities"))
+    }
 
-//     def priority(self, alert_id, priority):
-//         """\
-// Set the priority of the alert with the given alert_id.
+    // Return the list of all IDs related to the currently selected query.
+    pub async fn related(&self) -> AlertQuery<JsonMap> {
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "related"))
+    }
 
-// Required:
-// alert_id: Alert key (string)
-// priority: Priority (enum: LOW, MEDIUM, HIGH, CRITICAL)
+    // Find the different statistics for the alerts matching the query.
+    pub async fn statistics(&self) -> AlertQuery<JsonMap> {
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "statistics"))
+    }
 
-// Throws a Client exception if the alert does not exist.
-// """
-//         return self._connection.post(api_path_by_module(self, alert_id), json=priority)
+    // Set the status of the alert with the given alert_id.
+    // Required:
+    // alert_id: Alert key (string)
+    // status  : Status (enum: MALICIOUS, NON-MALICIOUS, ASSESS)
+    // Throws a Client exception if the alert does not exist.
+    pub async fn status(&self, alert_id: String, status: Statuses) -> Result<JsonMap> {
+        return self.connection.post(&api_path!(ALERT_INDEX, "status", alert_id), Body::Json(status), convert_api_output_map).await
+    }
 
-//     def priorities(self, fq=[], q=None, tc_start=None, tc=None, no_delay=False):
-//         """\
-// Find the different priorities matching the query.
+    /// Find the different statuses matching the query.
+    pub async fn statuses(&self) -> AlertQuery<JsonMap> {
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "statuses"))
+    }
 
-// Optional:
-// fq      : Post filter queries (you can have multiple of these)
-// q       : Query to apply to the alert list
-// tc_start: Time offset at which we start the time constraint
-// tc      : Time constraint applied to the API
-// no_delay: Do not delay alerts
-// """
-//         params_tuples = [('fq', x) for x in fq]
-//         kw = {
-//             'params_tuples': params_tuples,
-//             'q': q,
-//             'tc_start': tc_start,
-//             'tc': tc
-//         }
-//         if no_delay:
-//             kw['no_delay'] = True
-
-//         return self._connection.get(api_path_by_module(self, **kw))
-
-//     def related(self, fq=[], q=None, tc_start=None, tc=None, no_delay=False):
-//         """\
-// Return the list of all IDs related to the currently selected query.
-
-// Optional:
-// fq      : Post filter queries (you can have multiple of these)
-// q       : Query to apply to the alert list
-// tc_start: Time offset at which we start the time constraint
-// tc      : Time constraint applied to the API
-// no_delay: Do not delay alerts
-// """
-//         params_tuples = [('fq', x) for x in fq]
-//         kw = {
-//             'params_tuples': params_tuples,
-//             'q': q,
-//             'tc_start': tc_start,
-//             'tc': tc
-//         }
-//         if no_delay:
-//             kw['no_delay'] = True
-
-//         return self._connection.get(api_path_by_module(self, **kw))
-
-//     def statistics(self, fq=[], q=None, tc_start=None, tc=None, no_delay=False):
-//         """\
-// Find the different statistics for the alerts matching the query.
-
-// Optional:
-// fq      : Post filter queries (you can have multiple of these)
-// q       : Query to apply to the alert list
-// tc_start: Time offset at which we start the time constraint
-// tc      : Time constraint applied to the API
-// no_delay: Do not delay alerts
-// """
-//         params_tuples = [('fq', x) for x in fq]
-//         kw = {
-//             'params_tuples': params_tuples,
-//             'q': q,
-//             'tc_start': tc_start,
-//             'tc': tc
-//         }
-//         if no_delay:
-//             kw['no_delay'] = True
-
-//         return self._connection.get(api_path_by_module(self, **kw))
-
-//     def status(self, alert_id, status):
-//         """\
-// Set the status of the alert with the given alert_id.
-
-// Required:
-// alert_id: Alert key (string)
-// status  : Status (enum: MALICIOUS, NON-MALICIOUS, ASSESS)
-
-// Throws a Client exception if the alert does not exist.
-// """
-//         return self._connection.post(api_path_by_module(self, alert_id), json=status)
-
-//     def statuses(self, fq=[], q=None, tc_start=None, tc=None, no_delay=False):
-//         """\
-// Find the different statuses matching the query.
-
-// Optional:
-// fq      : Post filter queries (you can have multiple of these)
-// q       : Query to apply to the alert list
-// tc_start: Time offset at which we start the time constraint
-// tc      : Time constraint applied to the API
-// no_delay: Do not delay alerts
-// """
-//         params_tuples = [('fq', x) for x in fq]
-//         kw = {
-//             'params_tuples': params_tuples,
-//             'q': q,
-//             'tc_start': tc_start,
-//             'tc': tc
-//         }
-//         if no_delay:
-//             kw['no_delay'] = True
-
-//         return self._connection.get(api_path_by_module(self, **kw))
-
-//     def verdict(self, alert_id, verdict):
-//         """\
-// Set the verdict of the alert with the given alert_id.
-
-// Required:
-// alert_id: Alert key (string)
-// verdict : Verdict (enum: malicious, non_malicious)
-
-// Throws a Client exception if the alert does not exist.
-// """
-//         return self._connection.put(api_path_by_module(self, alert_id, verdict))
+    /// Set the verdict of the alert with the given alert_id.
+    pub async fn verdict(&self, alert_id: String, verdict: Verdict) -> Result<JsonMap> {
+        return self.connection.post(&api_path!(ALERT_INDEX, "verdict", alert_id, verdict.to_string()), Body::<()>::None, convert_api_output_map).await
+    }
 }
 
 pub struct Batch {
@@ -257,88 +168,36 @@ impl Batch {
         }
     }
 
-//     def label(self, q, labels, tc=None, tc_start=None, fq_list=None):
-//         """\
-// Add labels to alerts matching the search criteria.
+    // Add labels to alerts matching the search criteria.
+    // Required:
+    // q       : Query used to limit the scope of the data (string)
+    // labels  : Labels to apply (list of strings)
+    pub async fn label(&self, query: String, labels: Vec<String>) -> AlertQuery<JsonMap, Vec<String>> {
+        AlertQuery::post(self.connection.clone(), api_path!(ALERT_INDEX, "label", "batch"), labels).query(query)
+    }
 
-// Required:
-// q       : Query used to limit the scope of the data (string)
-// labels  : Labels to apply (list of strings)
+    // Set ownership on alerts matching the search criteria.
+    // Required:
+    // q       : Query used to limit the scope of the data (string)
+    pub async fn ownership(&self, query: String) -> AlertQuery<JsonMap, Vec<String>> {
+        AlertQuery::get(self.connection.clone(), api_path!(ALERT_INDEX, "ownership", "batch")).query(query)
+    }
 
-// Optional:
-// tc         : Time constraint applied to the query (string)
-// tc_start   : Date which the time constraint will be applied to [Default: NOW] (string)
-// fq_list    : List of filter queries (list of strings)
-// """
-//         if not fq_list:
-//             fq_list = []
+    // Set the priority on alerts matching the search criteria.
+    // Required:
+    // q       : Query used to limit the scope of the data (string)
+    // priority: Priority (enum: LOW, MEDIUM, HIGH, CRITICAL)
+    pub async fn priority(&self, query: String, priority: Priorities) -> AlertQuery<JsonMap, Priorities> {
+        AlertQuery::post(self.connection.clone(), api_path!(ALERT_INDEX, "priority", "batch"), priority).query(query)
+    }
 
-//         kw = get_function_kwargs('self', 'fq_list', 'labels')
-//         path = api_path('alert/label/batch', params_tuples=[('fq', fq) for fq in fq_list], **kw)
-
-//         return self._connection.post(path, json=labels)
-
-//     def ownership(self, q, tc=None, tc_start=None, fq_list=None):
-//         """\
-// Set ownership on alerts matching the search criteria.
-
-// Required:
-// q       : Query used to limit the scope of the data (string)
-
-// Optional:
-// tc         : Time constraint applied to the query (string)
-// tc_start   : Date which the time constraint will be applied to [Default: NOW] (string)
-// fq_list    : List of filter queries (list of strings)
-// """
-//         if not fq_list:
-//             fq_list = []
-
-//         kw = get_function_kwargs('self', 'fq_list', 'ownership')
-//         path = api_path('alert/ownership/batch', params_tuples=[('fq', fq) for fq in fq_list], **kw)
-
-//         return self._connection.get(path)
-
-//     def priority(self, q, priority, tc=None, tc_start=None, fq_list=None):
-//         """\
-// Set the priority on alerts matching the search criteria.
-
-// Required:
-// q       : Query used to limit the scope of the data (string)
-// priority: Priority (enum: LOW, MEDIUM, HIGH, CRITICAL)
-
-// Optional:
-// tc         : Time constraint applied to the query (string)
-// tc_start   : Date which the time constraint will be applied to [Default: NOW] (string)
-// fq_list    : List of filter queries (list of strings)
-// """
-//         if not fq_list:
-//             fq_list = []
-
-//         kw = get_function_kwargs('self', 'fq_list', 'priority')
-//         path = api_path('alert/priority/batch', params_tuples=[('fq', fq) for fq in fq_list], **kw)
-
-//         return self._connection.post(path, json=priority)
-
-//     def status(self, q, status, tc=None, tc_start=None, fq_list=None):
-//         """\
-// Set the status on alerts matching the search criteria.
-
-// Required:
-// q       : Query used to limit the scope of the data (string)
-// status  : Status (enum: MALICIOUS, NON-MALICIOUS, ASSESS)
-
-// Optional:
-// tc         : Time constraint applied to the query (string)
-// tc_start   : Date which the time constraint will be applied to [Default: NOW] (string)
-// fq_list    : List of filter queries (list of strings)
-// """
-//         if not fq_list:
-//             fq_list = []
-
-//         kw = get_function_kwargs('self', 'fq_list', 'status')
-//         path = api_path('alert/status/batch', params_tuples=[('fq', fq) for fq in fq_list], **kw)
-
-//         return self._connection.post(path, json=status)
+    // Set the status on alerts matching the search criteria.
+    // Required:
+    // q       : Query used to limit the scope of the data (string)
+    // status  : Status (enum: MALICIOUS, NON-MALICIOUS, ASSESS)
+    pub async fn status(&self, query: String, status: Statuses) -> AlertQuery<JsonMap, Statuses> {
+        AlertQuery::post(self.connection.clone(), api_path!(ALERT_INDEX, "status", "batch"), status).query(query)
+    }
 }
 
 #[derive(Deserialize)]
@@ -423,7 +282,7 @@ impl<Type: DeserializeOwned> DetailedAlertQuery<Type> {
         self.track_total_hits = Some(value); self
     }
 
-    pub async fn get(self) -> Result<Type> {
+    pub async fn send(self) -> Result<Type> {
 
         let mut params: Vec<(String, String)> = vec![
             ("offset".to_owned(), self.offset.to_string()),
@@ -457,8 +316,9 @@ impl<Type: DeserializeOwned> DetailedAlertQuery<Type> {
     }
 }
 
-pub struct AlertQuery<Type> {
+pub struct AlertQuery<Type, Post=()> {
     connection: Arc<Connection>,
+    post: Option<Post>,
     path: String,
     _type: PhantomData<Type>,
 
@@ -474,7 +334,35 @@ pub struct AlertQuery<Type> {
     no_delay: bool,
 }
 
-impl<Type: DeserializeOwned> AlertQuery<Type> {
+impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
+    fn get(connection: Arc<Connection>, path: String) -> Self {
+        AlertQuery {
+            connection,
+            post: None,
+            path,
+            _type: PhantomData,
+            filters: vec![],
+            query: None,
+            tc_start: None,
+            tc: None,
+            no_delay: false,
+        }
+    }
+    
+    fn post(connection: Arc<Connection>, path: String, body: Post) -> Self {
+        AlertQuery {
+            connection,
+            post: Some(body),
+            path,
+            _type: PhantomData,
+            filters: vec![],
+            query: None,
+            tc_start: None,
+            tc: None,
+            no_delay: false,
+        }
+    }
+
     /// Post filter queries (you can have multiple of these)
     pub fn filters(mut self, value: Vec<String>) -> Self {
         self.filters.extend(value); self
@@ -497,7 +385,7 @@ impl<Type: DeserializeOwned> AlertQuery<Type> {
     }
 
 
-    pub async fn get(self) -> Result<Type> {
+    pub async fn send(self) -> Result<Type> {
 
         let mut params = vec![];
 
@@ -519,7 +407,11 @@ impl<Type: DeserializeOwned> AlertQuery<Type> {
             params.push(("no_delay".to_owned(), "true".to_owned()))
         }
 
-        return self.connection.get_params(&self.path, params, convert_api_output_obj).await
+        if let Some(body) = self.post {
+            return self.connection.post_params(&self.path, Body::Json(body), params, convert_api_output_obj).await
+        } else {
+            return self.connection.get_params(&self.path, params, convert_api_output_obj).await
+        }
     } 
     
 }
