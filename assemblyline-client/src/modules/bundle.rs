@@ -2,7 +2,6 @@
 
 // from assemblyline_client.v4_client.common.utils import api_path, stream_output, raw_output
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::JsonMap;
@@ -32,8 +31,8 @@ impl Bundle {
     pub async fn create(self, sid: &str, use_alert: bool) -> Result<impl futures::Stream, Error> {
         let path = api_path!(BUNDLE_PATH, sid);
 
-        let params: HashMap<String, String> = if use_alert {
-            [("use_alert".to_string(), "".to_string())].into_iter().collect()
+        let params = if use_alert {
+            vec![("use_alert".to_string(), "".to_string())]
         } else {
             Default::default()
         };
@@ -67,18 +66,18 @@ impl Bundle {
         let exist_ok = exist_ok.into().unwrap_or(false);
         let allow_incomplete = allow_incomplete.into().unwrap_or(false);
 
-        let mut params = HashMap::<String, String>::new();
+        let mut params = vec![];
         if exist_ok {
-            params.insert("exist_ok".to_string(), "".to_string());
+            params.push(("exist_ok".to_string(), "".to_string()));
         }
         if let Some(classification) = min_classification {
-            params.insert("min_classification".to_string(), classification);
+            params.push(("min_classification".to_string(), classification));
         }
         if let Some(services) = rescan_services {
-            params.insert("rescan_services".to_string(), services.join(","));
+            params.push(("rescan_services".to_string(), services.join(",")));
         }
         if allow_incomplete {
-            params.insert("allow_incomplete".to_string(), "".to_string());
+            params.push(("allow_incomplete".to_string(), "".to_string()));
         }
 
         self.connection.post_params(&path, Body::<()>::Prepared(bundle.into()), params, convert_api_output_map).await

@@ -38,12 +38,12 @@ impl Submit {
 
     /// Resubmit a file for dynamic analysis
     pub async fn dynamic(&self, sha256: Sha256, copy_sid: Option<String>, name: Option<String>) -> Result<Submission, Error> {
-        let mut params = HashMap::new();
+        let mut params = vec![];
         if let Some(copy_sid) = copy_sid {
-            params.insert("copy_sid".to_owned(), copy_sid);
+            params.push(("copy_sid".to_owned(), copy_sid));
         }
         if let Some(name) = name {
-            params.insert("name".to_owned(), name);
+            params.push(("name".to_owned(), name));
         }
         let path = api_path!(SUBMIT_PATH, "dynamic", sha256);
         return self.connection.get_params(&path, params, convert_api_output_obj).await

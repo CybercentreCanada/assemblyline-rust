@@ -1,7 +1,6 @@
 
 use std::collections::HashMap;
 
-use futures::TryStreamExt;
 use log::{debug, error};
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
@@ -130,7 +129,7 @@ impl Connection {
     //     // return self.request(self.session.get, path, convert_api_output, **kw)
     //     todo!()
     // }
-    pub async fn get_params<Resp, F>(&self, path: &str, params: HashMap<String, String>, con: F) -> Result<Resp, Error>
+    pub async fn get_params<Resp, F>(&self, path: &str, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
         where F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
         let params = if params.is_empty() {
@@ -162,7 +161,7 @@ impl Connection {
         return con(self.request(reqwest::Method::POST, path, body, None, None).await?).await
     }
 
-    pub async fn post_params<Req, Resp, F>(&self, path: &str, body: Body<Req>, params: HashMap<String, String>, con: F) -> Result<Resp, Error>
+    pub async fn post_params<Req, Resp, F>(&self, path: &str, body: Body<Req>, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
               F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
@@ -184,7 +183,7 @@ impl Connection {
         path: &str,
         mut body: Body<Req>,
         timeout: Option<f64>,
-        params: Option<HashMap<String, String>>
+        params: Option<Vec<(String, String)>>
     ) -> Result<reqwest::Response, Error>
         where Req: serde::Serialize
     {

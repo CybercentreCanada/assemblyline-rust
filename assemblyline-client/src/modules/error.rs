@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -93,7 +92,7 @@ impl<Type> ListingBuilder<Type> {
     ///
     pub async fn fetch(self) -> Result<SearchResult<ErrorModel>> {
 
-        let mut params: HashMap<String, String> = [
+        let mut params: Vec<(String, String)> = [
             ("offset", self.offset.to_string()),
             ("query", self.query.unwrap_or_default()),
             ("rows", self.rows.to_string()),
@@ -101,10 +100,10 @@ impl<Type> ListingBuilder<Type> {
         ].into_iter().map(|(k, v)|(k.to_owned(), v)).collect();
 
         if self.use_archive {
-            params.insert("use_archive".to_string(), "".to_string());
+            params.push(("use_archive".to_string(), "".to_string()));
         }
         if let Some(hits) = self.track_total_hits {
-            params.insert("track_total_hits".to_string(), hits.to_string());
+            params.push(("track_total_hits".to_string(), hits.to_string()));
         }
         let path = api_path!(ERROR_PATH, "list");
         self.connection.get_params(&path, params, convert_api_output_obj).await
