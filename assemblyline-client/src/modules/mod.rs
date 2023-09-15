@@ -3,6 +3,9 @@ pub mod help;
 pub mod search;
 pub mod submit;
 pub mod ingest;
+pub mod alert;
+pub mod error;
+pub mod bundle;
 
 macro_rules! api_path {
     ($component:expr) => {

@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use serde::Deserialize;
+use serde_with::{SerializeDisplay, DeserializeFromStr};
 
 
 
@@ -31,7 +31,7 @@ pub enum Authentication {
 }
 
 /// sha256 hash of a file
-#[derive(Debug)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr)]
 pub struct Sha256 {
     hex: String
 }
@@ -53,21 +53,12 @@ impl std::ops::Deref for Sha256 {
 impl FromStr for Sha256 {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let hex = s.trim().to_ascii_lowercase();
         if hex.len() != 64 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(Error::InvalidSha256)
         }
         return Ok(Sha256{ hex })
-    }
-}
-
-impl<'de> Deserialize<'de> for Sha256 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> {
-        let content = String::deserialize(deserializer)?;
-        content.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -184,3 +175,9 @@ impl From<url::ParseError> for Error {
 impl std::error::Error for Error {
 
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// A convenience trait that lets you pass true, false, or None for boolean arguments
+pub trait IBool: Into<Option<bool>> + Copy {}
+impl<T: Into<Option<bool>> + Copy> IBool for T {}

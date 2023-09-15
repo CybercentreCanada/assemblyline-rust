@@ -19,13 +19,14 @@ use crate::types::{JsonMap, Error};
 use super::api_path;
 
 #[derive(Deserialize, Debug)]
-pub struct SearchResult {
-    pub items: Vec<JsonMap>,
+pub struct SearchResult<Type> {
+    pub items: Vec<Type>,
     pub offset: i64,
     pub rows: i64,
     pub total: i64,
 }
 
+pub type DictSearchResult = SearchResult<JsonMap>;
 
 enum Searchable {
     Alert,
@@ -189,7 +190,7 @@ impl SearchBuilder {
         self.track_total_hits = Some(value); self
     }
 
-    pub async fn search(self) -> Result<SearchResult, Error> {
+    pub async fn search(self) -> Result<DictSearchResult, Error> {
         let mut data = json!({
             "query": self.query,
             "filters": self.filters,

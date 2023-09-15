@@ -18,7 +18,7 @@ use tokio::io::AsyncSeekExt;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use url::Url;
 
-use crate::{JsonMap, Error, Sha256};
+use crate::{JsonMap, types::Error, Sha256};
 use crate::connection::{Connection, convert_api_output_obj, Body};
 use crate::models::submission::{SubmissionParams, File};
 
@@ -161,7 +161,7 @@ impl IngestBuilder {
 
     // metadata   : Metadata to include with submission. (dict)
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
-        self.metadata.extend(metadata.into_iter()); self
+        self.metadata.extend(metadata); self
     }
     pub fn metadata_item(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value); self
@@ -247,7 +247,7 @@ impl NamedIngestBuilder {
         if self.parent.params.is_some() || !self.parent.extra_params.is_empty() {
             let params = if let Some(params) = &self.parent.params {
                 if let serde_json::Value::Object(mut obj) = serde_json::to_value(params)? {
-                    obj.extend(self.parent.extra_params.clone().into_iter());
+                    obj.extend(self.parent.extra_params.clone());
                     obj
                 } else {
                     return Err(Error::ParameterSerialization)
