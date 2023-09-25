@@ -14,7 +14,7 @@ use tokio_util::codec::{FramedRead, BytesCodec};
 use url::Url;
 
 use crate::models::submission::{SubmissionParams, Submission};
-use crate::{Sha256, JsonMap, Error};
+use crate::{Sha256, JsonMap, types::Error};
 use crate::connection::{Connection, Body, convert_api_output_obj};
 
 use super::api_path;
@@ -38,12 +38,12 @@ impl Submit {
 
     /// Resubmit a file for dynamic analysis
     pub async fn dynamic(&self, sha256: Sha256, copy_sid: Option<String>, name: Option<String>) -> Result<Submission, Error> {
-        let mut params = HashMap::new();
+        let mut params = vec![];
         if let Some(copy_sid) = copy_sid {
-            params.insert("copy_sid".to_owned(), copy_sid);
+            params.push(("copy_sid".to_owned(), copy_sid));
         }
         if let Some(name) = name {
-            params.insert("name".to_owned(), name);
+            params.push(("name".to_owned(), name));
         }
         let path = api_path!(SUBMIT_PATH, "dynamic", sha256);
         return self.connection.get_params(&path, params, convert_api_output_obj).await
@@ -80,7 +80,7 @@ impl SubmitBuilder {
 
     // metadata   : Metadata to include with submission. (dict)
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
-        self.metadata.extend(metadata.into_iter()); self
+        self.metadata.extend(metadata); self
     }
     pub fn metadata_item(mut self, key: String, value: String) -> Self {
         self.metadata.insert(key, value); self
@@ -156,7 +156,7 @@ impl NamedSubmitBuilder {
         if self.parent.params.is_some() || !self.parent.extra_params.is_empty() {
             let params = if let Some(params) = &self.parent.params {
                 if let serde_json::Value::Object(mut obj) = serde_json::to_value(params)? {
-                    obj.extend(self.parent.extra_params.clone().into_iter());
+                    obj.extend(self.parent.extra_params.clone());
                     obj
                 } else {
                     return Err(Error::ParameterSerialization)

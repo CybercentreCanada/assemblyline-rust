@@ -6,6 +6,7 @@ use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use futures::future::BoxFuture;
 
 use crate::types::{Authentication, JsonMap, Error};
 
@@ -128,44 +129,49 @@ impl Connection {
     //     // return self.request(self.session.get, path, convert_api_output, **kw)
     //     todo!()
     // }
-    pub async fn get_params<Resp, F>(&self, path: &str, params: HashMap<String, String>, con: F) -> Result<Resp, Error>
-        where F: Fn(JsonMap) -> Result<Resp, Error>
+    pub async fn get_params<Resp, F>(&self, path: &str, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
+        where F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
         let params = if params.is_empty() {
             None
         } else {
             Some(params)
         };
-
-        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None, params).await?;
-        let body: JsonMap = resp.json().await?;
-        return con(body)
+        
+        return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, params).await?).await
     }
 
     pub async fn get<Resp, F>(&self, path: &str, con: F) -> Result<Resp, Error>
-        where F: Fn(JsonMap) -> Result<Resp, Error>
+        where F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
-        let resp = self.request::<()>(reqwest::Method::GET, path, Body::None, None, None).await?;
-        let body: JsonMap = resp.json().await?;
-        return con(body)
+        return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, None).await?).await
     }
 
     pub async fn get_with<Req, Resp, F>(&self, path: &str, body: Req, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
-              F: Fn(JsonMap) -> Result<Resp, Error>
+              F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
-        let resp = self.request(reqwest::Method::GET, path, Body::Json(body), None, None).await?;
-        let body: JsonMap = resp.json().await?;
-        return con(body)
+        return con(self.request(reqwest::Method::GET, path, Body::Json(body), None, None).await?).await
     }
 
     pub async fn post<Req, Resp, F>(&self, path: &str, body: Body<Req>, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
-              F: Fn(JsonMap) -> Result<Resp, Error>
+              F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
-        let resp = self.request(reqwest::Method::POST, path, body, None, None).await?;
-        let body: JsonMap = resp.json().await?;
-        return con(body)
+        return con(self.request(reqwest::Method::POST, path, body, None, None).await?).await
+    }
+
+    pub async fn post_params<Req, Resp, F>(&self, path: &str, body: Body<Req>, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
+        where Req: serde::Serialize,
+              F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
+    {
+        let params = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
+        
+        return con(self.request(reqwest::Method::POST, path, body, None, params).await?).await
     }
 
 // def put(self, path, **kw):
@@ -177,7 +183,7 @@ impl Connection {
         path: &str,
         mut body: Body<Req>,
         timeout: Option<f64>,
-        params: Option<HashMap<String, String>>
+        params: Option<Vec<(String, String)>>
     ) -> Result<reqwest::Response, Error>
         where Req: serde::Serialize
     {
@@ -209,6 +215,10 @@ impl Connection {
                 },
                 Body::Multipart(form) => {
                     request = request.multipart(form);
+                    body = Body::None;
+                },
+                Body::Prepared(data) => {
+                    request = request.body(data);
                     body = Body::None;
                 }
             }
@@ -318,7 +328,8 @@ impl Connection {
 pub (crate) enum Body<T: serde::Serialize> {
     None,
     Json(T),
-    Multipart(reqwest::multipart::Form)
+    Multipart(reqwest::multipart::Form),
+    Prepared(reqwest::Body),
 }
 
 fn is_session_error(error: &str) -> bool {
@@ -331,30 +342,48 @@ fn is_session_error(error: &str) -> bool {
     )
 }
 
-pub fn convert_api_output_string(mut obj: JsonMap) -> Result<String, Error> {
-    if let Some(Value::String(string)) = obj.remove("api_response") {
-        return Ok(string)
-    }
-    return Err(Error::MalformedResponse)
+pub fn convert_api_output_string(resp: reqwest::Response) -> BoxFuture<'static, Result<String, Error>> {
+    Box::pin(async {
+        let mut body: JsonMap = resp.json().await?;
+        if let Some(Value::String(string)) = body.remove("api_response") {
+            return Ok(string)
+        }
+        return Err(Error::MalformedResponse)
+    })
 }
 
-pub fn convert_api_output_map(mut obj: JsonMap) -> Result<JsonMap, Error> {
-    if let Some(Value::Object(map)) = obj.remove("api_response") {
-        return Ok(map)
-    }
-    return Err(Error::MalformedResponse)
+pub fn convert_api_output_map(resp: reqwest::Response) -> BoxFuture<'static, Result<JsonMap, Error>> {
+    Box::pin(async {
+        let mut body: JsonMap = resp.json().await?;
+        if let Some(Value::Object(map)) = body.remove("api_response") {
+            return Ok(map)
+        }
+        return Err(Error::MalformedResponse)
+    })
 }
 
-pub fn convert_api_output_obj<T: DeserializeOwned>(mut obj: JsonMap) -> Result<T, Error> {
-    if let Some(obj) = obj.remove("api_response") {
-        return Ok(serde_json::from_value(obj)?)
-    }
-    return Err(Error::MalformedResponse)
+pub fn convert_api_output_obj<T: DeserializeOwned>(resp: reqwest::Response) -> BoxFuture<'static, Result<T, Error>> {
+    Box::pin(async {
+        let mut body: JsonMap = resp.json().await?;
+        if let Some(obj) = body.remove("api_response") {
+            return Ok(serde_json::from_value(obj)?)
+        }
+        return Err(Error::MalformedResponse)
+    })
 }
 
-pub fn convert_api_output_list(mut obj: JsonMap) -> Result<Vec<Value>, Error> {
-    if let Some(Value::Array(values)) = obj.remove("api_response") {
-        return Ok(values)
-    }
-    return Err(Error::MalformedResponse)
+pub fn convert_api_output_list(resp: reqwest::Response) -> BoxFuture<'static, Result<Vec<Value>, Error>> {
+    Box::pin(async {
+        let mut body: JsonMap = resp.json().await?;
+        if let Some(Value::Array(values)) = body.remove("api_response") {
+            return Ok(values)
+        }
+        return Err(Error::MalformedResponse)
+    })
+}
+
+pub fn convert_api_output_stream(resp: reqwest::Response) -> BoxFuture<'static, Result<impl futures::Stream, Error>> {
+    Box::pin(async {
+        Ok(resp.bytes_stream())
+    })
 }

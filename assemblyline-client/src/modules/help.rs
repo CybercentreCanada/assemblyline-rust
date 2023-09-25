@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{Error, JsonMap};
+use crate::{types::Error, JsonMap};
 use crate::connection::{Connection, convert_api_output_string, convert_api_output_map};
 
 use super::api_path;

@@ -1,7 +1,6 @@
-// import json
+mod facet;
 
-// from assemblyline_client.v4_client.common.utils import SEARCHABLE, ClientError, api_path
-// from assemblyline_client.v4_client.module.search.facet import Facet
+
 // from assemblyline_client.v4_client.module.search.fields import Fields
 // from assemblyline_client.v4_client.module.search.grouped import Grouped
 // from assemblyline_client.v4_client.module.search.histogram import Histogram
@@ -16,16 +15,19 @@ use serde_json::json;
 use crate::connection::{Connection, Body, convert_api_output_obj};
 use crate::types::{JsonMap, Error};
 
+use self::facet::Facet;
+
 use super::api_path;
 
 #[derive(Deserialize, Debug)]
-pub struct SearchResult {
-    pub items: Vec<JsonMap>,
+pub struct SearchResult<Type> {
+    pub items: Vec<Type>,
     pub offset: i64,
     pub rows: i64,
     pub total: i64,
 }
 
+pub type DictSearchResult = SearchResult<JsonMap>;
 
 enum Searchable {
     Alert,
@@ -57,7 +59,7 @@ impl std::fmt::Display for Searchable {
 pub struct Search {
     connection: Arc<Connection>,
 
-//         self.facet = Facet(connection)
+    pub facet: Facet,
 //         self.fields = Fields(connection)
 //         self.grouped = Grouped(connection)
 //         self.histogram = Histogram(connection)
@@ -68,7 +70,10 @@ pub struct Search {
 
 impl Search {
     pub (crate) fn new(connection: Arc<Connection>) -> Self {
-        Self {connection}
+        Self {
+            facet: Facet::new(connection.clone()),
+            connection,
+        }
     }
 
     /// Search alerts with a lucene query.
@@ -189,7 +194,7 @@ impl SearchBuilder {
         self.track_total_hits = Some(value); self
     }
 
-    pub async fn search(self) -> Result<SearchResult, Error> {
+    pub async fn search(self) -> Result<DictSearchResult, Error> {
         let mut data = json!({
             "query": self.query,
             "filters": self.filters,

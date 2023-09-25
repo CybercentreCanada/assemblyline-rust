@@ -18,10 +18,13 @@ use std::sync::Arc;
 use connection::Connection;
 use modules::file::File;
 use modules::help::Help;
+use modules::alert::Alert;
+use modules::bundle::Bundle;
+use modules::error::Error;
 use modules::search::Search;
 use modules::ingest::Ingest;
 use modules::submit::Submit;
-pub use types::{Authentication, Error, Sha256, JsonMap};
+pub use types::{Authentication, Sha256, JsonMap};
 
 
 /// A client to communicate with the Assemblyline API
@@ -29,9 +32,12 @@ pub struct Client {
     // Connection handler
     // _connection: Arc<Connection>,
 
-    // self.alert = Alert(self._connection)
-    // self.bundle = Bundle(self._connection)
-    // self.error = Error(self._connection)
+    /// alert specific API endpoints
+    pub alert: Alert,
+    /// bundle specific API endpoints
+    pub bundle: Bundle,
+    /// error specific API endpoints
+    pub error: Error,
     /// file specific API endpoints
     pub file: File,
     // self.hash_search = HashSearch(self._connection)
@@ -60,9 +66,12 @@ pub struct Client {
 
 impl Client {
     /// Connect to an assemblyline system
-    pub async fn connect(server: String, auth: Authentication) -> Result<Self, Error> {
+    pub async fn connect(server: String, auth: Authentication) -> Result<Self, types::Error> {
         let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), None, None).await?);
         Ok(Self {
+            alert: Alert::new(connection.clone()),
+            bundle: Bundle::new(connection.clone()),
+            error: Error::new(connection.clone()),
             file: File::new(connection.clone()),
             help: Help::new(connection.clone()),
             ingest: Ingest::new(connection.clone()),
