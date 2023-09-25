@@ -50,7 +50,7 @@ pub struct Attack {
 
 /// Heuristic Signatures
 #[derive(Serialize, Deserialize, Debug)]
-struct Signature {
+pub struct Signature {
     /// Name of the signature that triggered the heuristic
     pub name: String,
     /// Number of times this signature triggered the heuristic
@@ -65,7 +65,7 @@ fn default_signature_frequency() -> i64 { 1 }
 
 /// Heuristic associated to the Section
 #[derive(Serialize, Deserialize, Debug)]
-struct Heuristic {
+pub struct Heuristic {
     /// ID of the heuristic triggered
     pub heur_id: String,
     /// Name of the heuristic
@@ -82,7 +82,7 @@ struct Heuristic {
 
 /// Result Section
 #[derive(Serialize, Deserialize, Debug)]
-struct Section {
+pub struct Section {
     /// Should the section be collapsed when displayed?
     #[serde(default)]
     pub auto_collapse: bool,
@@ -110,7 +110,7 @@ struct Section {
 
 /// Result Body
 #[derive(Serialize, Deserialize, Debug, Default)]
-struct ResultBody {
+pub struct ResultBody {
     /// Aggregate of the score for all heuristics
     #[serde(default)]
     pub score: i64,
@@ -121,7 +121,7 @@ struct ResultBody {
 
 /// Service Milestones
 #[derive(Serialize, Deserialize, Debug, Default)]
-struct Milestone {
+pub struct Milestone {
     /// Date the service started scanning
     pub service_started: DateTime<Utc>,
     /// Date the service finished scanning
@@ -130,7 +130,7 @@ struct Milestone {
 
 /// File related to the Response
 #[derive(Serialize, Deserialize, Debug)]
-struct File {
+pub struct File {
     /// Name of the file
     pub name: String,
     /// SHA256 of the file
@@ -154,7 +154,7 @@ fn default_file_parent_relation() -> String { "EXTRACTED".to_owned() }
 
 /// Response Body of Result
 #[derive(Serialize, Deserialize, Debug)]
-struct ResponseBody {
+pub struct ResponseBody {
     /// Milestone block
     #[serde(default)]
     pub milestones: Milestone,

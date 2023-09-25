@@ -39,7 +39,7 @@ pub struct FileResults {
     /// List tags generated
     pub tags: HashMap<String, Vec<(String, String, bool, Classification)>>,
     /// Metadata facets results
-    pub metadata: HashMap<String, FacetResult>,
+    // pub metadata: HashMap<String, FacetResult>,
     /// UI switch to disable features
     pub file_viewer_only: bool,
 }
@@ -147,7 +147,7 @@ impl File {
     pub async fn result_for_service(&self, sha256: &Sha256, service: &str) -> Result<FileResultForService> {
         return self.connection.get(&api_path!(FILE_INDEX, "result", sha256, service), convert_api_output_obj).await
     }
-        
+
     // Return the latest score for the given sha256.
     //
     // Required:
