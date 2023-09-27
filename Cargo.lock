@@ -43,10 +43,10 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "assemblyline-markings 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "assemblyline-models",
+ "assemblyline-models 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-recursion",
  "chrono",
  "env_logger",
@@ -89,6 +89,20 @@ dependencies = [
 [[package]]
 name = "assemblyline-models"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "struct-metadata",
+ "strum",
+]
+
+[[package]]
+name = "assemblyline-models"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "151b2437011b4270ef2542b5ff16b91cd09917a3282d51378db7a942e95bdc89"
 dependencies = [
  "chrono",
  "serde",
