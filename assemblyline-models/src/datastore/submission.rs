@@ -4,14 +4,15 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use struct_metadata::Described;
 
-use crate::{JsonMap, Sha256};
-
-use super::{Classification, Uuid};
+use crate::{JsonMap, Sha256, Classification, Uuid, ElasticMeta};
 
 
 /// Model of Submission
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
 pub struct Submission {
     // pub archive_ts = odm.Optional(odm.Date(store=False, description="Archiving timestamp (Deprecated)"))
     /// Document is present in the malware archive
@@ -21,8 +22,10 @@ pub struct Submission {
     /// Total number of errors in the submission
     pub error_count: i32,
     /// List of error keys
+    #[metadata(store=false)]
     pub errors: Vec<String>,
     /// Expiry timestamp
+    #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
     /// Total number of files in the submission
     pub file_count: i32,
@@ -31,12 +34,15 @@ pub struct Submission {
     /// Maximum score of all the files in the scan
     pub max_score: i32,
     /// Metadata associated to the submission
+    #[metadata(store=false)]
     pub metadata: HashMap<String, String>,
     /// Submission parameter details
     pub params: SubmissionParams,
     /// List of result keys
+    #[metadata(store=false)]
     pub results: Vec<String>,
     /// Submission ID
+    #[metadata(copyto="__text__")]
     pub sid: Uuid,
     /// Status of the submission
     pub state: SubmissionState,
@@ -47,17 +53,21 @@ pub struct Submission {
     /// Malicious verdict details
     pub verdict: Verdict,
     /// Was loaded from the archive
+    #[metadata(index=false)]
     pub from_archive: bool,
 
     /// the filescore key, used in deduplication. This is a non-unique key, that is
     /// shared by submissions that may be processed as duplicates.
+    #[metadata(index=false, store=false)]
     pub scan_key: Option<String>,
 }
 
 
 
 /// Submission Parameters
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=false)]
 pub struct SubmissionParams {
     /// classification of the submission
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -66,6 +76,7 @@ pub struct SubmissionParams {
     pub deep_scan: bool,
     /// Description of the submission
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[metadata(store=true, copyto="__text__")]
     pub description: Option<String>,
     /// Should this submission generate an alert?
     pub generate_alert: bool,
@@ -95,7 +106,11 @@ pub struct SubmissionParams {
     /// Service selection
     pub services: ServiceSelection,
     /// Service-specific parameters
+    #[metadata(index=false, store=false)]
     pub service_spec: HashMap<String, JsonMap>,
+    /// User who submitted the file
+    #[metadata(store=true, copyto="__text__")]
+    pub submitter: String,
     /// Time, in days, to live for this submission
     pub ttl: u32,
     /// Type of submission
@@ -103,6 +118,7 @@ pub struct SubmissionParams {
     pub submission_type: String,
     /// Initialization for temporary submission data
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[metadata(index=false)]
     pub initial_data: Option<String>,
     /// Does the submission automatically goes into the archive when completed?
     pub auto_archive: bool,
@@ -130,6 +146,7 @@ impl Default for SubmissionParams {
             profile: false,
             services: Default::default(),
             service_spec: Default::default(),
+            submitter: "USER".to_owned(),
             ttl: 30,
             submission_type: "USER".to_owned(),
             initial_data: None,
@@ -141,7 +158,9 @@ impl Default for SubmissionParams {
 
 
 /// Service Selection Scheme
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
 pub struct ServiceSelection {
     /// List of selected services
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,9 +177,12 @@ pub struct ServiceSelection {
 }
 
 /// Submission-Relevant Times
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
 pub struct Times {
     /// Date at which the submission finished scanning
+    #[metadata(store=false)]
     pub completed: Option<DateTime<Utc>>,
     /// Date at which the submission started scanning
     pub submitted: DateTime<Utc>,
@@ -168,15 +190,20 @@ pub struct Times {
 
 
 /// Submission Verdict
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=false)]
 pub struct Verdict {
     /// List of user that thinks this submission is malicious
+    #[serde(default)]
     pub malicious: Vec<String>,
     /// List of user that thinks this submission is non-malicious
+    #[serde(default)]
     pub non_malicious: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, strum::Display, Described)]
+#[metadata_type(ElasticMeta)]
 pub enum SubmissionState {
     Failed,
     Submitted,
@@ -200,12 +227,16 @@ impl<'de> Deserialize<'de> for SubmissionState {
 
 
 /// File Model of Submission
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=false)]
 pub struct File {
     /// Name of the file
+    #[metadata(copyto="__text__")]
     pub name: String,
     /// Size of the file in bytes
     pub size: Option<u64>,
     /// SHA256 hash of the file
+    #[metadata(copyto="__text__")]
     pub sha256: Sha256,
 }

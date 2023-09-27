@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use struct_metadata::Described;
 
-use crate::Sha256;
-
-use super::{Sha1, MD5, Domain, IP, Uri, Platform, Processor, SSDeepHash, PhoneNumber, UpperString, UNCPath, UriPath, Email, Mac};
+use crate::{Sha1, Sha256, MD5, Domain, IP, Uri, Platform, Processor, SSDeepHash, PhoneNumber, UpperString, UNCPath, UriPath, Email, Mac, ElasticMeta};
 
 /// Attribution Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct Attribution {
     /// Attribution Actor
     pub actor: Option<Vec<UpperString>>,
@@ -26,7 +26,8 @@ pub struct Attribution {
 }
 
 /// Antivirus Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct AV {
     /// List of heuristics
     pub heuristic: Option<Vec<String>>,
@@ -35,7 +36,8 @@ pub struct AV {
 }
 
 /// Valid Certificate Period
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct CertValid {
     /// Start date of certificate validity
     pub start: Option<Vec<String>>,
@@ -44,7 +46,8 @@ pub struct CertValid {
 }
 
 /// Certificate Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct Cert {
     /// Extended Key Usage
     pub extended_key_usage: Option<Vec<String>>,
@@ -71,7 +74,8 @@ pub struct Cert {
 }
 
 /// Dynamic Process
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct DynamicProcess {
     /// Commandline
     pub command_line: Option<Vec<String>>,
@@ -82,7 +86,8 @@ pub struct DynamicProcess {
 }
 
 /// Signatures
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct DynamicSignature {
     /// Signature Category
     pub category: Option<Vec<String>>,
@@ -93,7 +98,8 @@ pub struct DynamicSignature {
 }
 
 /// SSDeep
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct DynamicSSDeep {
     /// CLSIDs
     pub cls_ids: Option<Vec<SSDeepHash>>,
@@ -104,7 +110,8 @@ pub struct DynamicSSDeep {
 }
 
 /// Windows
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct DynamicWindow {
     /// CLSIDs
     pub cls_ids: Option<Vec<String>>,
@@ -115,7 +122,8 @@ pub struct DynamicWindow {
 }
 
 /// Operating System
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct DynamicOperatingSystem {
     /// Platform
     pub platform: Option<Vec<Platform>>,
@@ -126,7 +134,8 @@ pub struct DynamicOperatingSystem {
 }
 
 /// Dynamic Tag Model. Commonly Used by Dynamic Analysis
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct Dynamic {
     /// Autorun location
     pub autorun_location: Option<Vec<String>>,
@@ -151,15 +160,17 @@ pub struct Dynamic {
 }
 
 /// General Information Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct TaggingInfo {
     pub phone_number: Option<Vec<PhoneNumber>>,
     /// Password
-    pub password: Option<Vec<String>>, 
+    pub password: Option<Vec<String>>,
 }
 
 /// APK Application Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileAPKApp {
     /// Label
     pub label: Option<Vec<String>>,
@@ -168,7 +179,8 @@ pub struct FileAPKApp {
 }
 
 /// APK SDK Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileAPKSDK {
     /// Minimum OS required
     pub min: Option<Vec<String>>,
@@ -177,12 +189,13 @@ pub struct FileAPKSDK {
 }
 
 /// APK File Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileAPK {
     /// Activity
     pub activity: Option<Vec<String>>,
     /// APK Application Information
-    pub app: Option<FileAPKApp>, 
+    pub app: Option<FileAPKApp>,
     /// Features
     pub feature: Option<Vec<String>>,
     /// Locale
@@ -194,13 +207,14 @@ pub struct FileAPK {
     /// Components Provided
     pub provides_component: Option<Vec<String>>,
     /// APK SDK Information
-    pub sdk: Option<FileAPKSDK>, 
+    pub sdk: Option<FileAPKSDK>,
     /// Libraries Used
     pub used_library: Option<Vec<String>>,
 }
 
 /// File Date Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileDate {
     /// File Creation Date
     pub creation: Option<Vec<String>>,
@@ -209,14 +223,16 @@ pub struct FileDate {
 }
 
 /// ELF Sections
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileELFSections {
     /// Section Name
     pub name: Option<Vec<String>>,
 }
 
 /// ELF Segments
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileELFSegments {
     /// Segment Type
     #[serde(rename = "type")]
@@ -224,7 +240,8 @@ pub struct FileELFSegments {
 }
 
 /// ELF Notes
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileELFNotes {
     /// Note Name
     pub name: Option<Vec<String>>,
@@ -236,7 +253,8 @@ pub struct FileELFNotes {
 }
 
 /// ELF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileELF {
     /// Libraries
     pub libraries: Option<Vec<String>>,
@@ -251,7 +269,8 @@ pub struct FileELF {
 }
 
 /// Exiftool Information Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileIMGExiftool {
     /// Image Creation Tool
     pub creator_tool: Option<Vec<String>>,
@@ -266,7 +285,8 @@ pub struct FileIMGExiftool {
 }
 
 /// Image File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileIMG {
     /// Exiftool Information
     pub exif_tool: Option<FileIMGExiftool>,
@@ -281,7 +301,8 @@ pub struct FileIMG {
 }
 
 /// JAR File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileJAR {
     /// Main Class
     pub main_class: Option<Vec<String>>,
@@ -290,7 +311,8 @@ pub struct FileJAR {
 }
 
 /// File Name Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileName {
     /// Name of Anomaly
     pub anomaly: Option<Vec<String>>,
@@ -299,7 +321,8 @@ pub struct FileName {
 }
 
 /// OLE Macro Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileOLEMacro {
     /// SHA256 of Macro
     pub sha256: Option<Vec<Sha256>>,
@@ -308,7 +331,8 @@ pub struct FileOLEMacro {
 }
 
 /// OLE Summary Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileOLESummary {
     /// Author
     pub author: Option<Vec<String>>,
@@ -335,7 +359,8 @@ pub struct FileOLESummary {
 }
 
 /// OLE File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileOLE {
     /// OLE Macro
     #[serde(rename = "macro")]
@@ -351,7 +376,8 @@ pub struct FileOLE {
 }
 
 /// PDF Date Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePDFDate {
     /// Date Modified
     pub modified: Option<Vec<String>>,
@@ -362,21 +388,24 @@ pub struct FilePDFDate {
 }
 
 /// PDF Javascript Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePDFJavascript {
     /// SHA1 of Javascript
     pub sha1: Option<Vec<Sha1>>,
 }
 
 /// PDF Statistics Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePDFStats {
     /// SHA1 of Statistics
     pub sha1: Option<Vec<Sha1>>,
 }
 
 /// PDF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePDF {
     /// PDF Date Information
     pub date: Option<FilePDFDate>,
@@ -387,14 +416,16 @@ pub struct FilePDF {
 }
 
 /// PE Debug Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEDebug {
     /// GUID
     pub guid: Option<Vec<String>>,
 }
 
 /// PE Exports Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEExports {
     /// Function Name
     pub function_name: Option<Vec<String>>,
@@ -403,7 +434,8 @@ pub struct FilePEExports {
 }
 
 /// PE Imports Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEImports {
     /// Fuzzy
     pub fuzzy: Option<Vec<SSDeepHash>>,
@@ -422,14 +454,16 @@ pub struct FilePEImports {
 }
 
 /// PE Linker Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePELinker {
     /// Timestamp
     pub timestamp: Option<Vec<String>>,
 }
 
 /// PE OEP Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEOEP {
     /// Bytes
     pub bytes: Option<Vec<String>>,
@@ -438,7 +472,8 @@ pub struct FilePEOEP {
 }
 
 /// PE Resources Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEResources {
     /// Language
     pub language: Option<Vec<String>>,
@@ -447,14 +482,16 @@ pub struct FilePEResources {
 }
 
 /// PE Rich Header Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePERichHeader {
     /// Hash
     pub hash: Option<Vec<String>>,
 }
 
 /// PE Sections Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePESections {
     /// Hash
     pub hash: Option<Vec<String>>,
@@ -463,7 +500,8 @@ pub struct FilePESections {
 }
 
 /// PE Versions Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePEVersions {
     /// Description
     pub description: Option<Vec<String>>,
@@ -472,7 +510,8 @@ pub struct FilePEVersions {
 }
 
 /// PE File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePE {
     /// API Vector
     pub api_vector: Option<Vec<String>>,
@@ -499,14 +538,16 @@ pub struct FilePE {
 }
 
 /// PList Build Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListBuild {
     /// Machine OS
     pub machine_os: Option<Vec<String>>,
 }
 
 /// PList CF Bundle Version Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListCFBundleVersion {
     /// Long Version
     pub long: Option<Vec<String>>,
@@ -515,7 +556,8 @@ pub struct FilePListCFBundleVersion {
 }
 
 /// PList CF Bundle Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListCFBundle {
     /// Development Region
     pub development_region: Option<Vec<String>>,
@@ -538,7 +580,8 @@ pub struct FilePListCFBundle {
 }
 
 /// PList DT Platform Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListDTPlatform {
     /// Build
     pub build: Option<Vec<String>>,
@@ -549,7 +592,8 @@ pub struct FilePListDTPlatform {
 }
 
 /// PList DT Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListDT {
     /// Compiler
     pub compiler: Option<Vec<String>>,
@@ -558,7 +602,8 @@ pub struct FilePListDT {
 }
 
 /// PList LS Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListLS {
     /// Background Only
     pub background_only: Option<Vec<String>>,
@@ -567,7 +612,8 @@ pub struct FilePListLS {
 }
 
 /// PList NS Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListNS {
     /// Apple Script Enabled
     pub apple_script_enabled: Option<Vec<String>>,
@@ -576,7 +622,8 @@ pub struct FilePListNS {
 }
 
 /// PList UI Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListUI {
     /// Background Modes
     pub background_modes: Option<Vec<String>>,
@@ -585,14 +632,16 @@ pub struct FilePListUI {
 }
 
 /// PList WK Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePListWK {
     /// App Bundle ID
     pub app_bundle_identifier: Option<Vec<String>>,
 }
 
 /// PList File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePList {
     /// Installer URL
     pub installer_url: Option<Vec<String>>,
@@ -617,14 +666,16 @@ pub struct FilePList {
 }
 
 /// PowerShell File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FilePowerShell {
     /// Cmdlet
     pub cmdlet: Option<Vec<String>>,
 }
 
 /// Shortcut File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileShortcut {
     /// Command Line
     pub command_line: Option<Vec<String>>,
@@ -637,7 +688,8 @@ pub struct FileShortcut {
 }
 
 /// Strings File Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileStrings {
     /// API
     pub api: Option<Vec<String>>,
@@ -650,7 +702,8 @@ pub struct FileStrings {
 }
 
 /// SWF Header Frame
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileSWFHeaderFrame {
     /// Number of Frames
     pub count: Option<Vec<i64>>,
@@ -661,7 +714,8 @@ pub struct FileSWFHeaderFrame {
 }
 
 /// SWF Header Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileSWFHeader {
     /// Header Frame Information
     pub frame: Option<FileSWFHeaderFrame>,
@@ -670,7 +724,8 @@ pub struct FileSWFHeader {
 }
 
 /// SWF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct FileSWF {
     /// Header Information
     pub header: Option<FileSWFHeader>,
@@ -679,7 +734,8 @@ pub struct FileSWF {
 }
 
 /// Network IOC Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct NetworkIOCs {
     /// Domain
     pub domain: Option<Vec<Domain>>,
@@ -694,7 +750,8 @@ pub struct NetworkIOCs {
 }
 
 /// Network Email Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct NetworkEmail {
     /// Email Address
     pub address: Option<Vec<Email>>,
@@ -707,7 +764,8 @@ pub struct NetworkEmail {
 }
 
 /// Network Signature Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct NetworkSignature {
     /// Signature ID
     pub signature_id: Option<Vec<String>>,
@@ -716,7 +774,8 @@ pub struct NetworkSignature {
 }
 
 /// Network TLS Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct NetworkTLS {
     /// JA3 Hash
     pub ja3_hash: Option<Vec<MD5>>,
@@ -727,7 +786,8 @@ pub struct NetworkTLS {
 }
 
 /// Network Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct Network {
     /// Attack
     pub attack: Option<Vec<String>>,
@@ -753,7 +813,8 @@ pub struct Network {
 }
 
 /// Technique Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct Technique {
     /// Communication Routine
     pub comms_routine: Option<Vec<String>>,
@@ -781,7 +842,8 @@ pub struct Technique {
 }
 
 /// File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct TaggingFile {
     /// File Genealogy
     pub ancestry: Option<Vec<String>>,
@@ -830,26 +892,28 @@ pub struct TaggingFile {
 }
 
 /// Tagging Model
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(copyto="__text__")]
 pub struct Tagging {
     /// Attribution Tagging
-    pub attribution: Option<Attribution>,
+    pub attribution: Option<Box<Attribution>>,
     /// Antivirus Tagging
-    pub av: Option<AV>,
+    pub av: Option<Box<AV>>,
     /// Certificate Tagging
-    pub cert: Option<Cert>,
+    pub cert: Option<Box<Cert>>,
     /// Dynamic Analysis Tagging
-    pub dynamic: Option<Dynamic>,
+    pub dynamic: Option<Box<Dynamic>>,
     /// Informational Tagging
-    pub info: Option<TaggingInfo>,
+    pub info: Option<Box<TaggingInfo>>,
     /// File Tagging
-    pub file: Option<TaggingFile>,
+    pub file: Option<Box<TaggingFile>>,
     /// Network Tagging
-    pub network: Option<Network>,
+    pub network: Option<Box<Network>>,
     /// Source Tagging
-    pub source: Option<Vec<String>>,
+    pub source: Option<Box<Vec<String>>>,
     /// Technique Tagging
-    pub technique: Option<Technique>,
+    pub technique: Option<Box<Technique>>,
     /// Vector Tagging
-    pub vector: Option<Vec<String>>,
+    pub vector: Option<Box<Vec<String>>>,
 }

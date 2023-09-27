@@ -11,7 +11,6 @@
 mod types;
 mod connection;
 mod modules;
-mod models;
 
 use std::sync::Arc;
 
@@ -24,7 +23,7 @@ use modules::error::Error;
 use modules::search::Search;
 use modules::ingest::Ingest;
 use modules::submit::Submit;
-pub use types::{Authentication, Sha256, JsonMap};
+pub use types::{Authentication, JsonMap};
 
 
 /// A client to communicate with the Assemblyline API
@@ -86,9 +85,9 @@ impl Client {
 #[cfg(test)]
 mod tests {
 
+    use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
     use rand::{thread_rng, Rng};
 
-    use crate::models::submission::{SubmissionState, SubmissionParams, ServiceSelection};
     use crate::{Authentication, Client};
 
     fn init() {

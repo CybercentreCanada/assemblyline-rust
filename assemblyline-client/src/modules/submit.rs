@@ -8,13 +8,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use assemblyline_models::Sha256;
 use reqwest::multipart::{Form, Part};
 use tokio::io::AsyncSeekExt;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use url::Url;
+use assemblyline_models::datastore::submission::{SubmissionParams, Submission};
 
-use crate::models::submission::{SubmissionParams, Submission};
-use crate::{Sha256, JsonMap, types::Error};
+use crate::{JsonMap, types::Error};
 use crate::connection::{Connection, Body, convert_api_output_obj};
 
 use super::api_path;

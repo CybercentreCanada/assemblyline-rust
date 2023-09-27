@@ -29,7 +29,8 @@ impl std::error::Error for Error {}
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// Uppercase String
-#[derive(Debug, SerializeDisplay, DeserializeFromStr)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described)]
+#[metadata_type(ElasticMeta)]
 pub struct UpperString {
     value: String
 }
@@ -53,7 +54,7 @@ impl std::str::FromStr for UpperString {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let value = s.trim().to_uppercase();
-        return Ok(UpperString{ value })
+        Ok(UpperString{ value })
     }
 }
 
@@ -87,7 +88,7 @@ impl FromStr for Sha256 {
         if hex.len() != 64 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(Error::InvalidSha256(hex))
         }
-        return Ok(Sha256{ hex })
+        Ok(Sha256{ hex })
     }
 }
 
@@ -120,7 +121,7 @@ impl std::str::FromStr for MD5 {
         if hex.len() != 32 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(Error::InvalidMd5(hex))
         }
-        return Ok(MD5{ hex })
+        Ok(MD5{ hex })
     }
 }
 
@@ -154,7 +155,7 @@ impl std::str::FromStr for Sha1 {
         if hex.len() != 40 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(Error::InvalidSha1(hex))
         }
-        return Ok(Sha1{ hex })
+        Ok(Sha1{ hex })
     }
 }
 

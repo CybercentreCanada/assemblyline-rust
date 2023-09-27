@@ -23,7 +23,9 @@ url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
+assemblyline-models = { version="0.1" }
+
 [dev-dependencies]
 rand = "0.8"
 env_logger = "0.10"
-assemblyline-markings = { path = "../assemblyline-markings" }
+assemblyline-markings = { version="0.1" }

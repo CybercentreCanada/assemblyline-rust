@@ -6,32 +6,38 @@
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
+use struct_metadata::Described;
 
-use super::{Classification, Uuid};
+use crate::{Classification, Uuid, ElasticMeta};
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum Priorities {
-    Low, 
-    Medium, 
-    High, 
+    Low,
+    Medium,
+    High,
     Critical,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "SCREAMING-KEBAB-CASE")]
 pub enum Statuses {
-    Malicious, 
-    NonMalicious, 
-    Assess, 
+    Malicious,
+    NonMalicious,
+    Assess,
     Triage,
 }
 
 /// Model of Workflow
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
 pub struct Workflow {
     /// Classification of the workflow
+    #[metadata(copyto="__text__")]
     pub classification: Classification,
     /// Creation date of the workflow
     pub creation_date: DateTime<Utc>,
@@ -46,20 +52,24 @@ pub struct Workflow {
     pub hit_count: i64,
     /// Labels applied by the workflow
     #[serde(default)]
+    #[metadata(copyto="__text__")]
     pub labels: Vec<String>,
     /// Date of last edit on workflow
     pub last_edit: DateTime<Utc>,
     /// Date of last hit on workflow
     pub last_seen: Option<DateTime<Utc>>,
     /// Name of the workflow
+    #[metadata(copyto="__text__")]
     pub name: String,
     /// Which did this originate from?
     pub origin: Option<String>,
     /// Priority applied by the workflow
+    #[metadata(copyto="__text__")]
     pub priority: Option<Priorities>,
     /// Query that the workflow runs
     pub query: String,
     /// Status applied by the workflow
+    #[metadata(copyto="__text__")]
     pub status: Option<Statuses>,
     /// ID of the workflow
     pub workflow_id: Option<Uuid>,

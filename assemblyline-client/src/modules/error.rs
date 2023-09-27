@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::connection::{Connection, convert_api_output_obj};
+use assemblyline_models::datastore::error::Error as ErrorModel;
 
-use crate::models::error::Error as ErrorModel;
+use crate::connection::{Connection, convert_api_output_obj};
 use crate::types::Result;
 
 use super::api_path;

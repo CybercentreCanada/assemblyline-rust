@@ -30,37 +30,6 @@ pub enum Authentication {
     }
 }
 
-/// sha256 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr)]
-pub struct Sha256 {
-    hex: String
-}
-
-impl std::fmt::Display for Sha256 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.hex)
-    }
-}
-
-impl std::ops::Deref for Sha256 {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.hex
-    }
-}
-
-impl FromStr for Sha256 {
-    type Err = Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let hex = s.trim().to_ascii_lowercase();
-        if hex.len() != 64 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
-            return Err(Error::InvalidSha256)
-        }
-        return Ok(Sha256{ hex })
-    }
-}
 
 /// Short name for serde json's basic map type
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;

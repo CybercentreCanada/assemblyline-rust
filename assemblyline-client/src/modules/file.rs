@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use assemblyline_models::{Sha256, Classification};
+use assemblyline_models::datastore::file::File as FileModel;
+use assemblyline_models::datastore::result::Result as ResultModel;
 use serde::Deserialize;
 
 use crate::connection::{Connection, convert_api_output_string, convert_api_output_obj, convert_api_output_stream};
-use crate::models::Classification;
-use crate::types::{Sha256, IBool};
+use crate::types::IBool;
 use crate::types::Result;
-use crate::models::file::File as FileModel;
-use crate::models::result::Result as ResultModel;
 
 use super::api_path;
 

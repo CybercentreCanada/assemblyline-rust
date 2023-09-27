@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use assemblyline_models::Sha256;
 use chrono::{DateTime, Utc};
 use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
@@ -17,10 +18,10 @@ use serde_json::json;
 use tokio::io::AsyncSeekExt;
 use tokio_util::codec::{FramedRead, BytesCodec};
 use url::Url;
+use assemblyline_models::datastore::submission::{SubmissionParams, File};
 
-use crate::{JsonMap, types::Error, Sha256};
+use crate::{JsonMap, types::Error};
 use crate::connection::{Connection, convert_api_output_obj, Body};
-use crate::models::submission::{SubmissionParams, File};
 
 use super::api_path;
 

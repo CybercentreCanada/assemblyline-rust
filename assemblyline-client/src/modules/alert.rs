@@ -3,6 +3,8 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use assemblyline_models::datastore::workflow::{Priorities, Statuses};
+use assemblyline_models::datastore::alert::Alert as AlertModel;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
@@ -10,9 +12,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 
 use crate::JsonMap;
 use crate::connection::{Connection, convert_api_output_obj, convert_api_output_map, Body};
-use crate::models::workflow::{Priorities, Statuses};
 use crate::types::Result;
-use crate::models::alert::Alert as AlertModel;
 
 use super::api_path;
 use super::search::SearchResult;
@@ -89,19 +89,19 @@ impl Alert {
 
     /// List all alerts in the system (per page)
     pub fn list(&self) -> DetailedAlertQuery<SearchResult<Alert>> {
-        DetailedAlertQuery { 
+        DetailedAlertQuery {
             connection: self.connection.clone(),
             path: api_path!(ALERT_INDEX, "list"),
-            _type: Default::default(), 
-            filters: vec![], 
-            query: None, 
-            no_delay: false, 
-            offset: 0, 
-            rows: 10, 
-            tc_start: None, 
-            tc: None, 
-            use_archive: false, 
-            track_total_hits: None 
+            _type: Default::default(),
+            filters: vec![],
+            query: None,
+            no_delay: false,
+            offset: 0,
+            rows: 10,
+            tc_start: None,
+            tc: None,
+            use_archive: false,
+            track_total_hits: None
         }
     }
 
@@ -311,7 +311,7 @@ impl<Type: DeserializeOwned> DetailedAlertQuery<Type> {
         if let Some(track_total_hits) = self.track_total_hits {
             params.push(("track_total_hits".to_owned(), track_total_hits.to_string()));
         }
-        
+
         return self.connection.get_params(&self.path, params, convert_api_output_obj).await
     }
 }
@@ -348,7 +348,7 @@ impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
             no_delay: false,
         }
     }
-    
+
     fn post(connection: Arc<Connection>, path: String, body: Post) -> Self {
         AlertQuery {
             connection,
@@ -412,7 +412,7 @@ impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
         } else {
             return self.connection.get_params(&self.path, params, convert_api_output_obj).await
         }
-    } 
-    
+    }
+
 }
 
