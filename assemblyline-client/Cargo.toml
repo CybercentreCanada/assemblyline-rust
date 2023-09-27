@@ -16,7 +16,7 @@ strum = { version = "0.25", features = ["derive"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
-futures = "*"
+futures = "0.3"
 async-recursion = { version = "1" }
 
 url = "2"
