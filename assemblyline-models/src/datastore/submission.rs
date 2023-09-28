@@ -10,7 +10,7 @@ use crate::{JsonMap, Sha256, Classification, Uuid, ElasticMeta};
 
 
 /// Model of Submission
-#[derive(Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Submission {
@@ -177,7 +177,7 @@ pub struct ServiceSelection {
 }
 
 /// Submission-Relevant Times
-#[derive(Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Times {
@@ -190,7 +190,7 @@ pub struct Times {
 
 
 /// Submission Verdict
-#[derive(Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Verdict {
@@ -202,7 +202,7 @@ pub struct Verdict {
     pub non_malicious: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, strum::Display, Described)]
+#[derive(Serialize, Debug, PartialEq, Eq, strum::Display, Described)]
 #[metadata_type(ElasticMeta)]
 pub enum SubmissionState {
     Failed,
@@ -227,7 +227,7 @@ impl<'de> Deserialize<'de> for SubmissionState {
 
 
 /// File Model of Submission
-#[derive(Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {

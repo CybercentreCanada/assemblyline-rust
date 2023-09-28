@@ -1,152 +1,110 @@
+//! Interface for controlling the dispatch broker
+//!
+//! POST /submission/
+//! GET /submission/<sid>
+//! GET /health/
+//! WS /submission/finished
+//!
+
 use std::sync::Arc;
 
 use poem::http::StatusCode;
-use poem::listener::{TcpListener, OpensslTlsConfig};
+use poem::listener::{TcpListener, OpensslTlsConfig, Listener};
 use poem::web::{Data, Json, Redirect, Path};
-use poem::{EndpointExt, post, get, Server, handler, Response};
-use serde::Deserialize;
+use poem::{EndpointExt, post, get, Server, handler, Response, IntoResponse};
+use serde::{Deserialize, Serialize};
 
 use crate::logging::LoggerMiddleware;
+use crate::tls::random_tls_certificate;
+use crate::error::Error;
 
-use super::{BrokerSession, Error};
+use super::BrokerSession;
 
 
 pub async fn start_interface(session: Arc<BrokerSession>) -> Result<(), Error> {
 
+    let config = &session.config.core.dispatcher.broker_bind;
+
     let app = poem::Route::new()
         .at("/submission", post(post_submission))
         .at("/submission/:sid", get(get_submission))
-        .at("/relocate", post(post_relocate))
-        .at("/health", get(get_health))
+        .at("/health", get(get_health));
+
+    let app = match &config.path {
+        Some(route) => poem::Route::new().nest(route, app),
+        None => app,
+    };
+
+    let app = app
         .data(session.clone())
         .with(LoggerMiddleware);
 
-    let config = session.config.core.dispatcher.broker;
-
-    let listener = TcpListener::bind(config.bind_address);
-    let tls_config = match config.tls {
+    let listener = TcpListener::bind(config.address);
+    let tls_config = match &config.tls {
         Some(tls) => {
             OpensslTlsConfig::new()
-                .cert_from_data(tls.certificate_pem)
-                .key_from_data(tls.key_pem)
+                .cert_from_data(tls.certificate_pem.clone())
+                .key_from_data(tls.key_pem.clone())
         },
-        None => {
-            use openssl::{rsa::Rsa, x509::X509, pkey::PKey, asn1::{Asn1Integer, Asn1Time}, bn::BigNum};
-
-            // Generate our keypair
-            let key = Rsa::generate(1 << 11)?;
-            let pkey = PKey::from_rsa(key)?;
-
-            // Use that keypair to sign a certificate
-            let mut builder = X509::builder()?;
-
-            // Set serial number to 1
-            let one = BigNum::from_u32(1)?;
-            let serial_number = Asn1Integer::from_bn(&one)?;
-            builder.set_serial_number(&serial_number)?;
-
-            // set subject/issuer name
-            let mut name = openssl::x509::X509NameBuilder::new()?;
-            name.append_entry_by_text("C", "CA")?;
-            name.append_entry_by_text("ST", "ON")?;
-            name.append_entry_by_text("O", "Inside the house")?;
-            name.append_entry_by_text("CN", "localhost")?;
-            let name = name.build();
-            builder.set_issuer_name(&name)?;
-            builder.set_subject_name(&name)?;
-
-            // Set not before/after
-            let not_before = Asn1Time::from_unix((chrono::Utc::now() - chrono::Duration::days(1)).timestamp())?;
-            builder.set_not_before(&not_before)?;
-            let not_after = Asn1Time::from_unix((chrono::Utc::now() + chrono::Duration::days(366)).timestamp())?;
-            builder.set_not_after(&not_after)?;
-
-            // set public key
-            builder.set_pubkey(&pkey)?;
-
-            // sign and build
-            builder.sign(&pkey, openssl::hash::MessageDigest::sha256())?;
-            let cert = builder.build();
-
-            OpensslTlsConfig::new()
-                .cert_from_data(cert.to_pem()?)
-                .key_from_data(pkey.rsa()?.private_key_to_pem()?)
-        }
+        None => random_tls_certificate()?
     };
     let listener = listener.openssl_tls(tls_config);
 
-    let exit = tokio::spawn(async {
-        todo!()
+    let exit = tokio::spawn(async move {
+        while session.flags.running.load(std::sync::atomic::Ordering::Acquire) {
+            session.flags_changes.notified().await
+        }
     });
 
     Server::new(listener)
-        .run_with_graceful_shutdown(app, exit, None)
-        .await
+        .run_with_graceful_shutdown(app, async { exit.await; } , None)
+        .await?;
+    Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct StartSubmissionRequest {
-    submission: assemblyline_models::datastore::Submission
+    pub submission: assemblyline_models::datastore::Submission,
+    pub assignment: Option<String>
 }
+
 
 #[handler]
 async fn post_submission(
-    Data(session): Data<&Arc<BrokerSession>>, 
+    Data(session): Data<&Arc<BrokerSession>>,
     Json(request): Json<StartSubmissionRequest>,
-) -> Response {
+) -> poem::Result<Response> {
     // check if this submission belongs here or should be forwarded
-    let target_instance = session.assign_sid(request.submission.sid);
+    let target_instance = session.assign_sid(&request.submission.sid);
     if session.instance != target_instance {
-        let url = format!("https://{}/{}/submission", session.peer_address(target_instance), session.config.core.dispatcher.broker.path);
-        return Redirect::temporary(url).into().into();
+        let url = session.peer_url(target_instance, "submission")?;
+        return Ok(Redirect::temporary(url).into_response());
     }
 
-    // check if the submission is already present
-    if session.database.have_submission(&request.submission.sid).await? {
-        return StatusCode::OK.into()
-    }
-
-    // assign to a dispatcher
-    let dispatcher = session.select_dispatcher();
-    
-    // save to disk
-    session.database.assign_submission(&request).await?;
-
-    // notify the dispatcher
-    session.http_client.post();
+    session.assign_submission(request.submission, request.assignment).await?;
 
     // Return success
-    StatusCode::OK.into()
+    Ok(StatusCode::OK.into())
 }
 
 #[handler]
-fn get_submission(
-    Data(session): Data<&Arc<BrokerSession>>, 
+async fn get_submission(
+    Data(session): Data<&Arc<BrokerSession>>,
     Path(sid): Path<String>
-) -> Response {
+) -> poem::Result<Response> {
     // check if this submission belongs here or should be forwarded
-    let target_instance = session.assign_sid(sid);
+    let target_instance = session.assign_sid(&sid);
     if session.instance != target_instance {
-        return Redirect::temporary(session.peer_address(target_instance)).into().into();
+        let url = session.peer_url(target_instance, &format!("submission/{sid}"))?;
+        return Ok(Redirect::temporary(url).into_response())
     }
-    
+
     // get submission data
-    todo!();
-}
-
-#[handler]
-fn post_relocate() -> Response {
-    // check if this submission belongs here or should be rejected
-    todo!();
-
-    // check if the submission is already present
-    todo!();
-
-    // assign to a dispatcher
-    todo!();
-
-    // save to disk
-    todo!();
+    if let Some(submission) = session.database.get_submission(&sid).await? {
+        Ok(Json(submission).into_response())
+    } else {
+        Ok(StatusCode::NOT_FOUND.into())
+    }
 }
 
 #[handler]

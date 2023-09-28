@@ -5,6 +5,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 pub mod datastore;
+pub mod config;
 
 #[derive(Debug)]
 pub enum Error {
