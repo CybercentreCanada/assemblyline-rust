@@ -3,7 +3,7 @@
 //! POST /submission/
 //! GET /submission/<sid>
 //! DELETE /submission/<sid>
-//! WS /submission/finishing
+//! WS /updates/
 //! POST /start/<task_key>
 //! POST /result/<task_key>
 //! POST /error/<task_key>
@@ -13,8 +13,10 @@
 
 use std::sync::Arc;
 
+use assemblyline_models::datastore::Submission;
 use poem::listener::{TcpListener, OpensslTlsConfig, Listener};
 use poem::{post, get, Server, delete, Response, handler, EndpointExt};
+use serde::{Serialize, Deserialize};
 
 use crate::logging::LoggerMiddleware;
 use crate::tls::random_tls_certificate;
@@ -30,7 +32,7 @@ pub async fn start_interface(session: Arc<Session>) -> Result<(), Error> {
         .at("/submission/", post(post_submission))
         .at("/submission/:sid", get(get_submission))
         .at("/submission/:sid", delete(delete_submission))
-        .at("/submission/finishing", get(ws_finishing_submission))
+        .at("/updates/", get(ws_finishing_submission_and_status))
         .at("/start/:task_key", post(post_start_task))
         .at("/result/:task_key", post(post_result_task))
         .at("/error/:task_key", post(post_error_task))
@@ -85,8 +87,27 @@ fn delete_submission() -> Response {
     todo!()
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct LoadInfo {
+}
+
+impl LoadInfo {
+    pub fn stale() -> Self {
+        Self {
+
+        }
+    }
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub enum DispatchStatusMessage {
+    LoadInfo(LoadInfo),
+    Finished(Arc<Submission>)
+}
+
 #[handler]
-fn ws_finishing_submission() -> Response {
+fn ws_finishing_submission_and_status() -> Response {
     todo!()
 }
 

@@ -6,11 +6,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{JsonMap, Sha256, Classification, Uuid, ElasticMeta};
+use crate::{JsonMap, Sha256, Classification, ElasticMeta, Sid};
 
 
 /// Model of Submission
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Submission {
@@ -43,7 +43,7 @@ pub struct Submission {
     pub results: Vec<String>,
     /// Submission ID
     #[metadata(copyto="__text__")]
-    pub sid: Uuid,
+    pub sid: Sid,
     /// Status of the submission
     pub state: SubmissionState,
     /// This document is going to be deleted as soon as it finishes
@@ -65,7 +65,7 @@ pub struct Submission {
 
 
 /// Submission Parameters
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct SubmissionParams {
@@ -158,7 +158,7 @@ impl Default for SubmissionParams {
 
 
 /// Service Selection Scheme
-#[derive(Serialize, Deserialize, Default, Debug, Described)]
+#[derive(Serialize, Deserialize, Default, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct ServiceSelection {
@@ -177,7 +177,7 @@ pub struct ServiceSelection {
 }
 
 /// Submission-Relevant Times
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Times {
@@ -190,7 +190,7 @@ pub struct Times {
 
 
 /// Submission Verdict
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Verdict {
@@ -202,7 +202,7 @@ pub struct Verdict {
     pub non_malicious: Vec<String>,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq, strum::Display, Described)]
+#[derive(Serialize, Debug, PartialEq, Eq, strum::Display, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 pub enum SubmissionState {
     Failed,
@@ -227,7 +227,7 @@ impl<'de> Deserialize<'de> for SubmissionState {
 
 
 /// File Model of Submission
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {

@@ -11,7 +11,8 @@ pub mod config;
 pub enum Error {
     InvalidSha256(String),
     InvalidMd5(String),
-    InvalidSha1(String)
+    InvalidSha1(String),
+    InvalidSid(String),
 }
 
 impl Display for Error {
@@ -20,7 +21,14 @@ impl Display for Error {
             Error::InvalidSha256(content) => f.write_fmt(format_args!("Invalid value provided for a sha256: {content}")),
             Error::InvalidMd5(content) => f.write_fmt(format_args!("Invalid value provided for a md5: {content}")),
             Error::InvalidSha1(content) => f.write_fmt(format_args!("Invalid value provided for a sha1: {content}")),
+            Error::InvalidSid(content) => f.write_fmt(format_args!("Invalid value provided for a sid: {content}")),
         }
+    }
+}
+
+impl From<base62::DecodeError> for Error {
+    fn from(value: base62::DecodeError) -> Self {
+        Self::InvalidSid(value.to_string())
     }
 }
 
@@ -61,7 +69,7 @@ impl std::str::FromStr for UpperString {
 
 
 /// sha256 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Sha256 {
     hex: String
@@ -157,6 +165,31 @@ impl std::str::FromStr for Sha1 {
             return Err(Error::InvalidSha1(hex))
         }
         Ok(Sha1{ hex })
+    }
+}
+
+/// Validated uuid type with base62 encoding
+#[derive(SerializeDisplay, DeserializeFromStr, Debug, Described, Hash, PartialEq, Eq, Clone, Copy)]
+#[metadata_type(ElasticMeta)]
+pub struct Sid(u128);
+
+impl std::fmt::Display for Sid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&base62::encode(self.0))
+    }
+}
+
+impl std::str::FromStr for Sid {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Sid(base62::decode(s)?))
+    }
+}
+
+impl Sid {
+    pub fn assign(&self, bins: usize) -> usize {
+        (self.0 % bins as u128) as usize
     }
 }
 

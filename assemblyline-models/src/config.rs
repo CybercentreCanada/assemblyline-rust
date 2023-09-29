@@ -364,6 +364,7 @@ use struct_metadata::Described;
 #[derive(Deserialize, Default)]
 pub struct Dispatcher {
     pub broker_bind: BindDetails,
+    pub broker_storage_path: String,
 }
 
 #[derive(Deserialize)]

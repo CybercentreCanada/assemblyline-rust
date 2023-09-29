@@ -12,7 +12,7 @@ use crate::elastic::Elastic;
 use crate::error::Result;
 
 use self::interface::start_interface;
-
+pub use self::interface::{DispatchStatusMessage, LoadInfo};
 
 struct Flags {
     pub running: bool,
