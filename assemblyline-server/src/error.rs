@@ -29,6 +29,18 @@ impl From<openssl::error::ErrorStack> for Error {
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(value: serde_json::Error) -> Self {
+        todo!()
+    }
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for Error {
+    fn from(value: tokio_tungstenite::tungstenite::Error) -> Self {
+        todo!()
+    }
+}
+
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         todo!()

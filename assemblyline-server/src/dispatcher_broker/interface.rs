@@ -3,17 +3,23 @@
 //! POST /submission/
 //! GET /submission/<sid>
 //! GET /health/
-//! WS /submission/finished
+//! WS /finished/
 //!
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
+use assemblyline_models::Sid;
+use assemblyline_models::datastore::Submission;
+use futures::{SinkExt, StreamExt};
 use poem::http::StatusCode;
 use poem::listener::{TcpListener, OpensslTlsConfig, Listener};
+use poem::web::websocket::{WebSocket, Message};
 use poem::web::{Data, Json, Redirect, Path};
-use poem::{EndpointExt, post, get, Server, handler, Response, IntoResponse};
+use poem::{EndpointExt, post, get, Server, handler, Response, IntoResponse, delete};
 use serde::{Deserialize, Serialize};
 
+use crate::dispatcher_broker::PeerSubscribeMessage;
 use crate::logging::LoggerMiddleware;
 use crate::tls::random_tls_certificate;
 use crate::error::Error;
@@ -28,7 +34,9 @@ pub async fn start_interface(session: Arc<BrokerSession>) -> Result<(), Error> {
     let app = poem::Route::new()
         .at("/submission", post(post_submission))
         .at("/submission/:sid", get(get_submission))
-        .at("/health", get(get_health));
+        .at("/submission/:sid", delete(delete_submission))
+        .at("/health", get(get_health))
+        .at("/finished", get(stream_finished));
 
     let app = match &config.path {
         Some(route) => poem::Route::new().nest(route, app),
@@ -65,7 +73,7 @@ pub async fn start_interface(session: Arc<BrokerSession>) -> Result<(), Error> {
 #[derive(Serialize, Deserialize)]
 pub struct StartSubmissionRequest {
     pub submission: assemblyline_models::datastore::Submission,
-    pub assignment: Option<String>
+    pub assignment: Option<SocketAddr>
 }
 
 
@@ -75,7 +83,7 @@ async fn post_submission(
     Json(request): Json<StartSubmissionRequest>,
 ) -> poem::Result<Response> {
     // check if this submission belongs here or should be forwarded
-    let target_instance = session.assign_sid(&request.submission.sid);
+    let target_instance = request.submission.sid.assign(session.instance_count);
     if session.instance != target_instance {
         let url = session.peer_url(target_instance, "submission")?;
         return Ok(Redirect::temporary(url).into_response());
@@ -88,12 +96,29 @@ async fn post_submission(
 }
 
 #[handler]
-async fn get_submission(
+async fn delete_submission(
     Data(session): Data<&Arc<BrokerSession>>,
-    Path(sid): Path<String>
+    Path(sid): Path<Sid>
 ) -> poem::Result<Response> {
     // check if this submission belongs here or should be forwarded
-    let target_instance = session.assign_sid(&sid);
+    let target_instance = sid.assign(session.instance_count);
+    if session.instance != target_instance {
+        let url = session.peer_url(target_instance, &format!("submission/{sid}"))?;
+        return Ok(Redirect::temporary(url).into_response())
+    }
+
+    // get submission data
+    session.database.delete_submission(&sid).await?;
+    Ok(StatusCode::OK.into_response())
+}
+
+#[handler]
+async fn get_submission(
+    Data(session): Data<&Arc<BrokerSession>>,
+    Path(sid): Path<Sid>
+) -> poem::Result<Response> {
+    // check if this submission belongs here or should be forwarded
+    let target_instance = sid.assign(session.instance_count);
     if session.instance != target_instance {
         let url = session.peer_url(target_instance, &format!("submission/{sid}"))?;
         return Ok(Redirect::temporary(url).into_response())
@@ -110,4 +135,43 @@ async fn get_submission(
 #[handler]
 fn get_health() -> Response {
     todo!();
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum SubmissionMessage {
+    Finished(Arc<Submission>),
+    Lagged,
+}
+
+#[handler]
+async fn stream_finished(ws: WebSocket, Data(session): Data<&Arc<BrokerSession>>) -> impl IntoResponse {
+    use tokio::sync::broadcast::error::RecvError;
+    let mut finished = session.finished_submissions.resubscribe();
+    ws.on_upgrade(|mut socket| async move {
+        loop {
+            tokio::select! {
+                message = finished.recv() => {
+                    let message = match message {
+                        Ok(message) => match message {
+                            PeerSubscribeMessage::Finished(message) => SubmissionMessage::Finished(message),
+                            PeerSubscribeMessage::Lagged => SubmissionMessage::Lagged,
+                        },
+                        Err(RecvError::Closed) => return,
+                        Err(RecvError::Lagged(_)) => SubmissionMessage::Lagged,
+                    };
+                    let message = match serde_json::to_string(&message) {
+                        Ok(message) => message,
+                        Err(_) => continue,
+                    };
+                    let _ = socket.send(Message::Text(message)).await;
+                }
+                message = socket.next() => {
+                    match message {
+                        Some(_) => {},
+                        None => return,
+                    }
+                }
+            }
+        }
+    })
 }
