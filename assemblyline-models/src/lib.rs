@@ -69,7 +69,7 @@ impl std::str::FromStr for UpperString {
 
 
 /// sha256 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 pub struct Sha256 {
     hex: String

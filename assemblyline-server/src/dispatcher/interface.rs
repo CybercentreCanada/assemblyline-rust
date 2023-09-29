@@ -4,20 +4,26 @@
 //! GET /submission/<sid>
 //! DELETE /submission/<sid>
 //! WS /updates/
-//! POST /start/<task_key>
-//! POST /result/<task_key>
-//! POST /error/<task_key>
+//! POST /task/start
+//! POST /task/result
+//! POST /task/error
 //! GET /health/
 //! GET /stats/
 //!
 
 use std::sync::Arc;
 
+use assemblyline_models::datastore::submission::SubmissionState;
+use assemblyline_models::{Sid, Sha256};
 use assemblyline_models::datastore::Submission;
 use poem::listener::{TcpListener, OpensslTlsConfig, Listener};
-use poem::{post, get, Server, delete, Response, handler, EndpointExt};
+use poem::web::{Data, Json, Path};
+use poem::http::StatusCode;
+use poem::{post, get, Server, delete, Response, handler, EndpointExt, IntoResponse};
 use serde::{Serialize, Deserialize};
 
+use crate::dispatcher::submission::process_submission;
+use crate::dispatcher::{TaskSignature, ResultMessage, ResultResponse};
 use crate::logging::LoggerMiddleware;
 use crate::tls::random_tls_certificate;
 use crate::error::Error;
@@ -33,9 +39,9 @@ pub async fn start_interface(session: Arc<Session>) -> Result<(), Error> {
         .at("/submission/:sid", get(get_submission))
         .at("/submission/:sid", delete(delete_submission))
         .at("/updates/", get(ws_finishing_submission_and_status))
-        .at("/start/:task_key", post(post_start_task))
-        .at("/result/:task_key", post(post_result_task))
-        .at("/error/:task_key", post(post_error_task))
+        .at("/task/start", post(post_start_task))
+        .at("/task/result", post(post_result_task))
+        .at("/task/error", post(post_error_task))
         .at("/health/", get(get_health))
         .at("/stats/", get(get_stats));
 
@@ -71,20 +77,73 @@ pub async fn start_interface(session: Arc<Session>) -> Result<(), Error> {
     Ok(())
 }
 
+#[derive(Serialize, Deserialize)]
+enum PostSubmissionStatus {
+    Running,
+    Finished,
+}
 
-#[handler]
-fn post_submission() -> Response {
-    todo!()
+#[derive(Serialize, Deserialize)]
+pub struct PostSubmissionResponse {
+    pub status: PostSubmissionStatus
 }
 
 #[handler]
-fn get_submission() -> Response {
-    todo!()
+async fn post_submission(
+    Data(session): Data<&Arc<Session>>,
+    Json(submission): Json<Submission>
+) -> poem::Result<Json<PostSubmissionResponse>> {
+    // Check if its in the finished table
+    if session.finished.read().await.contains_key(&submission.sid) {
+        return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
+    }
+
+    // Test if the submission is already finished in elasticsearch
+    if let Some(sub) = session.elastic.submission.get(&submission.sid.to_string()).await? {
+        if let SubmissionState::Completed = sub.state {
+            session.finished.write().await.insert(sub.sid, sub);
+            return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
+        }
+    }
+
+    // See if we can launch this as a new submission
+    let mut active = session.active.write().await;
+    match active.entry(submission.sid) {
+        std::collections::hash_map::Entry::Occupied(_) => {
+            Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
+        },
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(tokio::spawn(process_submission(session.clone(), submission)));
+            Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
+        },
+    }
+}
+
+// #[derive(Serialize, Deserialize)]
+// pub struct PostSubmissionResponse {
+//     pub status: PostSubmissionStatus
+// }
+
+#[handler]
+async fn get_submission(
+    Data(session): Data<&Arc<Session>>,
+    Path(sid): Path<Sid>,
+) -> poem::Result<Response> {
+    if session.active.read().await.contains_key(&sid) {
+        return Ok(StatusCode::NO_CONTENT.into())
+    }
+    if let Some(submission) = session.finished.read().await.get(&sid) {
+        return Ok(Json(submission).into_response())
+    }
+    return Ok(StatusCode::NOT_FOUND.into())
 }
 
 #[handler]
-fn delete_submission() -> Response {
-    todo!()
+async fn delete_submission(
+    Data(session): Data<&Arc<Session>>,
+    Path(sid): Path<Sid>
+) {
+    session.finished.write().await.remove(&sid);
 }
 
 #[derive(Serialize, Deserialize)]
@@ -116,14 +175,50 @@ fn post_start_task() -> Response {
     todo!()
 }
 
-#[handler]
-fn post_result_task() -> Response {
-    todo!()
+
+#[derive(Serialize, Deserialize)]
+pub struct TaskResult {
+    pub sid: Sid,
+    pub service_name: String,
+    pub sha256: Sha256,
+
+    pub worker: String,
 }
 
 #[handler]
-fn post_error_task() -> Response {
-    todo!()
+async fn post_result_task(
+    Data(session): Data<&Arc<Session>>,
+    Json(result): Json<TaskResult>
+) {
+    let sig = TaskSignature {
+        hash: result.sha256.clone(),
+        service: result.service_name.clone(),
+        sid: result.sid,
+    };
+    session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Result(result))).await;
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TaskError {
+    pub sid: Sid,
+    pub service_name: String,
+    pub sha256: Sha256,
+
+    pub worker: String,
+
+}
+
+#[handler]
+async fn post_error_task(
+    Data(session): Data<&Arc<Session>>,
+    Json(result): Json<TaskError>
+) {
+    let sig = TaskSignature {
+        hash: result.sha256.clone(),
+        service: result.service_name.clone(),
+        sid: result.sid,
+    };
+    session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Error(result))).await;
 }
 
 #[handler]

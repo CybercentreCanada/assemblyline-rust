@@ -59,6 +59,12 @@ impl From<reqwest::Error> for Error {
     }
 }
 
+impl From<tokio::task::JoinError> for Error {
+    fn from(value: tokio::task::JoinError) -> Self {
+        todo!()
+    }
+}
+
 impl From<()> for Error {
     fn from(value: ()) -> Self {
         todo!()
