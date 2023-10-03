@@ -14,7 +14,6 @@ mod modules;
 
 use std::sync::Arc;
 
-use connection::Connection;
 use modules::file::File;
 use modules::help::Help;
 use modules::alert::Alert;
@@ -24,6 +23,7 @@ use modules::search::Search;
 use modules::ingest::Ingest;
 use modules::submit::Submit;
 pub use types::{Authentication, JsonMap};
+pub use connection::Connection;
 
 
 /// A client to communicate with the Assemblyline API

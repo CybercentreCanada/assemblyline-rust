@@ -129,7 +129,7 @@ impl Connection {
     //     // return self.request(self.session.get, path, convert_api_output, **kw)
     //     todo!()
     // }
-    pub async fn get_params<Resp, F>(&self, path: &str, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
+    pub (crate) async fn get_params<Resp, F>(&self, path: &str, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
         where F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
         let params = if params.is_empty() {
@@ -141,13 +141,13 @@ impl Connection {
         return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, params).await?).await
     }
 
-    pub async fn get<Resp, F>(&self, path: &str, con: F) -> Result<Resp, Error>
+    pub (crate) async fn get<Resp, F>(&self, path: &str, con: F) -> Result<Resp, Error>
         where F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
         return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, None).await?).await
     }
 
-    pub async fn get_with<Req, Resp, F>(&self, path: &str, body: Req, con: F) -> Result<Resp, Error>
+    pub (crate) async fn get_with<Req, Resp, F>(&self, path: &str, body: Req, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
               F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
