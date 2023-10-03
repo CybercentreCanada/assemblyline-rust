@@ -62,6 +62,8 @@ pub enum Error {
     Serialization(serde_json::Error),
     /// An unexpected state was reached serializing submission parameters
     ParameterSerialization,
+    /// A configuration value which has caused errors
+    Configuration(String),
 }
 
 impl Error {
@@ -93,6 +95,8 @@ impl Display for Error {
                 f.write_fmt(format_args!("An error occurred serializing a body: {error}")),
             Error::ParameterSerialization =>
                 f.write_str("Parameter serialization yielded unexpected type."),
+            Error::Configuration(message) =>
+                f.write_fmt(format_args!("A configuration parameter caused an error: {message}")),
         }
     }
 }

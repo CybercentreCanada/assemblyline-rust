@@ -1,6 +1,7 @@
 
 use std::collections::HashMap;
 
+use base64::Engine;
 use log::{debug, error};
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
@@ -47,7 +48,17 @@ impl Connection {
 
         // insert certificate
         if let Some(cert) = cert {
-            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(cert.as_bytes())?);
+            let cert = cert.trim();
+            let cert = if cert.contains("-----BEGIN ") {
+                cert.as_bytes().to_vec()
+            } else {
+                match base64::prelude::BASE64_STANDARD.decode(cert) {
+                    Ok(cert) => cert,
+                    Err(_) => return Err(Error::Configuration(format!("Couldn't understand the ca cert value: {cert}"))),
+                }
+            };
+
+            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(&cert)?);
         }
 
         // build headers

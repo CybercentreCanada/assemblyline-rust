@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-client"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -19,6 +19,7 @@ tokio-util = "0.7"
 futures = "0.3"
 async-recursion = { version = "1" }
 
+base64 = "0.21"
 url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
