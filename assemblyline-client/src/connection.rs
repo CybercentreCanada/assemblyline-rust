@@ -12,7 +12,7 @@ use crate::types::{Authentication, JsonMap, Error};
 
 
 /// A connection abstraction to handle queries
-pub (crate) struct Connection {
+pub struct Connection {
     client: reqwest::Client,
     server: String,
     max_retries: Option<u32>,
@@ -137,7 +137,7 @@ impl Connection {
         } else {
             Some(params)
         };
-        
+
         return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, params).await?).await
     }
 
@@ -154,14 +154,14 @@ impl Connection {
         return con(self.request(reqwest::Method::GET, path, Body::Json(body), None, None).await?).await
     }
 
-    pub async fn post<Req, Resp, F>(&self, path: &str, body: Body<Req>, con: F) -> Result<Resp, Error>
+    pub (crate) async fn post<Req, Resp, F>(&self, path: &str, body: Body<Req>, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
               F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
         return con(self.request(reqwest::Method::POST, path, body, None, None).await?).await
     }
 
-    pub async fn post_params<Req, Resp, F>(&self, path: &str, body: Body<Req>, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
+    pub (crate) async fn post_params<Req, Resp, F>(&self, path: &str, body: Body<Req>, params: Vec<(String, String)>, con: F) -> Result<Resp, Error>
         where Req: serde::Serialize,
               F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, Error>>
     {
@@ -170,7 +170,7 @@ impl Connection {
         } else {
             Some(params)
         };
-        
+
         return con(self.request(reqwest::Method::POST, path, body, None, params).await?).await
     }
 
@@ -178,7 +178,7 @@ impl Connection {
 //     return self.request(self.session.put, path, convert_api_output, **kw)
 
     /// Detailed method to make an http request
-    pub async fn request<Req>(&self,
+    pub (crate) async fn request<Req>(&self,
         method: reqwest::Method,
         path: &str,
         mut body: Body<Req>,

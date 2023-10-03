@@ -79,6 +79,22 @@ impl Client {
             // _connection,
         })
     }
+
+    /// Connect to an assemblyline system
+    pub async fn from_connection(connection: Arc<Connection>) -> Result<Self, types::Error> {
+        // let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), Some(cert), None).await?);
+        Ok(Self {
+            alert: Alert::new(connection.clone()),
+            bundle: Bundle::new(connection.clone()),
+            error: Error::new(connection.clone()),
+            file: File::new(connection.clone()),
+            help: Help::new(connection.clone()),
+            ingest: Ingest::new(connection.clone()),
+            search: Search::new(connection.clone()),
+            submit: Submit::new(connection)
+            // _connection,
+        })
+    }
 }
 
 
