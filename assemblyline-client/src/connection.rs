@@ -261,6 +261,7 @@ impl Connection {
                     // for connection errors continue, previously this would not include
                     // ssl or proxy errors
                     if err.is_connect() {
+                        error!("TLS Error: {}", err);
                         continue
                     }
 
