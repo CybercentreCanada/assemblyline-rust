@@ -1128,6 +1128,10 @@ impl ClassificationParser {
         return self._get_normalized_classification_text(ParsedClassification { level, required, groups, subgroups }, long_format, true)
     }
 
+    /// Get all the levels found in this config
+    pub fn levels(&self) -> &HashMap<i32, ClassificationLevel> {
+        &self.levels
+    }
 }
 
 /// values describing a classification string after parsing
