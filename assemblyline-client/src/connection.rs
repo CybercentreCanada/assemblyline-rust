@@ -43,7 +43,7 @@ impl rustls::client::ServerCertVerifier for OnlyCAVerify {
 }
 
 /// Specifiy how the client should perform its tls verification
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum TLSSettings {
     /// Use the native set of certificates
     Native,
