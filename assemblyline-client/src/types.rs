@@ -141,6 +141,12 @@ impl From<url::ParseError> for Error {
     }
 }
 
+impl From<rustls::Error> for Error {
+    fn from(value: rustls::Error) -> Self {
+        Self::Configuration(format!("Error loading tls certificates: {value}"))
+    }
+}
+
 impl std::error::Error for Error {
 
 }

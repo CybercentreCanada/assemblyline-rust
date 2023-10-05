@@ -1,16 +1,84 @@
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::Engine;
 use log::{debug, error};
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
+use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use futures::future::BoxFuture;
 
 use crate::types::{Authentication, JsonMap, Error};
 
+
+struct OnlyCAVerify {
+    preferred: rustls::RootCertStore,
+}
+
+impl OnlyCAVerify {
+    fn new(preferred: rustls::RootCertStore) -> Self {
+        Self { preferred }
+    }
+}
+
+impl rustls::client::ServerCertVerifier for OnlyCAVerify {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::Certificate,
+        intermediates: &[rustls::Certificate],
+        _server_name: &rustls::ServerName,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _ocsp_response: &[u8],
+        now: std::time::SystemTime,
+    ) -> std::result::Result<rustls::client::ServerCertVerified, rustls::Error> {
+        use rustls::client::verify_server_cert_signed_by_trust_anchor;
+
+        let cert = rustls::server::ParsedCertificate::try_from(end_entity)?;
+        verify_server_cert_signed_by_trust_anchor(&cert, &self.preferred, intermediates, now)?;
+        Ok(rustls::client::ServerCertVerified::assertion())
+    }
+}
+
+/// Specifiy how the client should perform its tls verification
+#[derive(Serialize, Deserialize)]
+pub enum TLSSettings {
+    /// Use the native set of certificates
+    Native,
+    /// Use the native set of certificates and the given certificate
+    CARoot(String),
+    /// Use the given certificate and only verify against it doing no other checks
+    UnsafeClusterCARoot(String),
+    /// Just let any old certificate work
+    UnsafeNoVerify,
+}
+
+impl Default for TLSSettings { fn default() -> Self { Self::Native }}
+
+fn unpack_certs(cert: String) -> Result<Vec<u8>, Error> {
+    let cert = cert.trim();
+    let cert = if cert.contains("-----BEGIN ") {
+        cert.as_bytes().to_vec()
+    } else {
+        match base64::prelude::BASE64_STANDARD.decode(cert) {
+            Ok(cert) => cert,
+            Err(_) => return Err(Error::Configuration(format!("Couldn't understand the ca cert value: {cert}"))),
+        }
+    };
+
+    Ok(cert)
+}
+
+fn to_rustls_certs(cert: Vec<u8>) -> Result<rustls::RootCertStore, Error> {
+    let mut reader = std::io::BufReader::new(&cert[..]);
+    let mut store = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut reader)? {
+        store.add(&rustls::Certificate(cert))?;
+    }
+    return Ok(store)
+}
 
 /// A connection abstraction to handle queries
 pub struct Connection {
@@ -21,12 +89,12 @@ pub struct Connection {
 //     self.debug = debug
 //     self.is_v4 = False
 //     self.silence_warnings = silence_warnings
-    _verify: bool,
     default_timeout: Option<f64>,
 
     session_header_label: reqwest::header::HeaderName,
     session_token: tokio::sync::RwLock<Option<reqwest::header::HeaderValue>>,
 }
+
 
 impl Connection {
     /// Connect to an assemblyline system
@@ -34,32 +102,40 @@ impl Connection {
         server: String,
         auth: Authentication,
         retry: Option<u32>,
-        verify: bool,
+        verify: TLSSettings,
         raw_headers: HashMap<String, String>,
-        cert: Option<String>,
         timeout: Option<f64>
     ) -> Result<Self, Error> {
-        let mut builder = if verify {
-            reqwest::Client::builder()
-        } else {
-            reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+        let builder = match verify {
+            TLSSettings::Native => {
+                reqwest::Client::builder()
+                    .tls_built_in_root_certs(true)
+                    .use_rustls_tls()
+            },
+            TLSSettings::CARoot(root) => {
+                reqwest::Client::builder()
+                    .tls_built_in_root_certs(true)
+                    .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(root)?)?)
+                    .use_rustls_tls()
+            },
+            TLSSettings::UnsafeClusterCARoot(root) => {
+                let store = to_rustls_certs(unpack_certs(root)?)?;
+                let verify = OnlyCAVerify::new(store);
+
+                let connector = rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_custom_certificate_verifier(Arc::new(verify))
+                    .with_no_client_auth();
+
+                reqwest::Client::builder()
+                    .use_preconfigured_tls(connector)
+            },
+            TLSSettings::UnsafeNoVerify => {
+                reqwest::Client::builder()
+                    .danger_accept_invalid_certs(true)
+                    .use_rustls_tls()
+            },
         };
-
-        // insert certificate
-        if let Some(cert) = cert {
-            let cert = cert.trim();
-            let cert = if cert.contains("-----BEGIN ") {
-                cert.as_bytes().to_vec()
-            } else {
-                match base64::prelude::BASE64_STANDARD.decode(cert) {
-                    Ok(cert) => cert,
-                    Err(_) => return Err(Error::Configuration(format!("Couldn't understand the ca cert value: {cert}"))),
-                }
-            };
-
-            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(&cert)?);
-        }
 
         // build headers
         let mut headers = HeaderMap::new();
@@ -79,7 +155,6 @@ impl Connection {
             server,
             max_retries: retry,
             authentication: auth,
-            _verify: verify,
             default_timeout: timeout,
             session_header_label: reqwest::header::HeaderName::from_lowercase(b"x-xsrf-token")?,
             session_token: tokio::sync::RwLock::new(None),

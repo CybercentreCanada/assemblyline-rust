@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-client"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -8,7 +8,10 @@ homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
 description = """A client for the Assemblyline malware analysis platform."""
 
 [dependencies]
-reqwest = { version = "0.11", features = ["json", "cookies", "multipart", "stream"] }
+reqwest = { version = "0.11", features = ["json", "cookies", "multipart", "stream", "gzip", "brotli", "deflate", "rustls-tls-native-roots"] }
+rustls = { version = "0.21.7", features = ["dangerous_configuration"] }
+rustls-pemfile = "1.0"
+
 serde = { version = "1.0", features = ["derive", "std"] }
 serde_with = "3.3"
 serde_json = "1.0"

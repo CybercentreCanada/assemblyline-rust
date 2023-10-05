@@ -23,7 +23,7 @@ use modules::search::Search;
 use modules::ingest::Ingest;
 use modules::submit::Submit;
 pub use types::{Authentication, JsonMap};
-pub use connection::Connection;
+pub use connection::{Connection, TLSSettings};
 
 
 /// A client to communicate with the Assemblyline API
@@ -66,7 +66,7 @@ pub struct Client {
 impl Client {
     /// Connect to an assemblyline system
     pub async fn connect(server: String, auth: Authentication) -> Result<Self, types::Error> {
-        let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), None, None).await?);
+        let connection = Arc::new(Connection::connect(server, auth, None, connection::TLSSettings::Native, Default::default(), None).await?);
         Ok(Self {
             alert: Alert::new(connection.clone()),
             bundle: Bundle::new(connection.clone()),
