@@ -312,6 +312,14 @@ impl ClassificationSubGroup {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NameString(String);
 
+impl core::ops::Deref for NameString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
+}
+
 impl std::str::FromStr for NameString {
     type Err = Errors;
 
@@ -332,7 +340,7 @@ impl core::fmt::Display for NameString {
 
 impl NameString {
     /// Access the raw string data behind this object
-    pub (crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.0
     }
 }
