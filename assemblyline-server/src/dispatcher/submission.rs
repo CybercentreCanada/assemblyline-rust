@@ -2,6 +2,7 @@ use std::collections::{HashSet, HashMap};
 use std::sync::Arc;
 
 use assemblyline_models::Sha256;
+use assemblyline_models::datastore::submission::SubmissionState;
 use assemblyline_models::datastore::{Submission, file};
 use log::error;
 use tokio::sync::mpsc;
@@ -14,7 +15,19 @@ use super::{Session};
 use super::file::{FileData, ExtractedFile};
 
 /// Process a submission through to completion
-pub async fn process_submission(session: Arc<Session>, submission: Submission) {
+pub async fn process_submission(session: Arc<Session>, submission: Submission) -> Result<Submission> {
+
+    // submission: Submission,
+    // session: Arc<Session>,
+    // finished_files: HashMap<Sha256, FileResult>,
+    // dropped_files: HashSet<Sha256>,
+
+    // Check if its in the database
+    if let Some(db_sub) = session.elastic.submission.get(&submission.sid.to_string()).await? {
+        if db_sub.state != SubmissionState::Submitted {
+            return Ok(db_sub)
+        }
+    }
 
     // # Refresh the quota hold
     // if submission.params.quota_item and submission.params.submitter:
@@ -27,22 +40,66 @@ pub async fn process_submission(session: Arc<Session>, submission: Submission) {
     //         'sender': 'dispatcher',
     //     }).as_primitives())
 
-    // Run until finished
-    let mut attempts = 0;
-    let result = loop {
-        let ctx = SubmissionContext::new(session, submission);
-        let err: Error = match tokio::spawn(ctx.process()).await {
-            Ok(Ok(result)) => break Ok(result),
-            Ok(Err(err)) => err,
-            Err(err) => err.into(),
+    // Setup context
+    let mut processing_files: JoinSet<Result<FileResult>> = JoinSet::new();
+    let mut file_info: HashMap<Sha256, FileData> = Default::default();
+    let (start_file_send, start_file_recv) = mpsc::channel(32);
+
+
+    // # Apply initial data parameter
+    todo!();
+    // if submission.params.initial_data:
+    //     try:
+    //         task.file_temporary_data[sha256] = {
+    //             key: value
+    //             for key, value in dict(json.loads(submission.params.initial_data)).items()
+    //             if len(str(value)) <= self.config.submission.max_temp_data_length
+    //         }
+
+    //     except (ValueError, TypeError) as err:
+    //         self.log.warning(f"[{sid}] could not process initialization data: {err}")
+
+    // # Initialize ancestry chain by identifying the root file
+    todo!();
+    // file_info = self.get_fileinfo(task, sha256)
+    // file_type = file_info.type if file_info else 'NOT_FOUND'
+    // task.file_temporary_data[sha256]['ancestry'] = [[dict(type=file_type, parent_relation="ROOT", sha256=sha256)]]
+
+    // dispatch initial file
+    {
+        let data = FileData {
+            sha256: submission.file.sha256.clone(),
+            depth: 0,
+            name: submission.file.name.clone(),
         };
-        attempts += 1;
-        if attempts > 5 {
-            break Err(err)
-        } else {
-            error!("Error in dispatching submission: {err}");
+        file_info.insert(data.sha256.clone(), data.clone());
+        processing_files.spawn(process_file(session.clone(), start_file_send, data));
+    }
+
+    // wait for changes
+    loop {
+        tokio::select! {
+            biased;
+            // wait for any new files to be suggested
+            file_message = start_file_recv.recv() => {
+                start_extracted_file(file_message).await
+            }
+
+            // wait for any files to finish
+            finished = processing_files.join_next() => {
+                match finished {
+                    Some(Ok(Ok(finished))) => { self.file_finished(finished).await; },
+                    Some(Ok(Err(err))) => { self.save_dispatch_error(err); },
+                    Some(Err(err)) => { self.save_dispatch_error(err.into()); },
+                    None => break,
+                }
+            }
         }
-    };
+    }
+
+    // collect results and update submission
+    todo!();
+
 
     // post processing
     todo!();
@@ -52,164 +109,80 @@ pub async fn process_submission(session: Arc<Session>, submission: Submission) {
     todo!("update finished/running structs in session");
 }
 
+async fn start_extracted_file(start: Option<ExtractedFile>) {
+    // Unwrap the message
+    let start = match start {
+        Some(message) => message,
+        None => return,
+    };
 
-struct SubmissionContext {
-    submission: Submission,
-    session: Arc<Session>,
-    processing_files: JoinSet<Result<FileResult>>,
-    finished_files: HashMap<Sha256, FileResult>,
-    file_info: HashMap<Sha256, FileData>,
-    dropped_files: HashSet<Sha256>,
-    start_file_send: mpsc::Sender<ExtractedFile>,
-    start_file_recv: mpsc::Receiver<ExtractedFile>,
-}
+    // Check if this file has already been dropped or excluded
+    if self.dropped_files.contains(&start.sha256) { return }
 
-impl SubmissionContext {
-    fn new() -> Self {
-        todo!()
+    // Enforce the max extracted limit
+    if self.file_info.len() >= self.submission.params.max_extracted as usize {
+        self.dropped_files.insert(start.sha256);
+        self.save_max_extracted_error(start).await;
+        return
     }
 
-    async fn process(self) -> Result<Submission> {
+    // Fetch the info about the parent of this file
+    let parent = self.file_info.get(&start.parent).clone();
 
-        // # Apply initial data parameter
-        // if submission.params.initial_data:
-        //     try:
-        //         task.file_temporary_data[sha256] = {
-        //             key: value
-        //             for key, value in dict(json.loads(submission.params.initial_data)).items()
-        //             if len(str(value)) <= self.config.submission.max_temp_data_length
-        //         }
-
-        //     except (ValueError, TypeError) as err:
-        //         self.log.warning(f"[{sid}] could not process initialization data: {err}")
-
-        // # Initialize ancestry chain by identifying the root file
-        // file_info = self.get_fileinfo(task, sha256)
-        // file_type = file_info.type if file_info else 'NOT_FOUND'
-        // task.file_temporary_data[sha256]['ancestry'] = [[dict(type=file_type, parent_relation="ROOT", sha256=sha256)]]
-
-        // # Start the file dispatching
-        // task.active_files.add(sha256)
-        // action = DispatchAction(kind=Action.dispatch_file, sid=sid, sha=sha256)
-        // self.find_process_queue(sid).put(action)
-
-
-        // dispatch initial file
-        {
-            let file = self.submission.file.clone();
-            let data = FileData {
-                sha256: file.sha256.clone(),
-                depth: 0,
-                name: file.name.clone(),
+    // Create the info packet about this file
+    let data = match self.file_info.entry(start.sha256.clone()) {
+        // File already started
+        std::collections::hash_map::Entry::Occupied(entry) => { return; },
+        // create new data for this file
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            let data = match parent {
+                Some(parent) => FileData { sha256: start.sha256, depth: parent.depth + 1, name: start.name },
+                None => FileData { sha256: start.sha256, depth: 1, name: start.name },
             };
-            self.file_info.insert(file.sha256.clone(), data.clone());
-            self.processing_files.spawn(todo!());
-        }
+            entry.insert(data.clone());
+            data
+        },
+    };
 
-        // wait for changes
-        loop {
-            tokio::select! {
-                biased;
-                // wait for any new files to be suggested
-                file_message = self.start_file_recv.recv() => {
-                    self.start_extracted_file(file_message).await
-                }
-
-                // wait for any files to finish
-                finished = self.processing_files.join_next() => {
-                    match finished {
-                        Some(Ok(Ok(finished))) => { self.file_finished(finished).await; },
-                        Some(Ok(Err(err))) => { self.save_dispatch_error(err); },
-                        Some(Err(err)) => { self.save_dispatch_error(err.into()); },
-                        None => break,
-                    }
-                }
-            }
-        }
-
-        // collect results
-        todo!();
-
-
-    }
-
-    async fn start_extracted_file(&self, start: Option<ExtractedFile>) {
-        // Unwrap the message
-        let start = match start {
-            Some(message) => message,
-            None => return,
-        };
-
-        // Check if this file has already been dropped or excluded
-        if self.dropped_files.contains(&start.sha256) { return }
-
-        // Enforce the max extracted limit
-        if self.file_info.len() >= self.submission.params.max_extracted as usize {
-            self.dropped_files.insert(start.sha256);
-            self.save_max_extracted_error(start).await;
-            return
-        }
-
-        // Fetch the info about the parent of this file
-        let parent = self.file_info.get(&start.parent).clone();
-
-        // Create the info packet about this file
-        let data = match self.file_info.entry(start.sha256.clone()) {
-            // File already started
-            std::collections::hash_map::Entry::Occupied(entry) => { return; },
-            // create new data for this file
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let data = match parent {
-                    Some(parent) => FileData { sha256: start.sha256, depth: parent.depth + 1, name: start.name },
-                    None => FileData { sha256: start.sha256, depth: 1, name: start.name },
-                };
-                entry.insert(data.clone());
-                data
-            },
-        };
-
-        // Kick off this file for processing
-        self.processing_files.spawn(todo!());
-    }
-
-    async fn file_finished(&self, result: FileResult) {
-        match finished_file {
-            Some(finished_file) => match finished_file {
-                Ok(_) => todo!(),
-                Err(_) => todo!(),
-            },
-            None => break,
-        }
-    }
-
-    async fn save_max_extracted_error(&self, start: ExtractedFile) {
-        todo!()
-        // self.log.info(f'[{sid}] hit extraction limit, dropping {extracted_sha256}')
-        // task.dropped_files.add(extracted_sha256)
-        // self._dispatching_error(task, Error({
-        //     'archive_ts': None,
-        //     'expiry_ts': expiry_ts,
-        //     'response': {
-        //         'message': f"Too many files extracted for submission {sid} "
-        //                    f"{extracted_sha256} extracted by "
-        //                    f"{service_name} will be dropped",
-        //         'service_name': service_name,
-        //         'service_tool_version': service_tool_version,
-        //         'service_version': service_version,
-        //         'status': 'FAIL_NONRECOVERABLE'
-        //     },
-        //     'sha256': extracted_sha256,
-        //     'type': 'MAX FILES REACHED'
-        // }))
-    }
-
-    async fn save_dispatch_error(&self, err: Error) {
-        todo!()
-    }
+    // Kick off this file for processing
+    self.processing_files.spawn(process_file(self.session.clone(), self.start_file_send.clone(), data));
 }
 
-    // self._submission_timeouts.set(task.sid, SUBMISSION_TOTAL_TIMEOUT, None)
+//     async fn file_finished(&self, result: FileResult) {
+//         match finished_file {
+//             Some(finished_file) => match finished_file {
+//                 Ok(_) => todo!(),
+//                 Err(_) => todo!(),
+//             },
+//             None => break,
+//         }
+//     }
 
+//     async fn save_max_extracted_error(&self, start: ExtractedFile) {
+//         todo!()
+//         // self.log.info(f'[{sid}] hit extraction limit, dropping {extracted_sha256}')
+//         // task.dropped_files.add(extracted_sha256)
+//         // self._dispatching_error(task, Error({
+//         //     'archive_ts': None,
+//         //     'expiry_ts': expiry_ts,
+//         //     'response': {
+//         //         'message': f"Too many files extracted for submission {sid} "
+//         //                    f"{extracted_sha256} extracted by "
+//         //                    f"{service_name} will be dropped",
+//         //         'service_name': service_name,
+//         //         'service_tool_version': service_tool_version,
+//         //         'service_version': service_version,
+//         //         'status': 'FAIL_NONRECOVERABLE'
+//         //     },
+//         //     'sha256': extracted_sha256,
+//         //     'type': 'MAX FILES REACHED'
+//         // }))
+//     }
+
+//     async fn save_dispatch_error(&self, err: Error) {
+//         todo!()
+//     }
+// }
 
     // """
     // Check if a submission is finished.
@@ -314,3 +287,80 @@ impl SubmissionContext {
     //     return True
     // return False
 
+//     @elasticapm.capture_span(span_type='dispatcher')
+//     def finalize_submission(self, task: SubmissionTask, max_score, file_list):
+//         """All of the services for all of the files in this submission have finished or failed.
+
+//         Update the records in the datastore, and flush the working data from redis.
+//         """
+//         submission = task.submission
+//         sid = submission.sid
+
+//         results = list(task.service_results.values())
+//         errors = list(task.service_errors.values())
+//         errors.extend(task.extra_errors)
+
+//         submission.classification = submission.params.classification
+//         submission.error_count = len(errors)
+//         submission.errors = errors
+//         submission.file_count = len(file_list)
+//         submission.results = [r.key for r in results]
+//         submission.max_score = max_score
+//         submission.state = 'completed'
+//         submission.times.completed = isotime.now_as_iso()
+//         self.datastore.submission.save(sid, submission)
+
+//         self._cleanup_submission(task)
+//         self.log.info(f"[{sid}] Completed; files: {len(file_list)} results: {len(results)} "
+//                       f"errors: {len(errors)} score: {max_score}")
+
+//     def _watcher_list(self, sid):
+//         return ExpiringSet(make_watcher_list_name(sid), host=self.redis)
+
+//     def _cleanup_submission(self, task: SubmissionTask):
+//         """Clean up code that is the same for canceled and finished submissions"""
+//         submission = task.submission
+//         sid = submission.sid
+
+//         # Now that a submission is finished, we can remove it from the timeout list
+//         self._submission_timeouts.clear(task.sid)
+
+//         if submission.params.quota_item and submission.params.submitter:
+//             self.log.info(f"[{sid}] Submission no longer counts toward {submission.params.submitter.upper()} quota")
+//             self.quota_tracker.end(submission.params.submitter)
+
+//         if task.completed_queue:
+//             NamedQueue(task.completed_queue, self.redis).push(submission.as_primitives())
+
+//         # Send complete message to any watchers.
+//         watcher_list = self._watcher_list(sid)
+//         for w in watcher_list.members():
+//             NamedQueue(w).push(WatchQueueMessage({'status': 'STOP'}).as_primitives())
+
+//         # Don't run post processing and traffic notifications if the submission is terminated
+//         if not task.submission.to_be_deleted:
+//             # Pull the tags keys and values into a searchable form
+//             tags = [
+//                 {'value': _t['value'], 'type': _t['type']}
+//                 for file_tags in task.file_tags.values()
+//                 for _t in file_tags.values()
+//             ]
+
+//             # Send the submission for alerting or resubmission
+//             self.postprocess_worker.process_submission(submission, tags)
+
+//             # Write all finished submissions to the traffic queue
+//             self.traffic_queue.publish(SubmissionMessage({
+//                 'msg': from_datastore_submission(submission),
+//                 'msg_type': 'SubmissionCompleted',
+//                 'sender': 'dispatcher',
+//             }).as_primitives())
+
+//         # Clear the timeout watcher
+//         watcher_list.delete()
+//         self.active_submissions.pop(sid)
+//         self.submissions_assignments.pop(sid)
+//         self.tasks.pop(sid, None)
+
+//         # Count the submission as 'complete' either way
+//         self.counter.increment('submissions_completed')

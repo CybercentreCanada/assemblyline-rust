@@ -1,4 +1,4 @@
-mod interface;
+pub mod interface;
 mod submission;
 mod file;
 

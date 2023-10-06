@@ -21,7 +21,7 @@ struct CacheEntry {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum Status {
-    Assigned(SocketAddr, DateTime<Utc>),
+    Assigned(SocketAddr, bool, DateTime<Utc>),
     Finished(DateTime<Utc>)
 }
 
@@ -98,24 +98,28 @@ impl Database {
         }
     }
 
+    pub async fn get_status(&self, sid: &Sid) -> Result<Option<Status>> {
+        Ok(self.cache.read().await.get(sid).map(|value|value.status.clone()))
+    }
+
     pub async fn get_assignment(&self, sid: &Sid) -> Result<Option<SocketAddr>> {
         match self.cache.read().await.get(sid) {
             Some(entry) => match &entry.status {
-                Status::Assigned(assign, _) => Ok(Some(assign.clone())),
+                Status::Assigned(assign, _, _) => Ok(Some(assign.clone())),
                 Status::Finished(_) => Ok(None),
             },
             None => Ok(None),
         }
     }
 
-    pub async fn assign_submission(&self, submission: Arc<Submission>, dispatcher: SocketAddr) -> Result<()> {
+    pub async fn assign_submission(&self, submission: Arc<Submission>, dispatcher: SocketAddr, retain: bool) -> Result<()> {
         let temp = tempfile::Builder::new()
             .prefix(TEMP_PREFIX)
             .tempfile_in(&self.path)?;
         let sid = submission.sid;
 
         let entry = DiskEntry {
-            status: Status::Assigned(dispatcher, Utc::now()),
+            status: Status::Assigned(dispatcher, retain, Utc::now()),
             submission,
         };
         tokio::fs::write(temp.path(), serde_json::to_vec(&entry)?).await?;
@@ -130,10 +134,10 @@ impl Database {
         }).collect())
     }
 
-    pub async fn list_assigned_submissions(&self) -> Result<Vec<(Sid, SocketAddr)>> {
+    pub async fn list_assigned_submissions(&self) -> Result<Vec<(Sid, SocketAddr, bool)>> {
         Ok(self.cache.read().await.iter().filter_map(|(sid, cache)|{
             match &cache.status {
-                Status::Assigned(dispatcher, _) => Some((*sid, dispatcher.clone())),
+                Status::Assigned(dispatcher, retain, _) => Some((*sid, dispatcher.clone(), *retain)),
                 Status::Finished(_) => None,
             }
         }).collect())
@@ -153,7 +157,12 @@ impl Database {
         }
     }
 
+    pub async fn delete(&self, sid: Sid) -> Result<()> {
+        todo!();
+    }
+
     pub async fn finish_submission(&self, submission: Arc<Submission>) -> Result<()> {
+        todo!("Drop if retain is false");
         let temp = tempfile::Builder::new()
             .prefix(TEMP_PREFIX)
             .tempfile_in(&self.path)?;

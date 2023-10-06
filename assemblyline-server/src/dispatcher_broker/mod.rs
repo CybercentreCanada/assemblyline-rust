@@ -13,13 +13,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use assemblyline_models::Sid;
 use assemblyline_models::config::Config;
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::datastore::submission::SubmissionState;
 use futures::StreamExt;
 use log::error;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::broadcast;
+use tokio::sync::{oneshot, mpsc, Mutex};
+use tokio::task::{JoinHandle, JoinSet};
 
 use self::database::Database;
 use self::interface::{start_interface, StartSubmissionRequest};
@@ -39,10 +41,15 @@ impl Default for BrokerFlags {
     }
 }
 
-#[derive(Clone)]
-pub enum PeerSubscribeMessage {
-    Finished(Arc<Submission>),
-    Lagged,
+pub (crate) enum SubmissionWatchStatus {
+    NotFound,
+    SlotOccupied,
+    Submission(Submission)
+}
+
+pub (crate) enum InternalMessage {
+    SubmissionStart(Sid, SocketAddr, bool),
+    InstallSubmissionWatch(Sid, oneshot::Sender<SubmissionWatchStatus>)
 }
 
 struct BrokerSession {
@@ -51,15 +58,15 @@ struct BrokerSession {
     instance_count: usize,
     flags: BrokerFlags,
     flags_changes: tokio::sync::Notify,
-    // elastic: Elastic,
     dispatcher_data: tokio::sync::RwLock<HashMap<SocketAddr, LoadInfo>>,
     database: Database,
     http_client: reqwest::Client,
-    finished_submissions: broadcast::Receiver<PeerSubscribeMessage>,
+    internal_sender: mpsc::Sender<InternalMessage>,
+    current_move_job: Mutex<Option<JoinHandle<Result<()>>>>,
 }
 
 impl BrokerSession {
-    
+
     pub fn peer_address(&self, instance: usize) -> String {
         format!("dispatcher-broker-{instance}")
     }
@@ -83,11 +90,33 @@ impl BrokerSession {
         Ok(url.join(route)?)
     }
 
+    async fn move_misplaced_submissions(self: &Arc<BrokerSession>) {
+        let mut job = self.current_move_job.lock().await;
+
+        *job = match job.take() {
+            Some(job) => {
+                if job.is_finished() {
+                    match job.await {
+                        Ok(Ok(())) => {},
+                        Ok(Err(err)) => { error!("Error in move_misplaced_submissions {err}"); },
+                        Err(err) => { error!("Task error on move_misplaced_submissions {err}"); },
+                    }
+                    Some(tokio::spawn(_move_misplaced_submissions(self.clone())))
+                } else {
+                    Some(job)
+                }
+            },
+            None => {
+                Some(tokio::spawn(_move_misplaced_submissions(self.clone())))
+            },
+        }
+    }
+
     pub async fn select_dispatcher(&self) -> SocketAddr {
         todo!()
     }
 
-    pub async fn assign_submission(&self, submission: Submission, dispatcher: Option<SocketAddr>) -> Result<()> {
+    pub async fn assign_submission(&self, submission: Submission, dispatcher: Option<SocketAddr>, retain: bool) -> Result<()> {
         let submission = Arc::new(submission);
         if let SubmissionState::Submitted = submission.state {
             // check if the submission is already present
@@ -102,21 +131,26 @@ impl BrokerSession {
             };
 
             // save to disk
-            self.database.assign_submission(submission, dispatcher).await?;
+            self.database.assign_submission(submission.clone(), dispatcher, retain).await?;
 
             // notify the dispatcher
-            todo!();
-            // self.http_client.post();
+            self.send_submission(&submission, dispatcher).await?;
+            self.internal_sender.send(InternalMessage::SubmissionStart(submission.sid, dispatcher, retain)).await;
         } else {
             self.database.finish_submission(submission).await;
         }
+        Ok(())
+    }
+
+    pub async fn send_submission(&self, submission: &Submission, dispatcher: SocketAddr) -> Result<()> {
+        self.http_client.post(format!("https://{dispatcher}/submission")).json(submission).send().await?;
         Ok(())
     }
 }
 
 pub async fn launch(config: Config, instance: usize, instance_count: usize) -> Result<()> {
     // setup queues
-    let (submission_sender, finished_submissions) = tokio::sync::broadcast::channel(2000);
+    let (internal_sender, internal_recv) = tokio::sync::mpsc::channel(200);
 
     // connect to database
     let database = Database::open(&config).await?;
@@ -131,13 +165,14 @@ pub async fn launch(config: Config, instance: usize, instance_count: usize) -> R
         config,
         flags: Default::default(),
         flags_changes: tokio::sync::Notify::new(),
+        current_move_job: tokio::sync::Mutex::new(None),
         // elastic,
         database,
         instance,
         instance_count,
         http_client,
-        finished_submissions,
         dispatcher_data: tokio::sync::RwLock::new(Default::default()),
+        internal_sender,
     });
 
     // setup exit conditions
@@ -153,26 +188,16 @@ pub async fn launch(config: Config, instance: usize, instance_count: usize) -> R
     let api = tokio::spawn(start_interface(session.clone()));
 
     // launch move worker
-    tokio::spawn(move_misplaced_submissions(session.clone()));
+    session.move_misplaced_submissions().await;
 
-    // Watch for dispatchers
-    tokio::spawn(monitor_dispatchers(session.clone(), submission_sender));
-   
+    // Watch for dispatcher status
+    tokio::spawn(monitor_dispatchers(session.clone()));
+
     // launch monitor worker
-    tokio::spawn(monitor_finished_jobs(session));
+    tokio::spawn(monitor_submissions(session, internal_recv));
 
     // wait for the api
     api.await.expect("API task failed")
-}
-
-async fn move_misplaced_submissions(session: Arc<BrokerSession>) {
-    while session.flags.running.load(Ordering::Acquire) {
-        match tokio::spawn(_move_misplaced_submissions(session.clone())).await {
-            Ok(Ok(())) => return,
-            Ok(Err(err)) => { error!("Error in move_misplaced_submissions {err}"); },
-            Err(err) => { error!("Task error on move_misplaced_submissions {err}"); },
-        }
-    }
 }
 
 async fn _move_misplaced_submissions(session: Arc<BrokerSession>) -> Result<()> {
@@ -195,14 +220,14 @@ async fn _move_misplaced_submissions(session: Arc<BrokerSession>) -> Result<()> 
         let url = session.peer_url(target_broker, "submission")?;
         if let Some(submission) = session.database.get_submission(&sid).await? {
 
-            let assignment = match status {
-                database::Status::Assigned(dispatcher, _) => Some(dispatcher),
-                database::Status::Finished(_) => None,
+            let (assignment, retain) = match status {
+                database::Status::Assigned(dispatcher, retain, _) => (Some(dispatcher), retain),
+                database::Status::Finished(_) => (None, true),
             };
 
             // send it to the right broker
             let handled = session.http_client.post(url)
-                .json(&StartSubmissionRequest { submission, assignment } )
+                .json(&StartSubmissionRequest { submission, assignment, refuse_forward: true, retain } )
                 .send().await?;
 
             // if that worked clear the local data
@@ -221,64 +246,178 @@ async fn _move_misplaced_submissions(session: Arc<BrokerSession>) -> Result<()> 
     return Ok(())
 }
 
-async fn monitor_finished_jobs(session: Arc<BrokerSession>) {
+async fn monitor_submissions(session: Arc<BrokerSession>, queue: mpsc::Receiver<InternalMessage>) {
+    let queue = Arc::new(Mutex::new(queue));
     while session.flags.running.load(Ordering::Acquire) {
-        match tokio::spawn(_monitor_finished_jobs(session.clone())).await {
+        match tokio::spawn(_monitor_submissions(session.clone(), queue.clone())).await {
             Ok(Ok(())) => return,
-            Ok(Err(err)) => { error!("Error in monitor_finished_jobs {err}"); },
-            Err(err) => { error!("Task error on monitor_finished_jobs {err}"); },
+            Ok(Err(err)) => { error!("Error in monitor_submissions {err}"); },
+            Err(err) => { error!("Task error on monitor_submissions {err}"); },
         }
     }
 }
 
-async fn _monitor_finished_jobs(session: Arc<BrokerSession>) -> Result<()> {
-    let mut stream = session.finished_submissions.resubscribe();
+async fn _monitor_submissions(session: Arc<BrokerSession>, queue: Arc<Mutex<mpsc::Receiver<InternalMessage>>>) -> Result<()> {
+    use database::Status;
+    use std::collections::hash_map::Entry;
+
+    let mut queue = queue.lock().await;
     let mut clear_too_old_interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-    tokio::spawn(refresh_submission_status(session.clone()));
+    let mut finish_slots: HashMap<Sid, oneshot::Sender<SubmissionWatchStatus>> = Default::default();
+    let mut queries: JoinSet<Result<Submission>> = JoinSet::new();
+
+    for _ in session.database.list_assigned_submissions().await? {
+        todo!("Launch queries for all outstanding ");
+    }
+
     loop {
         tokio::select! {
             _ = clear_too_old_interval.tick() => {
                 session.database.clear_abandoned().await?;
+                finish_slots.retain(|_, slot|!slot.is_closed());
             }
 
-            message = stream.recv() => {
+            _ = session.flags_changes.notified() => {
+                if !session.flags.running.load(Ordering::Acquire) {
+                    return Ok(())
+                }
+            }
+
+            message = queue.recv() => {
                 let message = match message {
-                    Ok(message) => message,
-                    Err(err) => match err {
-                        broadcast::error::RecvError::Closed => return Ok(()),
-                        broadcast::error::RecvError::Lagged(_) => PeerSubscribeMessage::Lagged,
-                    },
+                    Some(message) => message,
+                    None => return Ok(())
                 };
 
                 match message {
-                    PeerSubscribeMessage::Finished(submission) => {
-                        // update finished jobs in local database
-                        match session.database.get_assignment(&submission.sid).await {
-                            Ok(Some(host)) => {
-                                let url = format!("https://{host}/submission/{}", submission.sid);
-                                session.http_client.delete(url).send().await?;
-                                session.database.finish_submission(submission).await?;
+                    // A submission has been posted to a dispatcher. start watching
+                    // for it to complete
+                    InternalMessage::SubmissionStart(sid, dispatcher, retain) => {
+                        queries.spawn(wait_for_submission(session.clone(), sid, dispatcher, retain));
+                    },
+
+                    // Someone is asking to be notified when a submission finishes
+                    InternalMessage::InstallSubmissionWatch(sid, resp) => {
+                        // first check if we have a database entry for this submission
+                        match session.database.get_status(&sid).await? {
+                            // we do and it is being processed, drop through to the check for
+                            // finish_slots below
+                            Some(Status::Assigned(..)) => {},
+                            // We do and the submission is done. Send them the submission
+                            // and clear out our database.
+                            Some(Status::Finished(..)) => {
+                                if let Some(submission) = session.database.get_submission(&sid).await? {
+                                    _ = resp.send(SubmissionWatchStatus::Submission(submission));
+                                }
+                                session.database.delete(sid).await?;
+                                continue
                             }
-                            Ok(None) => continue,
-                            Err(err) => {
-                                error!("Could not check submission assignment: {err}");
-                            }
+                            // We have no record of that submission. Its already been processed.
+                            // they'll find the result when they check the database.
+                            None => {
+                                _ = resp.send(SubmissionWatchStatus::NotFound);
+                                continue
+                            },
                         }
-                        
-                    }
-                    PeerSubscribeMessage::Lagged => {
-                        // kick off refresh
-                        tokio::spawn(refresh_submission_status(session.clone()));
-                    }
+
+                        // We are currently processing that submission.
+                        match finish_slots.entry(sid) {
+                            // Someone is already waiting for a response to this submission.
+                            // Refresh the waiter if needed.
+                            Entry::Occupied(mut entry) => {
+                                if entry.get().is_closed() {
+                                    entry.insert(resp);
+                                } else {
+                                    resp.send(SubmissionWatchStatus::SlotOccupied);
+                                }
+                            },
+                            // Empty entry, put the request in this slot
+                            Entry::Vacant(entry) => {
+                                entry.insert(resp);
+                            },
+                        }
+                    },
+                }
+            }
+
+            finished = queries.join_next(), if !queries.is_empty() => {
+                let submission = match finished {
+                    Some(Ok(Ok(submission))) => submission,
+                    Some(Ok(Err(err))) => { error!("Error finishing submission: {err}"); continue }
+                    Some(Err(err)) => { error!("Task error finishing submission: {err}"); continue }
+                    None => continue,
+                };
+
+                let sid = submission.sid.clone();
+                match finish_slots.entry(sid) {
+                    Entry::Occupied(entry) => {
+                        match entry.remove().send(SubmissionWatchStatus::Submission(submission)) {
+                            Ok(_) => { session.database.delete(sid).await?; },
+                            Err(SubmissionWatchStatus::Submission(sub)) => {
+                                session.database.finish_submission(Arc::new(sub)).await?;
+                            },
+                            Err(_) => {}
+                        }
+                    },
+                    Entry::Vacant(_) => {
+                        session.database.finish_submission(Arc::new(submission)).await?;
+                    },
                 }
             }
         }
     }
 }
 
-async fn monitor_dispatchers(session: Arc<BrokerSession>, submission_sink: broadcast::Sender<PeerSubscribeMessage>) {
+async fn wait_for_submission(session: Arc<BrokerSession>, sid: Sid, dispatcher: SocketAddr, retain: bool) -> Result<Submission> {
+    use crate::dispatcher::interface::GetSubmissionResponse;
+
+    loop {
+        // ask the dispatcher for the submission
+        let err = match session.http_client.get(format!("https://{dispatcher}/submission/{sid}")).send().await {
+            // got a response
+            Ok(response) => {
+                match response.json::<GetSubmissionResponse>().await {
+                    Ok(resp) => return Ok(resp.submission),
+                    Err(err) => err,
+                }
+            },
+            Err(err) => err,
+        };
+
+        // If the dispatcher doesn't know about the submission send it
+        if err.status() == Some(reqwest::StatusCode::NOT_FOUND) {
+            match session.database.get_submission(&sid).await? {
+                Some(submission) => {
+                    session.send_submission(&submission, dispatcher).await?;
+                    continue;
+                }
+                None => return Err(Error::)
+            }
+        }
+
+        // connection error, check if the dispatcher is still around
+        if session.is_dispatcher_available(dispatcher).await {
+            error!("Transient error contacting dispatcher: {err}");
+            continue
+        }
+
+        // Assign to a new dispatcher
+        dispatcher = session.select_dispatcher().await;
+        match session.database.get_submission(&sid).await? {
+            Some(submission) => {
+                session.database.assign_submission(Arc::new(submission), dispatcher, retain).await?;
+                session.send_submission(&submission, dispatcher).await?;
+                continue;
+            }
+            None => return Err(Error::)
+        }
+    }
+}
+
+
+async fn monitor_dispatchers(session: Arc<BrokerSession>) {
     while session.flags.running.load(Ordering::Acquire) {
-        match tokio::spawn(_monitor_dispatchers(session.clone(), submission_sink.clone())).await {
+        match tokio::spawn(_monitor_dispatchers(session.clone())).await {
             Ok(Ok(())) => return,
             Ok(Err(err)) => { error!("Error in monitor_dispatchers {err}"); },
             Err(err) => { error!("Task error on monitor_dispatchers {err}"); },
@@ -286,23 +425,23 @@ async fn monitor_dispatchers(session: Arc<BrokerSession>, submission_sink: broad
     }
 }
 
-async fn _monitor_dispatchers(session: Arc<BrokerSession>, submission_sink: broadcast::Sender<PeerSubscribeMessage>) -> Result<()> {
+async fn _monitor_dispatchers(session: Arc<BrokerSession>) -> Result<()> {
     loop {
         // launch dispatcher monitoring
         let mut data = session.dispatcher_data.write().await;
         for peer in  tokio::net::lookup_host("dispatcher").await? {
             if let std::collections::hash_map::Entry::Vacant(entry) = data.entry(peer) {
                 entry.insert(LoadInfo::stale());
-                tokio::spawn(monitor_dispatcher_instance(session.clone(), peer, submission_sink.clone()));
+                tokio::spawn(monitor_dispatcher_instance(session.clone(), peer));
             }
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(30)).await
     }
 }
 
-async fn monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketAddr, submission_sink: broadcast::Sender<PeerSubscribeMessage>) {
+async fn monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketAddr) {
     while session.flags.running.load(Ordering::Acquire) {
-        match tokio::spawn(_monitor_dispatcher_instance(session.clone(), host.clone(), submission_sink.clone())).await {
+        match tokio::spawn(_monitor_dispatcher_instance(session.clone(), host.clone())).await {
             Ok(Ok(())) => return,
             Ok(Err(err)) => { error!("Error in monitor_dispatcher_instance {err}"); },
             Err(err) => { error!("Task error on monitor_dispatcher_instance {err}"); },
@@ -313,9 +452,11 @@ async fn monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketAd
     session.dispatcher_data.write().await.remove(&host);
 }
 
-async fn _monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketAddr, submission_sink: broadcast::Sender<PeerSubscribeMessage>) -> Result<()> {
+async fn _monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketAddr) -> Result<()> {
     // connect to dispatcher instance
-    let url = format!("wss://{host}/updates/");
+    let url = format!("wss://{host}/stats/");
+
+    todo!("handle reconnect and stale data");
 
     let (mut client, _) = tokio_tungstenite::connect_async(&url).await?;
 
@@ -334,59 +475,9 @@ async fn _monitor_dispatcher_instance(session: Arc<BrokerSession>, host: SocketA
                     DispatchStatusMessage::LoadInfo(load) => {
                         session.dispatcher_data.write().await.insert(host, load);
                     },
-                    DispatchStatusMessage::Finished(submission) => { 
-                        let _ = submission_sink.send(PeerSubscribeMessage::Finished(submission)); 
-                    },
                 }
             }
         }
     }
     return Ok(())
-}
-
-async fn refresh_submission_status(session: Arc<BrokerSession>) {
-    while session.flags.running.load(Ordering::Acquire) {
-        match tokio::spawn(_refresh_submission_status(session.clone())).await {
-            Ok(Ok(())) => return,
-            Ok(Err(err)) => { error!("Error in refresh_submission_status {err}"); },
-            Err(err) => { error!("Task error on refresh_submission_status {err}"); },
-        }
-    }
-}
-
-async fn _refresh_submission_status(session: Arc<BrokerSession>) -> Result<()> {
-    // check every submission stored locally to see if they have been completed remotely
-    for (sid, dispatcher) in session.database.list_assigned_submissions().await? {
-        // get the submission
-        let url = format!("https://{dispatcher}/submission/{sid}");
-        let response = match session.http_client.get(&url).send().await {
-            Ok(resp) => resp,
-            Err(err) => {
-                error!("Missing info from dispatcher: {err}");
-                continue
-            },
-        };
-
-        let data = match response.bytes().await {
-            Ok(data) => data,
-            Err(err) => {
-                error!("Corrupt info from dispatcher: {err}");
-                continue
-            },
-        };
-
-        let submission: Arc<Submission> = match serde_json::from_slice(&data) {
-            Ok(resp) => Arc::new(resp),
-            Err(err) => {
-                error!("Corrupt info from dispatcher: {err}");
-                continue
-            },
-        };
-
-        if let SubmissionState::Completed = submission.state {
-            session.http_client.delete(url).send().await?;
-            session.database.finish_submission(submission).await?;
-        }
-    }
-    Ok(())
 }

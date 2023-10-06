@@ -1,15 +1,5 @@
 //! Interface for controlling submission processing
 //!
-//! POST /submission/
-//! GET /submission/<sid>
-//! DELETE /submission/<sid>
-//! WS /updates/
-//! POST /task/start
-//! POST /task/result
-//! POST /task/error
-//! GET /health/
-//! GET /stats/
-//!
 
 use std::sync::Arc;
 
@@ -37,13 +27,11 @@ pub async fn start_interface(session: Arc<Session>) -> Result<(), Error> {
     let app = poem::Route::new()
         .at("/submission/", post(post_submission))
         .at("/submission/:sid", get(get_submission))
-        .at("/submission/:sid", delete(delete_submission))
-        .at("/updates/", get(ws_finishing_submission_and_status))
         .at("/task/start", post(post_start_task))
         .at("/task/result", post(post_result_task))
         .at("/task/error", post(post_error_task))
         .at("/health/", get(get_health))
-        .at("/stats/", get(get_stats));
+        .at("/stats/", get(ws_stats));
 
     let app = match &config.path {
         Some(route) => poem::Route::new().nest(route, app),
@@ -93,58 +81,60 @@ async fn post_submission(
     Data(session): Data<&Arc<Session>>,
     Json(submission): Json<Submission>
 ) -> poem::Result<Json<PostSubmissionResponse>> {
-    // Check if its in the finished table
-    if session.finished.read().await.contains_key(&submission.sid) {
-        return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
-    }
+    todo!()
+//     // Check if its in the finished table
+//     if session.finished.read().await.contains_key(&submission.sid) {
+//         return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
+//     }
 
-    // Test if the submission is already finished in elasticsearch
-    if let Some(sub) = session.elastic.submission.get(&submission.sid.to_string()).await? {
-        if let SubmissionState::Completed = sub.state {
-            session.finished.write().await.insert(sub.sid, sub);
-            return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
-        }
-    }
+//     // Test if the submission is already finished in elasticsearch
+//     if let Some(sub) = session.elastic.submission.get(&submission.sid.to_string()).await? {
+//         if let SubmissionState::Completed = sub.state {
+//             session.finished.write().await.insert(sub.sid, sub);
+//             return Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Finished }))
+//         }
+//     }
 
-    // See if we can launch this as a new submission
-    let mut active = session.active.write().await;
-    match active.entry(submission.sid) {
-        std::collections::hash_map::Entry::Occupied(_) => {
-            Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
-        },
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            entry.insert(tokio::spawn(process_submission(session.clone(), submission)));
-            Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
-        },
-    }
+//     // See if we can launch this as a new submission
+//     let mut active = session.active.write().await;
+//     match active.entry(submission.sid) {
+//         std::collections::hash_map::Entry::Occupied(_) => {
+//             Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
+//         },
+//         std::collections::hash_map::Entry::Vacant(entry) => {
+//             entry.insert(tokio::spawn(process_submission(session.clone(), submission)));
+//             Ok(Json(PostSubmissionResponse { status: PostSubmissionStatus::Running }))
+//         },
+//     }
 }
 
-// #[derive(Serialize, Deserialize)]
-// pub struct PostSubmissionResponse {
-//     pub status: PostSubmissionStatus
-// }
+#[derive(Serialize, Deserialize)]
+pub struct GetSubmissionResponse {
+    pub submission: Submission
+}
 
 #[handler]
 async fn get_submission(
     Data(session): Data<&Arc<Session>>,
     Path(sid): Path<Sid>,
-) -> poem::Result<Response> {
-    if session.active.read().await.contains_key(&sid) {
-        return Ok(StatusCode::NO_CONTENT.into())
-    }
-    if let Some(submission) = session.finished.read().await.get(&sid) {
-        return Ok(Json(submission).into_response())
-    }
-    return Ok(StatusCode::NOT_FOUND.into())
+) -> poem::Result<Json<GetSubmissionResponse>> {
+    todo!();
+//     if session.active.read().await.contains_key(&sid) {
+//         return Ok(StatusCode::NO_CONTENT.into())
+//     }
+//     if let Some(submission) = session.finished.read().await.get(&sid) {
+//         return Ok(Json(submission).into_response())
+//     }
+//     return Ok(StatusCode::NOT_FOUND.into())
 }
 
-#[handler]
-async fn delete_submission(
-    Data(session): Data<&Arc<Session>>,
-    Path(sid): Path<Sid>
-) {
-    session.finished.write().await.remove(&sid);
-}
+// #[handler]
+// async fn delete_submission(
+//     Data(session): Data<&Arc<Session>>,
+//     Path(sid): Path<Sid>
+// ) {
+//     session.finished.write().await.remove(&sid);
+// }
 
 #[derive(Serialize, Deserialize)]
 pub struct LoadInfo {
@@ -162,72 +152,71 @@ impl LoadInfo {
 #[derive(Serialize, Deserialize)]
 pub enum DispatchStatusMessage {
     LoadInfo(LoadInfo),
-    Finished(Arc<Submission>)
 }
 
-#[handler]
-fn ws_finishing_submission_and_status() -> Response {
-    todo!()
-}
+// #[handler]
+// fn ws_finishing_submission_and_status() -> Response {
+//     todo!()
+// }
 
-#[handler]
-fn post_start_task() -> Response {
-    todo!()
-}
+// #[handler]
+// fn post_start_task() -> Response {
+//     todo!()
+// }
 
 
-#[derive(Serialize, Deserialize)]
-pub struct TaskResult {
-    pub sid: Sid,
-    pub service_name: String,
-    pub sha256: Sha256,
+// #[derive(Serialize, Deserialize)]
+// pub struct TaskResult {
+//     pub sid: Sid,
+//     pub service_name: String,
+//     pub sha256: Sha256,
 
-    pub worker: String,
-}
+//     pub worker: String,
+// }
 
-#[handler]
-async fn post_result_task(
-    Data(session): Data<&Arc<Session>>,
-    Json(result): Json<TaskResult>
-) {
-    let sig = TaskSignature {
-        hash: result.sha256.clone(),
-        service: result.service_name.clone(),
-        sid: result.sid,
-    };
-    session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Result(result))).await;
-}
+// #[handler]
+// async fn post_result_task(
+//     Data(session): Data<&Arc<Session>>,
+//     Json(result): Json<TaskResult>
+// ) {
+//     let sig = TaskSignature {
+//         hash: result.sha256.clone(),
+//         service: result.service_name.clone(),
+//         sid: result.sid,
+//     };
+//     session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Result(result))).await;
+// }
 
-#[derive(Serialize, Deserialize)]
-pub struct TaskError {
-    pub sid: Sid,
-    pub service_name: String,
-    pub sha256: Sha256,
+// #[derive(Serialize, Deserialize)]
+// pub struct TaskError {
+//     pub sid: Sid,
+//     pub service_name: String,
+//     pub sha256: Sha256,
 
-    pub worker: String,
+//     pub worker: String,
 
-}
+// }
 
-#[handler]
-async fn post_error_task(
-    Data(session): Data<&Arc<Session>>,
-    Json(result): Json<TaskError>
-) {
-    let sig = TaskSignature {
-        hash: result.sha256.clone(),
-        service: result.service_name.clone(),
-        sid: result.sid,
-    };
-    session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Error(result))).await;
-}
+// #[handler]
+// async fn post_error_task(
+//     Data(session): Data<&Arc<Session>>,
+//     Json(result): Json<TaskError>
+// ) {
+//     let sig = TaskSignature {
+//         hash: result.sha256.clone(),
+//         service: result.service_name.clone(),
+//         sid: result.sid,
+//     };
+//     session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Error(result))).await;
+// }
 
-#[handler]
-fn get_health() -> Response {
-    todo!()
-}
+// #[handler]
+// fn get_health() -> Response {
+//     todo!()
+// }
 
-#[handler]
-fn get_stats() -> Response {
-    todo!()
-}
+// #[handler]
+// fn get_stats() -> Response {
+//     todo!()
+// }
 
