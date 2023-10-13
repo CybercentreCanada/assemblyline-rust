@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
 // from typing import Dict, List
@@ -361,13 +361,13 @@ use struct_metadata::Described;
 //     "max_inflight": 1000
 // }
 
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Dispatcher {
     pub broker_bind: BindDetails,
     pub broker_storage_path: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct BindDetails {
     pub address: std::net::SocketAddr,
     pub tls: Option<TlsConfig>,
@@ -384,7 +384,7 @@ impl Default for BindDetails {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TlsConfig {
     pub certificate_pem: String,
     pub key_pem: String,
@@ -740,7 +740,7 @@ pub struct TlsConfig {
 
 
 /// Core Component Configuration
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 // @odm.model(index=False, store=False, description="")
 pub struct Core {
     // /// Configuration for Alerter
@@ -1326,40 +1326,51 @@ pub struct Core {
 // }
 
 
-// @odm.model(index=False, store=False,
-//            description="Default values for parameters for submissions that may be overridden on a per submission basis")
-// class Submission(odm.Model):
-//     default_max_extracted: int = odm.Integer(description="How many extracted files may be added to a submission?")
-//     default_max_supplementary: int = odm.Integer(
-//         description="How many supplementary files may be added to a submission?")
-//     dtl: int = odm.Integer(description="Number of days submissions will remain in the system by default")
-//     max_dtl: int = odm.Integer(description="Maximum number of days submissions will remain in the system")
-//     max_extraction_depth: int = odm.Integer(description="Maximum files extraction depth")
-//     max_file_size: int = odm.Integer(description="Maximum size for files submitted in the system")
-//     max_metadata_length: int = odm.Integer(description="Maximum length for each metadata values")
-//     max_temp_data_length: int = odm.Integer(description="Maximum length for each temporary data values")
-//     sha256_sources: List[Sha256Source] = odm.List(
-//         odm.Compound(Sha256Source),
-//         default=[], description="List of external source to fetch file via their SHA256 hashes")
-//     tag_types = odm.Compound(TagTypes, default=DEFAULT_TAG_TYPES,
-//                              description="Tag types that show up in the submission summary")
-//     verdicts = odm.Compound(Verdicts, default=DEFAULT_VERDICTS,
-//                             description="Minimum score value to get the specified verdict.")
+/// Default values for parameters for submissions that may be overridden on a per submission basis
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Submission {
+    // /// How many extracted files may be added to a submission?
+    // pub default_max_extracted: u32,
+    // /// How many supplementary files may be added to a submission?
+    // pub default_max_supplementary: u32,
+    // /// Number of days submissions will remain in the system by default
+    // pub dtl: u32,
+    // /// Maximum number of days submissions will remain in the system
+    // pub max_dtl: u32,
+    // /// Maximum files extraction depth
+    // pub max_extraction_depth: u32,
+    // /// Maximum size for files submitted in the system
+    // pub max_file_size: u64,
+    // /// Maximum length for each metadata values
+    // pub max_metadata_length: u32,
+    /// Maximum length for each temporary data values
+    pub max_temp_data_length: u32,
+    // /// List of external source to fetch file via their SHA256 hashes
+    // pub sha256_sources: Vec<Sha256Source>,
+    // /// Tag types that show up in the submission summary
+    // pub tag_types: TagTypes,
+    // /// Minimum score value to get the specified verdict.
+    // pub verdicts: Verdicts,
+}
 
-
-// DEFAULT_SUBMISSION = {
-//     'default_max_extracted': 500,
-//     'default_max_supplementary': 500,
-//     'dtl': 30,
-//     'max_dtl': 0,
-//     'max_extraction_depth': 6,
-//     'max_file_size': 104857600,
-//     'max_metadata_length': 4096,
-//     'max_temp_data_length': 4096,
-//     'sha256_sources': [],
-//     'tag_types': DEFAULT_TAG_TYPES,
-//     'verdicts': DEFAULT_VERDICTS
-// }
+impl Default for Submission {
+    fn default() -> Self {
+        Self {
+            // default_max_extracted: 500,
+            // default_max_supplementary: 500,
+            // dtl: 30,
+            // max_dtl: 0,
+            // max_extraction_depth: 6,
+            // max_file_size: 104857600,
+            // max_metadata_length: 4096,
+            max_temp_data_length: 4096,
+            // sha256_sources: Default::default(),
+            // tag_types: Default::default(),
+            // verdicts: Default::default()
+        }
+    }
+}
 
 
 // @odm.model(index=False, store=False, description="Configuration for connecting to a retrohunt service.")
@@ -1374,39 +1385,30 @@ pub struct Core {
 
 
 /// Assemblyline Deployment Configuration
-/// @odm.model(index=False, store=False, )
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Config {
     // /// Authentication module configuration
-    // #[serde(default)]
     // pub auth: Auth,
     /// Core component configuration
-    #[serde(default)]
     pub core: Core,
     // /// Datastore configuration
-    // #[serde(default)]
     // pub datastore: Datastore,
     // /// Datasources configuration
     // #[serde(default = "default_datasources")]
     // pub datasources: HashMap<String, Datasource>,
     // /// Filestore configuration
-    // #[serde(default)]
     // pub filestore: Filestore,
     // /// Logging configuration
-    // #[serde(default)]
     // pub logging: Logging,
     // /// Service configuration
-    // #[serde(default)]
     // pub services: Services,
     // /// System configuration
-    // #[serde(default)]
     // pub system: System,
     // /// UI configuration parameters
-    // #[serde(default)]
     // pub ui: UI,
-    // /// Options for how submissions will be processed
-    // #[serde(default)]
-    // pub submission: Submission,
+    /// Options for how submissions will be processed
+    pub submission: Submission,
     // /// Retrohunt configuration for the frontend and server
     // pub retrohunt: Option<Retrohunt>,
 }

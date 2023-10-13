@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use assemblyline_models::Sha256;
+use assemblyline_models::{Sha256, JsonMap};
 use tokio::sync::mpsc;
 
 use super::Session;
@@ -13,20 +13,205 @@ pub struct FileData {
     pub sha256: Sha256,
     pub depth: usize,
     pub name: String,
+    pub temporary_data: JsonMap,
+    pub file_info: assemblyline_models::datastore::File,
 }
 
 
 pub struct ExtractedFile {
-    pub parent: Sha256,
+    pub parent: FileData,
     pub sha256: Sha256,
     pub name: String,
+
+    // By having the extract carry the sender back to the submission
+    // main loop we ensure that the dispatcher only runs while there are
+    // live files being processed.
+    // the main loop is written to keep running if and only if there are
+    // living references to this sender. This means that even if a file
+    // crashes out terribly the dispatcher can never hang due to that crash.
+    pub start_file: mpsc::Sender<ExtractedFile>
 }
 
 pub struct FileResult {
-
+    pub sha256: Sha256,
 }
 
 pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<ExtractedFile>, data: FileData) -> Result<FileResult> {
+    // Get the schedule for this file
+
+//         submission = task.submission
+//         sid = submission.sid
+//         if self.apm_client:
+//             elasticapm.label(sid=sid, sha256=sha256)
+
+//         file_depth: int = task.file_depth[sha256]
+//         # If its the first time we've seen this file, we won't have a schedule for it
+//         if sha256 not in task.file_schedules:
+//             # We are processing this file, load the file info, and build the schedule
+//             file_info = self.get_fileinfo(task, sha256)
+//             if file_info is None:
+//                 return False
+
+//             forbidden_services = None
+
+//             # If Dynamic Recursion Prevention is in effect and the file is not part of the bypass list,
+//             # Find the list of services this file is forbidden from being sent to.
+//             ignore_drp = submission.params.ignore_dynamic_recursion_prevention
+//             if not ignore_drp and sha256 not in task.dynamic_recursion_bypass:
+//                 forbidden_services = task.find_recursion_excluded_services(sha256)
+
+//             task.file_schedules[sha256] = self.scheduler.build_schedule(submission, file_info.type,
+//                                                                         file_depth, forbidden_services,
+//                                                                         task.service_access_control)
+
+//         file_info = task.file_info[sha256]
+//         schedule: list = list(task.file_schedules[sha256])
+//         deep_scan, ignore_filtering = submission.params.deep_scan, submission.params.ignore_filtering
+
+//         # Go through each round of the schedule removing complete/failed services
+//         # Break when we find a stage that still needs processing
+//         outstanding: dict[str, Service] = {}
+//         started_stages = []
+//         with elasticapm.capture_span('check_result_table'):
+//             while schedule and not outstanding:
+//                 stage = schedule.pop(0)
+//                 started_stages.append(stage)
+
+//                 for service_name in stage:
+//                     service = self.scheduler.services.get(service_name)
+//                     if not service:
+//                         continue
+
+//                     key = (sha256, service_name)
+
+//                     # If the service terminated in an error, count the error and continue
+//                     if key in task.service_errors:
+//                         continue
+
+//                     # If we have no error, and no result, its not finished
+//                     result = task.service_results.get(key)
+//                     if not result:
+//                         outstanding[service_name] = service
+//                         continue
+
+//                     # if the service finished, count the score, and check if the file has been dropped
+//                     if not ignore_filtering and result.drop:
+//                         # Clear out anything in the schedule after this stage
+//                         task.file_schedules[sha256] = started_stages
+//                         schedule.clear()
+
+//         # Try to retry/dispatch any outstanding services
+//         if outstanding:
+//             sent, enqueued, running, skipped = [], [], [], []
+
+//             for service_name, service in outstanding.items():
+//                 with elasticapm.capture_span('dispatch_task', labels={'service': service_name}):
+//                     service_queue = get_service_queue(service_name, self.redis)
+
+//                     key = (sha256, service_name)
+//                     # Check if the task is already running
+//                     if key in task.running_services:
+//                         running.append(service_name)
+//                         continue
+
+//                     # Check if this task is already sitting in queue
+//                     with elasticapm.capture_span('check_queue'):
+//                         dispatch_key = task.queue_keys.get(key, None)
+//                         if dispatch_key is not None and service_queue.rank(dispatch_key) is not None:
+//                             enqueued.append(service_name)
+//                             continue
+
+//                     # If its not in queue already check we aren't dispatching anymore
+//                     if task.submission.to_be_deleted:
+//                         skipped.append(service_name)
+//                         continue
+
+//                     # Check if we have attempted this too many times already.
+//                     task.service_attempts[key] += 1
+//                     if task.service_attempts[key] > 3:
+//                         self.retry_error(task, sha256, service_name)
+//                         continue
+
+//                     # Load the list of tags we will pass
+//                     tags = []
+//                     if service.uses_tags or service.uses_tag_scores:
+//                         tags = list(task.file_tags.get(sha256, {}).values())
+
+//                     # Load the temp submission data we will pass
+//                     temp_data = {}
+//                     if service.uses_temp_submission_data:
+//                         temp_data = task.file_temporary_data[sha256]
+
+//                     # Load the metadata we will pass
+//                     metadata = {}
+//                     if service.uses_metadata:
+//                         metadata = submission.metadata
+
+//                     tag_fields = ['type', 'value', 'short_type']
+//                     if service.uses_tag_scores:
+//                         tag_fields.append('score')
+
+//                     # Mark this routing for the purposes of dynamic recursion prevention
+//                     if service.category == DYNAMIC_ANALYSIS_CATEGORY:
+//                         task.forbid_for_children(sha256, service_name)
+
+//                     # Build the actual service dispatch message
+//                     config = self.build_service_config(service, submission)
+//                     service_task = ServiceTask(dict(
+//                         sid=sid,
+//                         metadata=metadata,
+//                         min_classification=task.submission.classification,
+//                         service_name=service_name,
+//                         service_config=config,
+//                         fileinfo=file_info,
+//                         filename=task.file_names.get(sha256, sha256),
+//                         depth=file_depth,
+//                         max_files=task.submission.params.max_extracted,
+//                         ttl=submission.params.ttl,
+//                         ignore_cache=submission.params.ignore_cache,
+//                         ignore_dynamic_recursion_prevention=submission.params.ignore_dynamic_recursion_prevention,
+//                         ignore_filtering=ignore_filtering,
+//                         tags=[{field: x[field] for field in tag_fields} for x in tags],
+//                         temporary_submission_data=[
+//                             {'name': name, 'value': value} for name, value in temp_data.items()
+//                         ],
+//                         deep_scan=deep_scan,
+//                         priority=submission.params.priority,
+//                         safelist_config=self.config.services.safelist
+//                     ))
+//                     service_task.metadata['dispatcher__'] = self.instance_id
+
+//                     # Its a new task, send it to the service
+//                     queue_key = service_queue.push(service_task.priority, service_task.as_primitives())
+//                     task.queue_keys[key] = queue_key
+//                     sent.append(service_name)
+//                     task.service_logs[key].append(f'Submitted to queue at {now_as_iso()}')
+
+//             if sent or enqueued or running:
+//                 # If we have confirmed that we are waiting, or have taken an action, log that.
+//                 self.log.info(f"[{sid}] File {sha256} sent to: {sent} "
+//                               f"already in queue for: {enqueued} "
+//                               f"running on: {running}")
+//                 return False
+//             elif skipped:
+//                 # Not waiting for anything, and have started skipping what is left over
+//                 # because this submission is terminated. Drop through to the base
+//                 # case where the file is complete
+//                 pass
+//             else:
+//                 # If we are not waiting, and have not taken an action, we must have hit the
+//                 # retry limit on the only service running. In that case, we can move directly
+//                 # onto the next stage of services, so recurse to trigger them.
+//                 return self.dispatch_file(task, sha256)
+
+//         self.counter.increment('files_completed')
+//         if len(task.queue_keys) > 0 or len(task.running_services) > 0:
+//             self.log.info(f"[{sid}] Finished processing file '{sha256}', submission incomplete "
+//                           f"(queued: {len(task.queue_keys)} running: {len(task.running_services)})")
+//         else:
+//             self.log.info(f"[{sid}] Finished processing file '{sha256}', checking if submission complete")
+//             return self.check_submission(task)
+//         return False
     todo!()
 }
 
@@ -548,234 +733,6 @@ pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<Extrac
 //                     self.dispatch_submission(task)
 
 
-//     @elasticapm.capture_span(span_type='dispatcher')
-//     def get_fileinfo(self, task: SubmissionTask, sha256: str) -> Optional[FileInfo]:
-//         # First try to get the info from local cache
-//         file_info = task.file_info.get(sha256, None)
-//         if file_info:
-//             return file_info
-
-//         # get the info from datastore
-//         filestore_info: Optional[File] = self.datastore.file.get(sha256)
-
-//         if filestore_info is None:
-//             # Store an error and mark this file as unprocessable
-//             task.dropped_files.add(sha256)
-//             self._dispatching_error(task, Error({
-//                 'archive_ts': None,
-//                 'expiry_ts': task.submission.expiry_ts,
-//                 'response': {
-//                     'message': f"Couldn't find file info for {sha256} in submission {task.sid}",
-//                     'service_name': 'Dispatcher',
-//                     'service_tool_version': '4.0',
-//                     'service_version': '4.0',
-//                     'status': 'FAIL_NONRECOVERABLE'
-//                 },
-//                 'sha256': sha256,
-//                 'type': 'UNKNOWN'
-//             }))
-//             task.file_info[sha256] = None
-//             task.file_schedules[sha256] = []
-//             return None
-//         else:
-//             # Translate the file info format
-//             file_info = task.file_info[sha256] = FileInfo(dict(
-//                 magic=filestore_info.magic,
-//                 md5=filestore_info.md5,
-//                 mime=filestore_info.mime,
-//                 sha1=filestore_info.sha1,
-//                 sha256=filestore_info.sha256,
-//                 size=filestore_info.size,
-//                 type=filestore_info.type,
-//             ))
-//         return file_info
-
-//     @elasticapm.capture_span(span_type='dispatcher')
-//     def dispatch_file(self, task: SubmissionTask, sha256: str) -> bool:
-//         """
-//         Dispatch to any outstanding services for the given file.
-//         If nothing can be dispatched, check if the submission is finished.
-
-//         :param task: Submission task object.
-//         :param sha256: hash of the file to check.
-//         :param timed_out_host: Name of the host that timed out after maximum service attempts.
-//         :return: true if submission is finished.
-//         """
-//         submission = task.submission
-//         sid = submission.sid
-//         if self.apm_client:
-//             elasticapm.label(sid=sid, sha256=sha256)
-
-//         file_depth: int = task.file_depth[sha256]
-//         # If its the first time we've seen this file, we won't have a schedule for it
-//         if sha256 not in task.file_schedules:
-//             # We are processing this file, load the file info, and build the schedule
-//             file_info = self.get_fileinfo(task, sha256)
-//             if file_info is None:
-//                 return False
-
-//             forbidden_services = None
-
-//             # If Dynamic Recursion Prevention is in effect and the file is not part of the bypass list,
-//             # Find the list of services this file is forbidden from being sent to.
-//             ignore_drp = submission.params.ignore_dynamic_recursion_prevention
-//             if not ignore_drp and sha256 not in task.dynamic_recursion_bypass:
-//                 forbidden_services = task.find_recursion_excluded_services(sha256)
-
-//             task.file_schedules[sha256] = self.scheduler.build_schedule(submission, file_info.type,
-//                                                                         file_depth, forbidden_services,
-//                                                                         task.service_access_control)
-
-//         file_info = task.file_info[sha256]
-//         schedule: list = list(task.file_schedules[sha256])
-//         deep_scan, ignore_filtering = submission.params.deep_scan, submission.params.ignore_filtering
-
-//         # Go through each round of the schedule removing complete/failed services
-//         # Break when we find a stage that still needs processing
-//         outstanding: dict[str, Service] = {}
-//         started_stages = []
-//         with elasticapm.capture_span('check_result_table'):
-//             while schedule and not outstanding:
-//                 stage = schedule.pop(0)
-//                 started_stages.append(stage)
-
-//                 for service_name in stage:
-//                     service = self.scheduler.services.get(service_name)
-//                     if not service:
-//                         continue
-
-//                     key = (sha256, service_name)
-
-//                     # If the service terminated in an error, count the error and continue
-//                     if key in task.service_errors:
-//                         continue
-
-//                     # If we have no error, and no result, its not finished
-//                     result = task.service_results.get(key)
-//                     if not result:
-//                         outstanding[service_name] = service
-//                         continue
-
-//                     # if the service finished, count the score, and check if the file has been dropped
-//                     if not ignore_filtering and result.drop:
-//                         # Clear out anything in the schedule after this stage
-//                         task.file_schedules[sha256] = started_stages
-//                         schedule.clear()
-
-//         # Try to retry/dispatch any outstanding services
-//         if outstanding:
-//             sent, enqueued, running, skipped = [], [], [], []
-
-//             for service_name, service in outstanding.items():
-//                 with elasticapm.capture_span('dispatch_task', labels={'service': service_name}):
-//                     service_queue = get_service_queue(service_name, self.redis)
-
-//                     key = (sha256, service_name)
-//                     # Check if the task is already running
-//                     if key in task.running_services:
-//                         running.append(service_name)
-//                         continue
-
-//                     # Check if this task is already sitting in queue
-//                     with elasticapm.capture_span('check_queue'):
-//                         dispatch_key = task.queue_keys.get(key, None)
-//                         if dispatch_key is not None and service_queue.rank(dispatch_key) is not None:
-//                             enqueued.append(service_name)
-//                             continue
-
-//                     # If its not in queue already check we aren't dispatching anymore
-//                     if task.submission.to_be_deleted:
-//                         skipped.append(service_name)
-//                         continue
-
-//                     # Check if we have attempted this too many times already.
-//                     task.service_attempts[key] += 1
-//                     if task.service_attempts[key] > 3:
-//                         self.retry_error(task, sha256, service_name)
-//                         continue
-
-//                     # Load the list of tags we will pass
-//                     tags = []
-//                     if service.uses_tags or service.uses_tag_scores:
-//                         tags = list(task.file_tags.get(sha256, {}).values())
-
-//                     # Load the temp submission data we will pass
-//                     temp_data = {}
-//                     if service.uses_temp_submission_data:
-//                         temp_data = task.file_temporary_data[sha256]
-
-//                     # Load the metadata we will pass
-//                     metadata = {}
-//                     if service.uses_metadata:
-//                         metadata = submission.metadata
-
-//                     tag_fields = ['type', 'value', 'short_type']
-//                     if service.uses_tag_scores:
-//                         tag_fields.append('score')
-
-//                     # Mark this routing for the purposes of dynamic recursion prevention
-//                     if service.category == DYNAMIC_ANALYSIS_CATEGORY:
-//                         task.forbid_for_children(sha256, service_name)
-
-//                     # Build the actual service dispatch message
-//                     config = self.build_service_config(service, submission)
-//                     service_task = ServiceTask(dict(
-//                         sid=sid,
-//                         metadata=metadata,
-//                         min_classification=task.submission.classification,
-//                         service_name=service_name,
-//                         service_config=config,
-//                         fileinfo=file_info,
-//                         filename=task.file_names.get(sha256, sha256),
-//                         depth=file_depth,
-//                         max_files=task.submission.params.max_extracted,
-//                         ttl=submission.params.ttl,
-//                         ignore_cache=submission.params.ignore_cache,
-//                         ignore_dynamic_recursion_prevention=submission.params.ignore_dynamic_recursion_prevention,
-//                         ignore_filtering=ignore_filtering,
-//                         tags=[{field: x[field] for field in tag_fields} for x in tags],
-//                         temporary_submission_data=[
-//                             {'name': name, 'value': value} for name, value in temp_data.items()
-//                         ],
-//                         deep_scan=deep_scan,
-//                         priority=submission.params.priority,
-//                         safelist_config=self.config.services.safelist
-//                     ))
-//                     service_task.metadata['dispatcher__'] = self.instance_id
-
-//                     # Its a new task, send it to the service
-//                     queue_key = service_queue.push(service_task.priority, service_task.as_primitives())
-//                     task.queue_keys[key] = queue_key
-//                     sent.append(service_name)
-//                     task.service_logs[key].append(f'Submitted to queue at {now_as_iso()}')
-
-//             if sent or enqueued or running:
-//                 # If we have confirmed that we are waiting, or have taken an action, log that.
-//                 self.log.info(f"[{sid}] File {sha256} sent to: {sent} "
-//                               f"already in queue for: {enqueued} "
-//                               f"running on: {running}")
-//                 return False
-//             elif skipped:
-//                 # Not waiting for anything, and have started skipping what is left over
-//                 # because this submission is terminated. Drop through to the base
-//                 # case where the file is complete
-//                 pass
-//             else:
-//                 # If we are not waiting, and have not taken an action, we must have hit the
-//                 # retry limit on the only service running. In that case, we can move directly
-//                 # onto the next stage of services, so recurse to trigger them.
-//                 return self.dispatch_file(task, sha256)
-
-//         self.counter.increment('files_completed')
-//         if len(task.queue_keys) > 0 or len(task.running_services) > 0:
-//             self.log.info(f"[{sid}] Finished processing file '{sha256}', submission incomplete "
-//                           f"(queued: {len(task.queue_keys)} running: {len(task.running_services)})")
-//         else:
-//             self.log.info(f"[{sid}] Finished processing file '{sha256}', checking if submission complete")
-//             return self.check_submission(task)
-//         return False
-
-
 //     @classmethod
 //     def build_service_config(cls, service: Service, submission: Submission) -> dict[str, str]:
 //         """Prepare the service config that will be used downstream.
@@ -1172,22 +1129,6 @@ pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<Extrac
 //                 self.find_process_queue(sid).put(DispatchAction(kind=Action.start, sid=sid, sha=sha,
 //                                                                 service_name=service_name, worker_id=worker_id))
 
-//     @elasticapm.capture_span(span_type='dispatcher')
-//     def set_timeout(self, task: SubmissionTask, sha256, service_name, worker_id):
-//         sid = task.submission.sid
-//         service = self.scheduler.services.get(service_name)
-//         if not service:
-//             return
-//         self._service_timeouts.set((sid, sha256, service_name), service.timeout + TIMEOUT_EXTRA_TIME, worker_id)
-//         task.running_services.add((sha256, service_name))
-
-//     @elasticapm.capture_span(span_type='dispatcher')
-//     def clear_timeout(self, task, sha256, service_name):
-//         sid = task.submission.sid
-//         task.queue_keys.pop((sha256, service_name), None)
-//         task.running_services.discard((sha256, service_name))
-//         self._service_timeouts.clear((sid, sha256, service_name))
-
 //     def handle_timeouts(self):
 //         while self.sleep(TIMEOUT_TEST_INTERVAL):
 //             with apm_span(self.apm_client, 'process_timeouts'):
@@ -1247,114 +1188,6 @@ pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<Extrac
 //                                 host=worker_id, counter_type='service', redis=self.redis)
 //         return True
 
-//     def work_guard(self):
-//         check_interval = GUARD_TIMEOUT/8
-//         old_value = int(time.time())
-//         self.dispatchers_directory.set(self.instance_id, old_value)
-
-//         try:
-//             while self.sleep(check_interval):
-//                 cpu_mark = time.process_time()
-//                 time_mark = time.time()
-
-//                 # Increase the guard number
-//                 gap = int(time.time() - old_value)
-//                 updated_value = self.dispatchers_directory.increment(self.instance_id, gap)
-
-//                 # If for whatever reason, there was a moment between the previous increment
-//                 # and the one before that, that the gap reached the timeout, someone may have
-//                 # started stealing our work. We should just exit.
-//                 if time.time() - old_value > GUARD_TIMEOUT:
-//                     self.log.warning(f'Dispatcher closing due to guard interval failure: '
-//                                      f'{time.time() - old_value} > {GUARD_TIMEOUT}')
-//                     self.stop()
-//                     return
-
-//                 # Everything is fine, prepare for next round
-//                 old_value = updated_value
-
-//                 self.counter.increment_execution_time('cpu_seconds', time.process_time() - cpu_mark)
-//                 self.counter.increment_execution_time('busy_seconds', time.time() - time_mark)
-//         finally:
-//             if not self.running:
-//                 self.dispatchers_directory.pop(self.instance_id)
-//                 self.dispatchers_directory_finalize.pop(self.instance_id)
-
-//     def work_thief(self):
-
-//         # Clean up the finalize list once in a while
-//         for id, timestamp in self.dispatchers_directory_finalize.items().items():
-//             if int(time.time()) - timestamp > DAY_IN_SECONDS:
-//                 self.dispatchers_directory_finalize.pop(id)
-
-//         # Keep a table of the last recorded status for other dispatchers
-//         last_seen = {}
-
-//         try:
-//             while self.sleep(GUARD_TIMEOUT / 4):
-//                 cpu_mark = time.process_time()
-//                 time_mark = time.time()
-
-//                 # Load guards
-//                 finalizing = self.dispatchers_directory_finalize.items()
-//                 last_seen.update(self.dispatchers_directory.items())
-
-//                 # List all dispatchers with jobs assigned
-//                 for raw_key in self.redis_persist.keys(TASK_ASSIGNMENT_PATTERN):
-//                     key: str = raw_key.decode()
-//                     key = key[len(DISPATCH_TASK_ASSIGNMENT):]
-//                     if key not in last_seen:
-//                         last_seen[key] = time.time()
-//                 self.running_dispatchers_estimate = len(set(last_seen.keys()) - set(finalizing.keys()))
-
-//                 self.counter.increment_execution_time('cpu_seconds', time.process_time() - cpu_mark)
-//                 self.counter.increment_execution_time('busy_seconds', time.time() - time_mark)
-
-//                 # Check if any of the dispatchers
-//                 if last_seen:
-//                     oldest = min(last_seen.keys(), key=lambda _x: last_seen[_x])
-//                     if time.time() - last_seen[oldest] > GUARD_TIMEOUT:
-//                         self.steal_work(oldest)
-//                         last_seen.pop(oldest)
-
-//         finally:
-//             if not self.running:
-//                 self.dispatchers_directory.pop(self.instance_id)
-//                 self.dispatchers_directory_finalize.pop(self.instance_id)
-
-//     def steal_work(self, target):
-//         target_jobs = Hash(DISPATCH_TASK_ASSIGNMENT+target, host=self.redis_persist)
-//         self.log.info(f'Starting to steal work from {target}')
-
-//         # Start of process dispatcher transaction
-//         if self.apm_client:
-//             self.apm_client.begin_transaction(APM_SPAN_TYPE)
-
-//         cpu_mark = time.process_time()
-//         time_mark = time.time()
-
-//         keys = target_jobs.keys()
-//         while keys:
-//             key = keys.pop()
-//             message = target_jobs.pop(key)
-//             if not keys:
-//                 keys = target_jobs.keys()
-
-//             if not message:
-//                 continue
-
-//             if self.submissions_assignments.pop(key):
-//                 self.submission_queue.unpop(message)
-
-//         self.counter.increment_execution_time('cpu_seconds', time.process_time() - cpu_mark)
-//         self.counter.increment_execution_time('busy_seconds', time.time() - time_mark)
-
-//         if self.apm_client:
-//             self.apm_client.end_transaction('submission_message', 'success')
-
-//         self.log.info(f'Finished stealing work from {target}')
-//         self.dispatchers_directory.pop(target)
-//         self.dispatchers_directory_finalize.pop(target)
 
 //     def handle_commands(self):
 //         while self.running:

@@ -57,12 +57,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.75"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
-
-[[package]]
 name = "arc-swap"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1318,7 +1312,6 @@ version = "1.3.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc7ae19f3e791ae8108b08801abb3708d64d3a16490c720e0b81040cae87b5d"
 dependencies = [
- "anyhow",
  "async-trait",
  "base64 0.21.4",
  "bytes",
@@ -1683,21 +1676,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "scratch"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "native-tls",
- "poem",
- "reqwest",
- "rustls 0.21.7",
- "rustls-native-certs",
- "rustls-pemfile",
- "tokio",
-]
 
 [[package]]
 name = "sct"

@@ -102,7 +102,7 @@ impl FromStr for Sha256 {
 }
 
 /// MD5 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct MD5 {
     hex: String
@@ -136,7 +136,7 @@ impl std::str::FromStr for MD5 {
 
 
 /// Sha1 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Sha1 {
     hex: String

@@ -104,6 +104,8 @@ pub struct SubmissionParams {
     pub priority: u16,
     /// Should the submission do extra profiling?
     pub profile: bool,
+    /// Does this submission count against quota?
+    pub quota_item: bool,
     /// Service selection
     pub services: ServiceSelection,
     /// Service-specific parameters
@@ -145,6 +147,7 @@ impl Default for SubmissionParams {
             max_supplementary: 100,
             priority: 100,
             profile: false,
+            quota_item: false,
             services: Default::default(),
             service_spec: Default::default(),
             submitter: "USER".to_owned(),

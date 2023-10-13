@@ -7,7 +7,7 @@ use crate::{Classification, Sha256, MD5, SSDeepHash, Sha1, ElasticMeta};
 
 
 /// File Seen Model
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Seen {
@@ -36,7 +36,7 @@ impl Default for Seen {
 }
 
 /// Model of File
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct File {
