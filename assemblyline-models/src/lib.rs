@@ -238,4 +238,5 @@ pub struct ElasticMeta {
     pub index: Option<bool>,
     pub store: Option<bool>,
     pub copyto: &'static str,
+    pub text: bool,
 }

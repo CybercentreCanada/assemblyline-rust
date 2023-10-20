@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use assemblyline_models::datastore::Submission;
 use assemblyline_models::{Sha256, JsonMap};
 use tokio::sync::mpsc;
 
@@ -15,6 +16,9 @@ pub struct FileData {
     pub name: String,
     pub temporary_data: JsonMap,
     pub file_info: assemblyline_models::datastore::File,
+    // pub submission: Arc<Submission>,
+    // pub ignore_dynamic_recursion_prevention: bool,
+    pub schedule: Vec<
 }
 
 
@@ -34,77 +38,38 @@ pub struct ExtractedFile {
 
 pub struct FileResult {
     pub sha256: Sha256,
+    pub score: i32,
+    pub errors: Vec<String>,
+    pub results: Vec<String>,
 }
 
 pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<ExtractedFile>, data: FileData) -> Result<FileResult> {
+    let params = &data.submission.params;
+
     // Get the schedule for this file
+    let forbidden_services = if !data.ignore_dynamic_recursion_prevention {
+        task.find_recursion_excluded_services(data.sha256)
+    } else {
+        None
+    };
 
-//         submission = task.submission
-//         sid = submission.sid
-//         if self.apm_client:
-//             elasticapm.label(sid=sid, sha256=sha256)
+    let schedule = self.scheduler.build_schedule(submission, file_info.type,
+                                                                file_depth, forbidden_services,
+                                                                task.service_access_control)
 
-//         file_depth: int = task.file_depth[sha256]
-//         # If its the first time we've seen this file, we won't have a schedule for it
-//         if sha256 not in task.file_schedules:
-//             # We are processing this file, load the file info, and build the schedule
-//             file_info = self.get_fileinfo(task, sha256)
-//             if file_info is None:
-//                 return False
+    deep_scan, ignore_filtering = submission.params.deep_scan, submission.params.ignore_filtering
 
-//             forbidden_services = None
+    let results = vec![];
 
-//             # If Dynamic Recursion Prevention is in effect and the file is not part of the bypass list,
-//             # Find the list of services this file is forbidden from being sent to.
-//             ignore_drp = submission.params.ignore_dynamic_recursion_prevention
-//             if not ignore_drp and sha256 not in task.dynamic_recursion_bypass:
-//                 forbidden_services = task.find_recursion_excluded_services(sha256)
+    for stage in schedule {
+        let jobs = tokio::tasks::JoinSet::new();
 
-//             task.file_schedules[sha256] = self.scheduler.build_schedule(submission, file_info.type,
-//                                                                         file_depth, forbidden_services,
-//                                                                         task.service_access_control)
+        for service_name, service in stage {
 
-//         file_info = task.file_info[sha256]
-//         schedule: list = list(task.file_schedules[sha256])
-//         deep_scan, ignore_filtering = submission.params.deep_scan, submission.params.ignore_filtering
+        }
 
-//         # Go through each round of the schedule removing complete/failed services
-//         # Break when we find a stage that still needs processing
-//         outstanding: dict[str, Service] = {}
-//         started_stages = []
-//         with elasticapm.capture_span('check_result_table'):
-//             while schedule and not outstanding:
-//                 stage = schedule.pop(0)
-//                 started_stages.append(stage)
+        jobs.c
 
-//                 for service_name in stage:
-//                     service = self.scheduler.services.get(service_name)
-//                     if not service:
-//                         continue
-
-//                     key = (sha256, service_name)
-
-//                     # If the service terminated in an error, count the error and continue
-//                     if key in task.service_errors:
-//                         continue
-
-//                     # If we have no error, and no result, its not finished
-//                     result = task.service_results.get(key)
-//                     if not result:
-//                         outstanding[service_name] = service
-//                         continue
-
-//                     # if the service finished, count the score, and check if the file has been dropped
-//                     if not ignore_filtering and result.drop:
-//                         # Clear out anything in the schedule after this stage
-//                         task.file_schedules[sha256] = started_stages
-//                         schedule.clear()
-
-//         # Try to retry/dispatch any outstanding services
-//         if outstanding:
-//             sent, enqueued, running, skipped = [], [], [], []
-
-//             for service_name, service in outstanding.items():
 //                 with elasticapm.capture_span('dispatch_task', labels={'service': service_name}):
 //                     service_queue = get_service_queue(service_name, self.redis)
 
@@ -187,32 +152,20 @@ pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<Extrac
 //                     sent.append(service_name)
 //                     task.service_logs[key].append(f'Submitted to queue at {now_as_iso()}')
 
-//             if sent or enqueued or running:
-//                 # If we have confirmed that we are waiting, or have taken an action, log that.
-//                 self.log.info(f"[{sid}] File {sha256} sent to: {sent} "
-//                               f"already in queue for: {enqueued} "
-//                               f"running on: {running}")
-//                 return False
-//             elif skipped:
-//                 # Not waiting for anything, and have started skipping what is left over
-//                 # because this submission is terminated. Drop through to the base
-//                 # case where the file is complete
-//                 pass
-//             else:
-//                 # If we are not waiting, and have not taken an action, we must have hit the
-//                 # retry limit on the only service running. In that case, we can move directly
-//                 # onto the next stage of services, so recurse to trigger them.
-//                 return self.dispatch_file(task, sha256)
+    }
 
-//         self.counter.increment('files_completed')
-//         if len(task.queue_keys) > 0 or len(task.running_services) > 0:
-//             self.log.info(f"[{sid}] Finished processing file '{sha256}', submission incomplete "
-//                           f"(queued: {len(task.queue_keys)} running: {len(task.running_services)})")
-//         else:
-//             self.log.info(f"[{sid}] Finished processing file '{sha256}', checking if submission complete")
-//             return self.check_submission(task)
-//         return False
-    todo!()
+
+    self.counter.increment('files_completed')
+    if len(task.queue_keys) > 0 or len(task.running_services) > 0:
+        self.log.info(f"[{sid}] Finished processing file '{sha256}', submission incomplete "
+                        f"(queued: {len(task.queue_keys)} running: {len(task.running_services)})")
+    else:
+        self.log.info(f"[{sid}] Finished processing file '{sha256}', checking if submission complete")
+        return self.check_submission(task)
+
+    return Ok(FileResult{
+
+    })
 }
 
 // from __future__ import annotations
@@ -1376,3 +1329,164 @@ pub async fn process_file(session: Arc<Session>, start_file: mpsc::Sender<Extrac
 //         # Wait for those updates to finish
 //         for event in new_sid_events:
 //             event.wait()
+
+// from __future__ import annotations
+// from typing import Dict, Optional, Set, cast
+
+// import logging
+// import os
+// import re
+
+// from assemblyline.common.forge import CachedObject, get_classification
+// from assemblyline.datastore.helper import AssemblylineDatastore
+// from assemblyline.odm.models.config import Config
+// from assemblyline.odm.models.service import Service
+// from assemblyline.odm.models.submission import Submission
+// from assemblyline_core.server_base import get_service_stage_hash, ServiceStage
+
+
+// # If you are doing development and you want the system to route jobs ignoring the service setup/teardown
+// # set an environment variable SKIP_SERVICE_SETUP to true for all dispatcher containers
+// SKIP_SERVICE_SETUP = os.environ.get('SKIP_SERVICE_SETUP', 'false').lower() in ['true', '1']
+
+// Classification = get_classification()
+
+
+// class Scheduler:
+//     """This object encapsulates building the schedule for a given file type for a submission."""
+
+//     def __init__(self, datastore: AssemblylineDatastore, config: Config, redis):
+//         self.datastore = datastore
+//         self.config = config
+//         self._services: Dict[str, Service] = {}
+//         self.services = cast(Dict[str, Service], CachedObject(self._get_services))
+//         self.service_stage = get_service_stage_hash(redis)
+//         self.c12n_services: Dict[str, Set[str]] = {}
+
+//     def build_schedule(self, submission: Submission, file_type: str, file_depth: int = 0,
+//                        runtime_excluded: Optional[list[str]] = None,
+//                        submitter_c12n: Optional[str] = Classification.UNRESTRICTED) -> list[dict[str, Service]]:
+//         # Get the set of all services currently enabled on the system
+//         all_services = dict(self.services)
+
+//         # Retrieve a list of services that the classfication group is allowed to submit to
+//         if submitter_c12n is None:
+//             accessible = set(all_services.keys())
+//         else:
+//             accessible = self.get_accessible_services(submitter_c12n)
+
+//         # Load the selected and excluded services by category
+//         excluded = self.expand_categories(submission.params.services.excluded)
+//         runtime_excluded = self.expand_categories(runtime_excluded or [])
+//         if not submission.params.services.selected:
+//             selected = [s for s in all_services.keys()]
+//         else:
+//             selected = self.expand_categories(submission.params.services.selected)
+
+//         if submission.params.services.rescan:
+//             selected.extend(self.expand_categories(submission.params.services.rescan))
+
+//         # If we enable service safelisting, the Safelist service shouldn't run on extracted files unless:
+//         #   - We're enforcing use of the Safelist service (we always want to run the Safelist service)
+//         #   - We're running submission with Deep Scanning
+//         #   - We want to Ignore Filtering (perform as much unfiltered analysis as possible)
+//         if "Safelist" in selected and file_depth and self.config.services.safelist.enabled and \
+//                 not self.config.services.safelist.enforce_safelist_service \
+//                 and not (submission.params.deep_scan or submission.params.ignore_filtering):
+//             # Alter schedule to remove Safelist, if scheduled to run
+//             selected.remove("Safelist")
+
+//         # Add all selected, accepted, and not rejected services to the schedule
+//         schedule: list[dict[str, Service]] = [{} for _ in self.config.services.stages]
+//         services = list(set(selected).intersection(accessible) - set(excluded) - set(runtime_excluded))
+//         selected = []
+//         skipped = []
+//         for name in services:
+//             service = all_services.get(name, None)
+
+//             if not service:
+//                 skipped.append(name)
+//                 logging.warning(f"Service configuration not found: {name}")
+//                 continue
+
+//             accepted = not service.accepts or re.match(service.accepts, file_type)
+//             rejected = bool(service.rejects) and re.match(service.rejects, file_type)
+
+//             if accepted and not rejected:
+//                 schedule[self.stage_index(service.stage)][name] = service
+//                 selected.append(name)
+//             else:
+//                 skipped.append(name)
+
+//         return schedule
+
+//     def expand_categories(self, services: list[str]) -> list[str]:
+//         """Expands the names of service categories found in the list of services.
+
+//         Args:
+//             services (list): List of service category or service names.
+//         """
+//         if services is None:
+//             return []
+
+//         services = list(services)
+//         categories = self.categories()
+
+//         found_services = []
+//         seen_categories: set[str] = set()
+//         while services:
+//             name = services.pop()
+
+//             # If we found a new category mix in it's content
+//             if name in categories:
+//                 if name not in seen_categories:
+//                     # Add all of the items in this group to the list of
+//                     # things that we need to evaluate, and mark this
+//                     # group as having been seen.
+//                     services.extend(categories[name])
+//                     seen_categories.update(name)
+//                 continue
+
+//             # If it isn't a category, its a service
+//             found_services.append(name)
+
+//         # Use set to remove duplicates, set is more efficient in batches
+//         return list(set(found_services))
+
+//     def categories(self) -> Dict[str, list[str]]:
+//         all_categories: dict[str, list[str]] = {}
+//         for service in self.services.values():
+//             try:
+//                 all_categories[service.category].append(service.name)
+//             except KeyError:
+//                 all_categories[service.category] = [service.name]
+//         return all_categories
+
+//     def get_accessible_services(self, user_c12n: str) -> Set[str]:
+//         if not self.c12n_services.get(user_c12n):
+//             # Cache services that are accessible to a classification group
+//             self.c12n_services[user_c12n] = {_ for _, service in dict(self.services).items()
+//                                              if Classification.is_accessible(user_c12n, service.classification)}
+
+//         return self.c12n_services[user_c12n]
+
+//     def stage_index(self, stage):
+//         return self.config.services.stages.index(stage)
+
+//     def _get_services(self):
+//         old, self._services = self._services, {}
+//         stages = self.service_stage.items()
+//         services: list[Service] = self.datastore.list_all_services(full=True)
+//         for service in services:
+//             if service.enabled:
+//                 # Determine if this is a service we would wait for the first update run for
+//                 # Assume it is set to running so that in the case of a redis failure we fail
+//                 # on the side of waiting for the update and processing more, rather than skipping
+//                 wait_for = service.update_config and (service.update_config.wait_for_update and not SKIP_SERVICE_SETUP)
+//                 # This is a service that we wait for, and is new, so check if it has finished its update setup
+//                 if wait_for and service.name not in old:
+//                     if stages.get(service.name, ServiceStage.Running) == ServiceStage.Running:
+//                         self._services[service.name] = service
+//                 else:
+//                     self._services[service.name] = service
+//         return self._services

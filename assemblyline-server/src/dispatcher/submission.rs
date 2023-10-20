@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use crate::dispatcher::file::{FileResult, process_file};
+use crate::dispatcher::submission;
 use crate::error::Result;
 
 use super::Session;
@@ -24,7 +25,7 @@ use super::file::{FileData, ExtractedFile};
 
 struct SubmissionContext {
     session: Arc<Session>,
-    submission: Submission,
+    submission: Arc<Submission>,
 
     // Track files that are running, finished, or refused
     started_files: HashSet<Sha256>,
@@ -36,6 +37,9 @@ struct SubmissionContext {
 
     // all of the non-service errors that occurred during processing
     error_keys: Vec<String>,
+
+    // Set of files that can skip dynamic recursion prevention
+    dynamic_recursion_bypass: HashSet<Sha256>,
 }
 
 impl SubmissionContext {
@@ -53,7 +57,7 @@ impl SubmissionContext {
     }
 
     async fn _run(&mut self) -> Result<Submission> {
-        // some short aliases
+        // some short (read only) aliases
         let submission = &self.submission;
         let params = &self.submission.params;
         let sid = self.submission.sid;
@@ -92,7 +96,9 @@ impl SubmissionContext {
                 None => {
                     return self.submission_failure().await
                 }
-            }
+            },
+            submission: self.submission.clone(),
+            ignore_dynamic_recursion_prevention: params.ignore_dynamic_recursion_prevention
         };
 
         // Apply initial data parameter
@@ -152,37 +158,30 @@ impl SubmissionContext {
             }
         }
 
-        max_score = max(file_scores.values()) if file_scores else 0  # Submissions with no results have no score
+        // Submissions with no results have no score (0)
+        let max_score = self.file_results.into_values()
+            .fold(0, |acc, result| acc.max(result.score));
 
         // collect results and update submission
-        results = list(task.service_results.values())
-        errors = list(task.service_errors.values())
-        errors.extend(task.extra_errors)
+        let results = vec![];
+        let errors = self.error_keys;
+        for result in self.file_results.values() {
+            errors.extend(result.errors);
+            results.extend(result.results);
+        }
 
-        submission.classification = submission.params.classification
-        submission.error_count = len(errors)
-        submission.errors = error_keys;
-        submission.file_count = len(file_list)
-        submission.results = [r.key for r in results]
-        submission.max_score = max_score
-        submission.state = 'completed'
-        submission.times.completed = isotime.now_as_iso()
-
-        self._cleanup_submission(task)
-        self.log.info(f"[{sid}] Completed; files: {len(file_list)} results: {len(results)} "
-                        f"errors: {len(errors)} score: {max_score}")
-
+        let mut submission = self.submission;
+        submission.classification = submission.params.classification;
+        submission.error_count = errors.len() as i32;
+        submission.errors = errors;
+        submission.file_count = self.started_files.len() as i32;
+        submission.results = results;
+        submission.max_score = max_score;
+        submission.state = SubmissionState::Completed;
+        submission.times.completed = Some(chrono::Utc::now());
 
         // post processing
         todo!();
-
-        // Finish
-
-        // //         # Send complete message to any watchers.
-        // //         watcher_list = self._watcher_list(sid)
-        // //         for w in watcher_list.members():
-        // //             NamedQueue(w).push(WatchQueueMessage({'status': 'STOP'}).as_primitives())
-
         // //         # Don't run post processing and traffic notifications if the submission is terminated
         // //         if not task.submission.to_be_deleted:
         // //             # Pull the tags keys and values into a searchable form
@@ -201,6 +200,16 @@ impl SubmissionContext {
         // //                 'msg_type': 'SubmissionCompleted',
         // //                 'sender': 'dispatcher',
         // //             }).as_primitives())
+
+        // Finish
+        self.log.info(f"[{sid}] Completed; files: {len(file_list)} results: {len(results)} "
+                        f"errors: {len(errors)} score: {max_score}")
+
+        // TODO
+        //         # Send complete message to any watchers.
+        //         watcher_list = self._watcher_list(sid)
+        //         for w in watcher_list.members():
+        //             NamedQueue(w).push(WatchQueueMessage({'status': 'STOP'}).as_primitives())
 
         // //         # Clear the timeout watcher
         // //         watcher_list.delete()
@@ -235,6 +244,11 @@ impl SubmissionContext {
         // Fetch the info about the parent of this file
         let parent = start.parent;
 
+        // If Dynamic Recursion Prevention is in effect and the file is not part of the bypass list,
+        // Find the list of services this file is forbidden from being sent to.
+        let ignore_drp = self.submission.params.ignore_dynamic_recursion_prevention;
+        let ignore_drp = ignore_drp || self.dynamic_recursion_bypass.contains(&start.sha256);
+
         // Create the info packet about this file
         let data = FileData {
             sha256: start.sha256.clone(),
@@ -245,6 +259,8 @@ impl SubmissionContext {
                 Some(info) => info,
                 None => return Ok(())
             },
+            submission: self.submission.clone(),
+            ignore_dynamic_recursion_prevention: ignore_drp,
         };
 
         // Kick off this file for processing

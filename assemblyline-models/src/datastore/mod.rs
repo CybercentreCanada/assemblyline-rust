@@ -6,6 +6,7 @@ pub mod workflow;
 pub mod result;
 pub mod tagging;
 pub mod file;
+pub mod service;
 
 pub use submission::Submission;
 pub use error::Error;
@@ -14,3 +15,4 @@ pub use workflow::Workflow;
 pub use result::Result;
 pub use tagging::Tagging;
 pub use file::File;
+pub use service::Service;

@@ -4,7 +4,7 @@ use poem::http::StatusCode;
 
 #[derive(Debug)]
 pub enum Error {
-
+    SearchException(String)
 }
 
 impl std::fmt::Display for Error {
