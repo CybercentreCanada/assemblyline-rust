@@ -10,6 +10,8 @@ edition = "2021"
 log = "*"
 chrono = "*"
 tempfile = "*"
+rand = "*"
+itertools = "*"
 
 # Core framework
 tokio = { version = "1", features = ["full"] }

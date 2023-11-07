@@ -4,7 +4,10 @@ use poem::http::StatusCode;
 
 #[derive(Debug)]
 pub enum Error {
-    SearchException(String)
+    SearchException(String),
+    ArchiveDisabled(String),
+    VersionConflictException(String),
+    DataStoreException(&'static str)
 }
 
 impl std::fmt::Display for Error {
@@ -61,6 +64,18 @@ impl From<reqwest::Error> for Error {
 
 impl From<tokio::task::JoinError> for Error {
     fn from(value: tokio::task::JoinError) -> Self {
+        todo!()
+    }
+}
+
+impl From<elasticsearch::Error> for Error {
+    fn from(value: elasticsearch::Error) -> Self {
+        todo!()
+    }
+}
+
+impl From<elasticsearch::http::transport::BuildError> for Error {
+    fn from(value: elasticsearch::http::transport::BuildError) -> Self {
         todo!()
     }
 }
