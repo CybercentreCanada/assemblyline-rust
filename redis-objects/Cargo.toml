@@ -1,0 +1,22 @@
+[package]
+name = "redis-objects"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
+description = """Object oriented wrapper around redis client."""
+
+[dependencies]
+serde = { version = "1.0", features = ["derive", "std"] }
+# serde_with = "3.3"
+serde_json = "1.0"
+# strum = { version = "0.25", features = ["derive"] }
+
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+
+# The versions of these two packages are tied togeather, don't change one without 
+# making sure the pool is using the same redis version
+redis = { version = "0.23", features = ["tokio-comp", "connection-manager", "keep-alive", "native-tls"] }
+deadpool-redis = { version = "0.13.0", features = ["serde"] }
