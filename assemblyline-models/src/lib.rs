@@ -1,11 +1,16 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 pub mod datastore;
 pub mod config;
+pub mod messages;
+mod meta;
+
+pub use meta::ElasticMeta;
 
 #[derive(Debug)]
 pub enum Error {
@@ -70,6 +75,7 @@ impl std::str::FromStr for UpperString {
 
 /// sha256 hash of a file
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq)]
+#[metadata(mapping="keyword", normalizer="lowercase_normalizer")]
 #[metadata_type(ElasticMeta)]
 pub struct Sha256 {
     hex: String
@@ -171,6 +177,7 @@ impl std::str::FromStr for Sha1 {
 /// Validated uuid type with base62 encoding
 #[derive(SerializeDisplay, DeserializeFromStr, Debug, Described, Hash, PartialEq, Eq, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
+#[metadata(mapping="keyword")]
 pub struct Sid(u128);
 
 impl std::fmt::Display for Sid {
@@ -193,6 +200,11 @@ impl Sid {
     }
 }
 
+#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(mapping="text")]
+pub struct Text(String);
+
 /// Unvalidated uuid type
 pub type Uuid = String;
 
@@ -205,8 +217,12 @@ pub type IP = String;
 /// Unvalidated uri type
 pub type Uri = String;
 
-/// Unvalidated classification type
-pub type Classification = String;
+/// Expanding classification type
+#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(mapping="classification")]
+pub struct Classification(String);
+pub type ClassificationString = String;
 
 /// Unvalidated platform type
 pub type Platform = String;
@@ -231,12 +247,3 @@ pub type UriPath = String;
 
 /// Unvalidated Email type
 pub type Email = String;
-
-/// Metadata fields required for converting the structs to elasticsearch mappings
-#[derive(Default)]
-pub struct ElasticMeta {
-    pub index: Option<bool>,
-    pub store: Option<bool>,
-    pub copyto: &'static str,
-    pub text: bool,
-}

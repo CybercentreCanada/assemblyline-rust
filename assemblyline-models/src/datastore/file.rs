@@ -5,6 +5,28 @@ use struct_metadata::Described;
 use crate::{Classification, Sha256, MD5, SSDeepHash, Sha1, ElasticMeta};
 
 
+/// URI Information Model
+#[derive(Serialize, Deserialize, Described, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
+pub struct URIInfo {
+    /// full URI
+    pub uri: String,
+
+    // https://www.rfc-editor.org/rfc/rfc1808.html#section-2.1
+    scheme: String,
+    netloc: String,
+    path: Option<String>,
+    params: Option<String>,
+    query: Option<String>,
+    fragment: Option<String>,
+
+    // Ease-of-use elements
+    username: Option<String>,
+    password: Option<String>,
+    hostname: String,
+    port: Option<u16>,
+}
 
 /// File Seen Model
 #[derive(Serialize, Deserialize, Described, Clone)]
@@ -90,4 +112,7 @@ pub struct File {
     #[serde(default)]
     #[metadata(index=false, store=false)]
     pub from_archive: bool,
+
+    /// URI structure to speed up specialty file searching
+    pub uri_info: Option<URIInfo>,
 }

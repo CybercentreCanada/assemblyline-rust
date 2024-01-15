@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 // from typing import Dict, List
@@ -900,20 +901,37 @@ pub struct Core {
 //     'REVIEW'
 // ]
 
-// SAFELIST_HASH_TYPES = ['sha1', 'sha256', 'md5']
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+// #[metadata_type(ElasticMeta)]
+#[strum(serialize_all = "lowercase")]
+pub enum SafelistHashTypes {
+    Sha1, Sha256, Md5
+}
 // REGISTRY_TYPES = ['docker', 'harbor']
 
 
-// @odm.model(index=False, store=False, description="Service's Safelisting Configuration")
-// class ServiceSafelist(odm.Model):
-//     enabled = odm.Boolean(default=True,
-//                           description="Should services be allowed to check extracted files against safelist?")
-//     hash_types = odm.List(odm.Enum(values=SAFELIST_HASH_TYPES),
-//                           default=['sha1', 'sha256'],
-//                           description="Types of file hashes used for safelist checks")
-//     enforce_safelist_service = odm.Boolean(default=False,
-//                                            description="Should the Safelist service always run on extracted files?")
+/// Service's Safelisting Configuration
+// @odm.model(index=False, store=False, description="")
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServiceSafelist {
+    /// Should services be allowed to check extracted files against safelist?
+    pub enabled: bool,
+    /// Types of file hashes used for safelist checks
+    pub hash_types: Vec<SafelistHashTypes>,
+    /// Should the Safelist service always run on extracted files?
+    pub enforce_safelist_service: bool,
+}
 
+impl Default for ServiceSafelist {
+    fn default() -> Self {
+        Self { 
+            enabled: true, 
+            hash_types: vec![SafelistHashTypes::Sha1, SafelistHashTypes::Sha256], 
+            enforce_safelist_service: false,
+        }
+    }
+}
 
 // @odm.model(index=False, store=False, description="Pre-Configured Registry Details for Services")
 // class ServiceRegistry(odm.Model):
@@ -1325,6 +1343,21 @@ pub struct Core {
 //     'malicious': 1000
 // }
 
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described, Clone, Copy)]
+// #[metadata_type(ElasticMeta)]
+#[strum(serialize_all = "lowercase")]
+pub enum TemporaryKeyType {
+    Union,
+    Overwrite,
+    Ignore,
+}
+
+impl Default for TemporaryKeyType {
+    fn default() -> Self {
+        Self::Overwrite
+    }
+}
+
 
 /// Default values for parameters for submissions that may be overridden on a per submission basis
 #[derive(Serialize, Deserialize)]
@@ -1352,6 +1385,9 @@ pub struct Submission {
     // pub tag_types: TagTypes,
     // /// Minimum score value to get the specified verdict.
     // pub verdicts: Verdicts,
+
+    /// Set the operation that will be used to update values using this key in the temporary submission data.
+    pub temporary_keys: HashMap<String, TemporaryKeyType>,
 }
 
 impl Default for Submission {
@@ -1368,6 +1404,10 @@ impl Default for Submission {
             // sha256_sources: Default::default(),
             // tag_types: Default::default(),
             // verdicts: Default::default()
+            temporary_keys: [
+                ("passwords".to_owned(), TemporaryKeyType::Union),
+                ("ancestry".to_owned(), TemporaryKeyType::Ignore),
+            ].into_iter().collect()
         }
     }
 }

@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{JsonMap, ElasticMeta};
+use crate::{JsonMap, ElasticMeta, Text};
 
 /// Environment Variable Model
 #[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
@@ -269,9 +269,9 @@ pub struct Service {
     #[serde(default)]
     pub config: JsonMap,
     /// Description of service
-    #[metadata(store=true, copyto="__text__", text=true)]
+    #[metadata(store=true, copyto="__text__")]
     #[serde(default="default_description")]
-    pub description: String,
+    pub description: Text,
     /// Default classification assigned to service results
     pub default_result_classification: String, // = odm.ClassificationString(default=Classification.UNRESTRICTED, )
     /// Is the service enabled
@@ -344,7 +344,7 @@ pub struct Service {
 }
 
 fn default_category() -> String { "Static Analysis".to_owned() }
-fn default_description() -> String { "NA".to_owned() }
+fn default_description() -> Text { Text("NA".to_owned()) }
 fn default_stage() -> String { "CORE".to_owned() }
 fn default_timeout() -> u32 { 60 }
 fn default_update_channel() -> ChannelKinds { ChannelKinds::Stable }

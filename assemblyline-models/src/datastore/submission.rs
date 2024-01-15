@@ -71,7 +71,6 @@ pub struct Submission {
 #[metadata(index=true, store=false)]
 pub struct SubmissionParams {
     /// classification of the submission
-    #[serde(skip_serializing_if = "String::is_empty")]
     pub classification: Classification,
     /// Should a deep scan be performed?
     pub deep_scan: bool,
@@ -132,7 +131,7 @@ pub struct SubmissionParams {
 impl Default for SubmissionParams {
     fn default() -> Self {
         Self {
-            classification: "".to_owned(),
+            classification: Classification("".to_owned()),
             deep_scan: false,
             description: None,
             generate_alert: false,
