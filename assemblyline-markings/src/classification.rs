@@ -25,7 +25,6 @@ const INVALID_SHORT_CLASSIFICATION: &str = "INV";
 /// Long name used with invalid classification level
 const INVALID_CLASSIFICATION: &str = "INVALID";
 
-
 /// A parser to process classification banners
 #[derive(Default, Debug, PartialEq)]
 pub struct ClassificationParser {
@@ -497,7 +496,7 @@ impl ClassificationParser {
     /// Put the given components back togeather into a classification string
     /// default long_format = true
     /// default skip_auto_select = false
-    fn _get_normalized_classification_text(&self, parts: ParsedClassification, long_format: bool, skip_auto_select: bool) -> Result<String> {
+    pub fn get_normalized_classification_text(&self, parts: ParsedClassification, long_format: bool, skip_auto_select: bool) -> Result<String> {
         let ParsedClassification{level: lvl_idx, required: req, mut groups, mut subgroups} = parts;
 
         let group_delim = if long_format {"REL TO "} else {"REL "};
@@ -858,7 +857,7 @@ impl ClassificationParser {
             subgroups: intersection(&parts1.subgroups, &parts2.subgroups),
         };
 
-        return self._get_normalized_classification_text(parts, long_format, true)
+        return self.get_normalized_classification_text(parts, long_format, true)
     }
 
     /// Given a user classification, check if a user is allow to see a certain classification
@@ -1030,7 +1029,7 @@ impl ClassificationParser {
 
         let parts = parts1.max(&parts2)?;
 
-        return self._get_normalized_classification_text(parts, long_format, false)
+        return self.get_normalized_classification_text(parts, long_format, false)
     }
 
     /// Mixes to classification and returns to least restrictive form for them
@@ -1054,7 +1053,7 @@ impl ClassificationParser {
 
         let parts = parts1.min(&parts2);
 
-        return self._get_normalized_classification_text(parts, long_format, false)
+        return self.get_normalized_classification_text(parts, long_format, false)
     }
 
     // pub fn normalize(&self) -> NormalizeBuilder { NormalizeBuilder { ce: self, ..Default::default() }}
@@ -1090,7 +1089,7 @@ impl ClassificationParser {
 
         let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups, !skip_auto_select)?;
         // println!("{:?}", parts);
-        let new_c12n = self._get_normalized_classification_text(parts, long_format, skip_auto_select)?;
+        let new_c12n = self.get_normalized_classification_text(parts, long_format, skip_auto_select)?;
         // if long_format {
         //     self._classification_cache.add(new_c12n)
         // } else {
@@ -1125,7 +1124,7 @@ impl ClassificationParser {
         let groups = union(&parts1.groups, &parts2.groups);
         let subgroups = union(&parts1.subgroups, &parts2.subgroups);
 
-        return self._get_normalized_classification_text(ParsedClassification { level, required, groups, subgroups }, long_format, true)
+        return self.get_normalized_classification_text(ParsedClassification { level, required, groups, subgroups }, long_format, true)
     }
 
     /// Get all the levels found in this config
@@ -1309,7 +1308,7 @@ mod test {
     fn setup() -> ClassificationParser {
         ClassificationParser::new(setup_config()).unwrap()
     }
-
+    
     #[test]
     fn load_yaml() {
         let yaml = serde_yaml::to_string(&setup_config()).unwrap();
@@ -1321,6 +1320,7 @@ mod test {
     #[test]
     fn load_json() {
         let json = serde_json::to_string(&setup_config()).unwrap();
+        println!("{json}");
         let file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(file.path(), json).unwrap();
         assert_eq!(ClassificationParser::load(file.path()).unwrap(), setup());
