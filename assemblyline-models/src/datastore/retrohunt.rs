@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use struct_metadata::Described;
 
-use crate::{Classification, Sha256, ElasticMeta, ClassificationString, Text};
+use crate::{Sha256, ElasticMeta, ClassificationString, Text, ExpandingClassification};
 
 
 
@@ -14,7 +14,8 @@ pub struct Retrohunt {
     /// Defines the indices used for this retrohunt job
     pub archive_only: bool,
     /// Classification for the retrohunt job
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Maximum classification of results in the search
     pub search_classification: ClassificationString,
     /// Start time for the search.
@@ -55,7 +56,8 @@ pub struct Retrohunt {
 #[metadata(index=true, store=true)]
 struct RetrohuntHit {
     /// Classification string for the retrohunt job and results list
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     pub sha256: Sha256,
     /// Expiry for this entry.
     #[metadata(store=false)]
@@ -66,6 +68,7 @@ struct RetrohuntHit {
 
 #[cfg(test)]
 mod python {
+
     use serde_json::json;
 
     use crate::datastore::retrohunt::RetrohuntHit;
@@ -92,17 +95,30 @@ mod python {
     }
 
     #[test]
-    fn retrohunt() {
+    fn retrohunt_schema() {
         let py_mappings = load_mapping("retrohunt", "Retrohunt");
         let mapping = build_mapping::<Retrohunt>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
 
     #[test]
-    fn retrohunt_hits() {
+    fn retrohunt_hits_schema() {
         let py_mappings = load_mapping("retrohunt", "RetrohuntHit");
         let mapping = build_mapping::<RetrohuntHit>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
+
+    // // Test that the classification components get expanded as expected
+    // #[test]
+    // fn classification_serialize() {
+    //     let time = DateTime::parse_from_rfc3339("2001-05-01T01:59:59Z").unwrap();
+    //     let sample = RetrohuntHit {
+    //         classification: "",
+    //         sha256: Sha256::from_str("00000000000000000000000000000000").unwrap(),
+    //         expiry_ts: Some(time.into()),
+    //         search: "abc123".to_owned(),
+    //     };
+    //     assert_eq!(crate::serialize::to_string(&sample).unwrap(), "");
+    // }
 
 }

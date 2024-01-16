@@ -15,7 +15,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Sha256, Classification, ElasticMeta};
+use crate::{Sha256, ElasticMeta, ClassificationString, ExpandingClassification};
 
 use super::tagging::Tagging;
 
@@ -104,7 +104,7 @@ pub struct Section {
     #[metadata(copyto="__text__")]
     pub body: Option<String>,
     /// Classification of the section
-    pub classification: Classification,
+    pub classification: ClassificationString,
     /// Type of body in this section
     #[metadata(index=false)]
     pub body_format: BodyFormat,
@@ -167,7 +167,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub description: String,
     /// Classification of the file
-    pub classification: Classification,
+    pub classification: ClassificationString,
     /// Is this an image used in an Image Result Section?
     #[serde(default)]
     pub is_section_image: bool,
@@ -218,7 +218,8 @@ pub struct ResponseBody {
 #[metadata(index=true, store=true)]
 pub struct Result {
     /// Aggregate classification for the result
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Date at which the result object got created
     pub created: DateTime<Utc>,
     /// Expiry timestamp

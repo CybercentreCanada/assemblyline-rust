@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{JsonMap, Sha256, Classification, ElasticMeta, Sid};
+use crate::{JsonMap, Sha256, ExpandingClassification, ElasticMeta, Sid, ClassificationString};
 
 
 /// Model of Submission
@@ -18,7 +18,8 @@ pub struct Submission {
     /// Document is present in the malware archive
     pub archived: bool,
     /// Classification of the submission
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Total number of errors in the submission
     pub error_count: i32,
     /// List of error keys
@@ -63,15 +64,13 @@ pub struct Submission {
     pub scan_key: Option<String>,
 }
 
-
-
 /// Submission Parameters
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct SubmissionParams {
     /// classification of the submission
-    pub classification: Classification,
+    pub classification: ClassificationString,
     /// Should a deep scan be performed?
     pub deep_scan: bool,
     /// Description of the submission
@@ -131,7 +130,7 @@ pub struct SubmissionParams {
 impl Default for SubmissionParams {
     fn default() -> Self {
         Self {
-            classification: Classification("".to_owned()),
+            classification: ClassificationString::new("".to_owned()).unwrap(),
             deep_scan: false,
             description: None,
             generate_alert: false,

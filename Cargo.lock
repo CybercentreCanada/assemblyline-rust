@@ -66,8 +66,8 @@ checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
 name = "assemblyline-client"
 version = "0.1.11"
 dependencies = [
- "assemblyline-markings 0.1.3",
- "assemblyline-models 0.1.0",
+ "assemblyline-markings 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assemblyline-models 0.1.1",
  "async-recursion",
  "base64 0.21.7",
  "chrono",
@@ -89,19 +89,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-markings"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba3898fb819fd18501f967910a535a3da106a3dbd5ff06815cd7379360b92b0b"
-dependencies = [
- "itertools 0.11.0",
- "serde",
- "serde_json",
- "serde_yaml",
-]
-
-[[package]]
-name = "assemblyline-markings"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "itertools 0.11.0",
  "serde",
@@ -111,11 +99,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "assemblyline-models"
-version = "0.1.0"
+name = "assemblyline-markings"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "151b2437011b4270ef2542b5ff16b91cd09917a3282d51378db7a942e95bdc89"
+checksum = "8c7de4b53fd897f3b2de5b1459b61c6909b526d05f8e4a424d847e73996fb457"
 dependencies = [
+ "itertools 0.11.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "assemblyline-models"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fa130c0739491b4960b1fe7afb3160c099e21a9d9b82139f71e739716b3390b"
+dependencies = [
+ "base62",
  "chrono",
  "serde",
  "serde_json",
@@ -126,9 +127,9 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
- "assemblyline-markings 0.1.3",
+ "assemblyline-markings 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "base62",
  "chrono",
  "pretty_assertions",
@@ -143,7 +144,7 @@ dependencies = [
 name = "assemblyline-server"
 version = "0.1.0"
 dependencies = [
- "assemblyline-models 0.1.1",
+ "assemblyline-models 0.1.2",
  "chrono",
  "elasticsearch",
  "futures",
@@ -1682,9 +1683,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.29"
+version = "0.38.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a1a81a2478639a14e68937903356dbac62cf52171148924f754bb8a8cd7a96c"
+checksum = "322394588aaf33c24007e8bb3238ee3e4c5c09c084ab32bc73890b99ff326bca"
 dependencies = [
  "bitflags 2.4.1",
  "errno",
@@ -1967,9 +1968,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.11.2"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
+checksum = "2593d31f82ead8df961d8bd23a64c2ccf2eb5dd34b0a34bfb4dd54011c72009e"
 
 [[package]]
 name = "socket2"

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use struct_metadata::Described;
 
-use crate::{Classification, Sha256, MD5, SSDeepHash, Sha1, ElasticMeta};
+use crate::{Sha256, MD5, SSDeepHash, Sha1, ElasticMeta, ExpandingClassification};
 
 
 /// URI Information Model
@@ -66,7 +66,8 @@ pub struct File {
     #[metadata(index=false, store=false)]
     pub ascii: String,
     /// Classification of the file
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Entropy of the file
     pub entropy: f64,
     /// Expiry timestamp

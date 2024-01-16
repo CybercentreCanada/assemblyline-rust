@@ -8,7 +8,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Classification, Uuid, ElasticMeta};
+use crate::{Uuid, ElasticMeta, ExpandingClassification};
 
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
@@ -38,7 +38,8 @@ pub enum Statuses {
 pub struct Workflow {
     /// Classification of the workflow
     #[metadata(copyto="__text__")]
-    pub classification: Classification,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Creation date of the workflow
     pub creation_date: DateTime<Utc>,
     /// UID of the creator of the workflow
