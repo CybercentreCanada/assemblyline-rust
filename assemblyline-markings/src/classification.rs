@@ -1134,7 +1134,7 @@ impl ClassificationParser {
 }
 
 /// values describing a classification string after parsing
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct ParsedClassification {
     /// Classification level
     pub level: i32,
