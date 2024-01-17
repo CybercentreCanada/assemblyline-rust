@@ -32,9 +32,23 @@ pub struct Retrohunt {
     #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
 
+    /// Earliest expiry group this search will include
+    pub start_group: u32,
+    /// Date corresponding to start_group (if any)
+    pub start_date: Option<DateTime<Utc>>,
+    /// Latest expiry group this search will include
+    pub end_group: u32,
+    /// Date corresponding to end_group (if any)
+    pub end_date: Option<DateTime<Utc>>,
+
+    /// Time that the search started
+    pub run_start: Option<DateTime<Utc>>,
+    /// Time that the search finished
+    pub run_complete: Option<DateTime<Utc>>,
+
     /// Unique id identifying this retrohunt job
     pub code: String,
-    /// Text of filter query derived from yara signature"
+    /// Text of filter query derived from yara signature
     #[metadata(store=false)]
     pub raw_query: Option<String>,
     /// Text of original yara signature run
