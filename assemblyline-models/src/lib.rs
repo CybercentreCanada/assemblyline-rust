@@ -215,7 +215,7 @@ impl Sid {
 #[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text")]
-pub struct Text(String);
+pub struct Text(pub String);
 
 /// Unvalidated uuid type
 pub type Uuid = String;
@@ -246,7 +246,7 @@ pub struct ExpandingClassification<const USER: bool=false> {
 }
 
 impl<const USER: bool> ExpandingClassification<USER> {
-    fn new(classification: String) -> Result<Self, ModelError> {
+    pub fn new(classification: String) -> Result<Self, ModelError> {
         let parser = DEFAULT_CLASSIFICATION_PARSER.lock().or_else(|_| Err(ModelError::ClassificationNotInitialized))?;
         let parser = parser.as_ref().ok_or(ModelError::ClassificationNotInitialized)?;
 
@@ -294,7 +294,7 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
 pub struct ClassificationString(String);
 
 impl ClassificationString {
-    fn new(classification: String) -> Result<Self, ModelError> {
+    pub fn new(classification: String) -> Result<Self, ModelError> {
         let parser = DEFAULT_CLASSIFICATION_PARSER.lock().map_err(|_| ModelError::ClassificationNotInitialized)?;
         let parser = parser.as_ref().ok_or(ModelError::ClassificationNotInitialized)?;
 
