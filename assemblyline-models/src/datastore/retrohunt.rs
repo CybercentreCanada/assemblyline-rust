@@ -26,8 +26,6 @@ pub struct Retrohunt {
     pub classification: ExpandingClassification,
     /// Maximum classification of results in the search
     pub search_classification: ClassificationString,
-    /// Start time for the search.
-    pub created: DateTime<Utc>,
     /// User who created this retrohunt job
     #[metadata(copyto="__text__")]
     pub creator: String,
@@ -42,17 +40,15 @@ pub struct Retrohunt {
 
     /// Earliest expiry group this search will include
     pub start_group: u32,
-    /// Date corresponding to start_group (if any)
-    pub start_date: Option<DateTime<Utc>>,
     /// Latest expiry group this search will include
     pub end_group: u32,
-    /// Date corresponding to end_group (if any)
-    pub end_date: Option<DateTime<Utc>>,
 
-    /// Time that the search started
-    pub run_start: Option<DateTime<Utc>>,
+    /// Start time for the search.
+    pub created_time: DateTime<Utc>,
+    /// Start time for the search.
+    pub started_time: DateTime<Utc>,
     /// Time that the search finished
-    pub run_complete: Option<DateTime<Utc>>,
+    pub completed_time: Option<DateTime<Utc>>,
 
     /// Unique id identifying this retrohunt job
     pub code: String,
