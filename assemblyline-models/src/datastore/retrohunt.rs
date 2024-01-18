@@ -50,7 +50,7 @@ pub struct Retrohunt {
     pub code: String,
     /// Text of filter query derived from yara signature
     #[metadata(store=false)]
-    pub raw_query: Option<String>,
+    pub raw_query: String,
     /// Text of original yara signature run
     #[metadata(store=false, copyto="__text__")]
     pub yara_signature: String,
