@@ -261,6 +261,10 @@ impl<const USER: bool> ExpandingClassification<USER> {
             __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
         })
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.classification
+    }
 }
 
 impl<'de> Deserialize<'de> for ExpandingClassification {
@@ -295,6 +299,10 @@ impl ClassificationString {
         let parser = parser.as_ref().ok_or(ModelError::ClassificationNotInitialized)?;
 
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 

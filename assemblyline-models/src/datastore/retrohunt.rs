@@ -58,6 +58,9 @@ pub struct Retrohunt {
     /// List of error messages that occured during the search
     #[metadata(store=false)]
     pub errors: Vec<String>,
+    /// List of warning messages that occured during the search
+    #[metadata(store=false)]
+    pub warnings: Vec<String>,
     /// Boolean that indicates if this retrohunt job is finished
     pub finished: bool,
     /// Indicates if the list of hits been truncated at some limit
