@@ -1,18 +1,26 @@
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
+use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::{Sha256, ElasticMeta, ClassificationString, Text, ExpandingClassification};
 
-
+#[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[metadata_type(ElasticMeta)]
+#[strum(serialize_all = "snake_case")]
+pub enum IndexCatagory {
+    Hot = 1,
+    Archive = 2,
+    HotAndArchive = 3,
+}
 
 /// A search run on stored files.
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Retrohunt {
-    /// Defines the indices used for this retrohunt job
-    pub archive_only: bool,
+    /// Which archive catagories do we run on
+    pub indices: IndexCatagory,
     /// Classification for the retrohunt job
     #[serde(flatten)]
     pub classification: ExpandingClassification,
