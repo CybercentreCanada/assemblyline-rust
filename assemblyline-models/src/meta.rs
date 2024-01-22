@@ -36,6 +36,7 @@ pub struct FieldMapping {
     #[serde(rename="type")]
     pub type_: String,
     pub index: bool,
+    pub store: bool,
     pub ignore_malformed: bool,
     pub doc_values: Option<bool>,
     pub ignore_above: Option<u32>,
@@ -49,6 +50,7 @@ impl Default for FieldMapping {
         Self { 
             enabled: true, 
             ignore_malformed: false,
+            store: false,
             type_: Default::default(), index: Default::default(), doc_values: Default::default(), ignore_above: Default::default(), copy_to: Default::default(), analyzer: Default::default(), normalizer: Default::default() 
         }
     }
@@ -58,6 +60,7 @@ impl Default for FieldMapping {
 pub struct DynamicTemplate {
     #[serde(rename="match")]
     pub match_: Option<String>,
+    pub match_mapping_type: Option<String>,
     pub path_match: Option<String>,
     pub mapping: FieldMapping,
 }
@@ -72,6 +75,7 @@ pub struct Mappings {
 impl Mappings {
     fn insert(&mut self, name: &str, meta: &ElasticMeta, mut field: FieldMapping) {
         field.index |= meta.index.unwrap_or_default();
+        // field.store |= meta.store.unwrap_or_default();
 
         if field.type_ != "text" {
             field.doc_values = meta.index;
@@ -128,7 +132,9 @@ impl Mappings {
             Kind::Aliased { name, kind } => todo!(),
             Kind::Enum { name, variants } => todo!(),
             Kind::Sequence(_) => todo!(),
-            Kind::Option(_) => todo!(),
+            Kind::Option(kind) => {
+                self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
+            },
             Kind::Mapping(key, value) => {
                 if key.kind != Kind::String {
                     return Err(MappingError::OnlyStringKeys)
@@ -273,7 +279,38 @@ impl Mappings {
     pub fn insert_dynamic(&mut self, name: String, template: DynamicTemplate) {
         self.dynamic_templates.push([(name, template)].into_iter().collect());
     }
+
+    pub fn apply_defaults(&mut self) {
+        self.dynamic_templates.insert(0, [("strings_as_keywords".to_owned(), DynamicTemplate {
+            match_: None,
+            path_match: None,
+            match_mapping_type: Some("string".to_owned()),
+            mapping: FieldMapping {
+                type_: "keyword".to_owned(),
+                ignore_above: Some(8191),
+                ..Default::default()
+            }
+        })].into_iter().collect());
+
+        if !self.properties.contains_key("id") {
+            self.properties.insert("id".to_owned(), FieldMapping {
+                store: true,
+                doc_values: Some(true),
+                type_: "keyword".to_owned(),
+                ..Default::default()
+            });
+        }
+    
+        self.properties.insert("__text__".to_owned(), FieldMapping {
+            store: false,
+            type_: "text".to_owned(),
+            ..Default::default()
+        });
+    
+    }
+
 }
+
 
 
 pub fn build_mapping<T: Described<ElasticMeta>>() -> Result<Mappings, MappingError> {
@@ -385,285 +422,3 @@ pub enum MappingError {
     NoIndexedAny(String),
     OnlyStringKeys
 }
-
-
-
-// macro_rules! json_map {
-//     // map-like
-//     ($($k:expr => $v:expr),* $(,)?) => {{
-//         [$(($k.to_owned(), json!($v)),)*].into_iter().collect()
-//     }};
-//     // set-like
-//     // ($($v:expr),* $(,)?) => {{
-//     //     core::convert::From::from([$($v,)*])
-//     // }};
-// }
-
-// fn set_mapping(meta: &ElasticMeta, mut body: JsonMap) -> serde_json::Value {
-//     body.insert("index".to_owned(), json!(meta.index));
-//     if let Some(value) = body.get("type").cloned() {
-//         if value != "text" {
-//             body.insert("doc_values".to_owned(), json!(meta.index));
-//         }
-//         if value == "keyword" {
-//             body.insert("ignore_above".to_owned(), json!(8191));  // The maximum always safe value in elasticsearch
-//         }
-//     }
-
-//     if let Some(copyto) = meta.copyto {
-//         // assert len(temp_field.copyto) == 1
-//         body.insert("copy_to".to_owned(), json!(copyto));
-//     }
-
-//     if let Some(analyzer) = meta.analyzer {
-//         body.insert("analyzer".to_owned(), json!(analyzer));
-//     }
-//     if let Some(normalizer) = meta.normalizer {
-//         body.insert("normalizer".to_owned(), json!(normalizer));
-//     }
-        
-//     return body.into()
-// }
-
-// fn field_from_mapping(mappings: &mut JsonMap, full_name: String, meta: &ElasticMeta, mapping: &str) {
-//     mappings.insert(full_name.trim_matches('.').to_owned(), set_mapping(meta, json_map!{
-//         "type" => mapping,
-//     }));
-// }
-
-// fn field_from_type(mappings: &mut JsonMap, dynamic: &mut Vec<serde_json::Value>, path: Vec<&str>, full_name: String, kind: &Kind<ElasticMeta>, meta: &ElasticMeta) -> Result<(), MappingError> {
-//     match &kind {
-//         struct_metadata::Kind::Struct { name, children } => {
-//             let children: Vec<_> = children.iter().map(|entry|(Some(entry.label), &entry.type_info.kind, &entry.metadata)).collect();
-//             let (mut temp_mappings, temp_dynamic) = build_mapping_inner(&children, path, false)?;
-//             mappings.append(&mut temp_mappings);
-//             dynamic.extend(temp_dynamic);
-//         },
-//         struct_metadata::Kind::Aliased { name, kind } => {
-//             let (m, d) = build_mapping_inner(&[(None, &kind.kind, &kind.metadata)], path, false)?;
-//             mappings.extend(m);
-//             dynamic.extend(d);
-//         },
-//         struct_metadata::Kind::Enum { name, variants } => todo!(),
-//         struct_metadata::Kind::Sequence(child_type) => {
-//             let (mut temp_mappings, temp_dynamic) = build_mapping_inner(&[(None, &child_type.kind, &child_type.metadata)], path, false)?;
-//             mappings.append(&mut temp_mappings);
-//             dynamic.extend(temp_dynamic);
-//         },
-//         struct_metadata::Kind::Option(child_type) => {
-//             let (mut temp_mappings, temp_dynamic) = build_mapping_inner(&[(None, &child_type.kind, &child_type.metadata)], path, false)?;
-//             mappings.append(&mut temp_mappings);
-//             dynamic.extend(temp_dynamic);
-//         },
-//         struct_metadata::Kind::Mapping(key, value) => {
-//             if key.kind != Kind::String {
-//                 return Err(MappingError::OnlyStringKeys)
-//             }
-//             // elif isinstance(field, FlattenedObject):
-//             //     if not field.index or isinstance(field.child_type, Any):
-//             //         mappings[name.strip(".")] = {"type": "object", "enabled": False}
-//             //     else:
-//             //         dynamic.extend(build_templates(f'{name}.*', field.child_type, nested_template=True, index=field.index))
-
-//             // elif isinstance(field, Mapping):
-//             //     if not field.index or isinstance(field.child_type, Any):
-//             //         mappings[name.strip(".")] = {"type": "object", "enabled": False}
-//             //     else:
-//             //         dynamic.extend(build_templates(f'{name}.*', field.child_type, index=field.index))
-//             let index = meta.index.unwrap_or(false);
-//             if !index || value.kind == struct_metadata::Kind::Any {
-//                 mappings.insert(full_name.trim_matches('.').to_owned(), json!({"type": "object", "enabled": false}));
-//             } else {
-//                 dynamic.extend(build_templates(&(full_name + ".*"), &value.kind, &value.metadata, false, index)?);
-//             }
-
-//         },
-//         struct_metadata::Kind::DateTime => {mappings.insert(full_name.trim_matches('.').to_owned(), set_mapping(meta, json_map!{
-//             "type" => "date",
-//             "format" => "date_optional_time||epoch_millis",
-//         }));},
-//         struct_metadata::Kind::String => field_from_mapping(mappings, full_name, meta, "keyword"),
-//         struct_metadata::Kind::U128 |
-//         struct_metadata::Kind::I128 => return Err(MappingError::UnsupportedType(full_name, "128 bit numbers not supported".to_owned())),
-//         struct_metadata::Kind::U64 |
-//         struct_metadata::Kind::I64 |
-//         struct_metadata::Kind::U32 |
-//         struct_metadata::Kind::I32 |
-//         struct_metadata::Kind::U16 |
-//         struct_metadata::Kind::I16 |
-//         struct_metadata::Kind::U8 |
-//         struct_metadata::Kind::I8 => field_from_mapping(mappings, full_name, meta, "integer"),
-//         struct_metadata::Kind::F64 |
-//         struct_metadata::Kind::F32 => field_from_mapping(mappings, full_name, meta, "float"),
-//         struct_metadata::Kind::Bool => field_from_mapping(mappings, full_name, meta, "boolean"),
-//         struct_metadata::Kind::Any => todo!(),
-//     }
-//     Ok(())
-// }
-
-
-// /// The mapping for Elasticsearch based on a model object.
-// fn build_mapping_inner(children: &[(Option<&'static str>, &Kind<ElasticMeta>, &ElasticMeta)], prefix: Vec<&str>, allow_refuse_implicit: bool) -> Result<(JsonMap, Vec<serde_json::Value>), MappingError> {
-    
-//     let mut mappings: JsonMap = Default::default();
-//     let mut dynamic: Vec<serde_json::Value> = vec![];
-
-//     // Fill in the sections
-//     for (label, kind, meta) in children {
-
-//         let mut path = prefix.clone();
-//         if let Some(label) = label {
-//             path.push(label);
-//         }
-//         let full_name = path.join(".");
-
-//         match meta.mapping {
-//             // if a mapping has been explicity set, use it, unless its a special mapping type
-//             Some(mapping) => {
-//                 if mapping.eq_ignore_ascii_case("classification") {
-//                     mappings.insert(full_name.trim_matches('.').to_owned(), set_mapping(meta, json_map!{
-//                         "type" => "keyword"
-//                     }));
-//                     if !full_name.contains(".") {
-//                         mappings.insert("__access_lvl__".to_owned(), json_map!{
-//                             "type" => "integer",
-//                             "index" => true,
-//                         });
-//                         mappings.insert("__access_req__".to_owned(), json_map!{
-//                             "type" => "keyword",
-//                             "index" => true,
-//                         });
-//                         mappings.insert("__access_grp1__".to_owned(), json_map!{
-//                             "type" => "keyword",
-//                             "index" => true,
-//                         });
-//                         mappings.insert("__access_grp2__".to_owned(), json_map!{
-//                             "type" => "keyword",
-//                             "index" => true,
-//                         });
-//                     }
-//                 } else {
-//                     field_from_mapping(&mut mappings, full_name, meta, mapping)
-//                 }
-//             }
-//             // No maping type has been set, handle it based on type information instead
-//             None => field_from_type(&mut mappings, &mut dynamic, path, full_name, kind, meta)?
-//         };
-
-
-
-
-//         // elif isinstance(field, Any):
-//         //     if field.index:
-//         //         raise ValueError(f"Any may not be indexed: {name}")
-
-//         //     mappings[name.strip(".")] = {
-//         //         "type": "keyword",
-//         //         "index": False,
-//         //         "doc_values": False
-//         //     }
-
-//         // else:
-//         //     raise NotImplementedError(f"Unknown type for elasticsearch schema: {field.__class__}")
-//     }
-
-//     // The final template must match everything and disable indexing
-//     // this effectively disables dynamic indexing EXCEPT for the templates
-//     // we have defined
-//     if dynamic.is_empty() && allow_refuse_implicit {
-//         // We cannot use the dynamic type matching if others are in play because they conflict with each other
-//         // TODO: Find a way to make them work together.
-//         dynamic.push(json!({"refuse_all_implicit_mappings": {
-//             "match": "*",
-//             "mapping": {
-//                 "index": false,
-//                 "ignore_malformed": true,
-//             }
-//         }}))
-//     }
-
-//     Ok((mappings, dynamic))
-// }
-
-
-// // nested_template = false
-// // index = true
-// fn build_templates(name: &str, kind: &Kind<ElasticMeta>, field: &ElasticMeta, nested_template: bool, index: bool) -> Result<Vec<serde_json::Value>, MappingError> {
-// //     if isinstance(field, (Keyword, Boolean, Integer, Float, Text, Json)):
-// //     match kind {
-// //         Kind::String | Kind::U64 | Kind::I64 | Kind::U32 | Kind::I32 |
-// //         Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 |
-// //         Kind::F64 | Kind::F32 |
-// //         Kind::Bool => {
-// //             if nested_template {
-// //                 let main_template = json!({
-// //                     "match": name,
-// //                     "mapping": {
-// //                         "type": "nested"
-// //                     }
-// //                 });
-
-// //                 return Ok(vec![json!({"nested_".to_owned() + name: main_template})])
-// //             } else {
-
-// //                 let field_template = json!({
-// //                     "path_match": name,
-// //                     "mapping": {
-// //                         "type": type_mapping(kind),
-// //                         "index": index,
-// //                         "copy_to": field.copyto
-// //                     }
-// //                 });
-
-// //                 return Ok(vec![json!({format!("{name}_tpl"): field_template})])
-// //             }
-// //         },
-// // //     elif isinstance(field, Any) or not index:
-// //         Kind::Any | _ if !index => {
-// //             if index {
-// //                 return Err(MappingError::NoIndexedAny(name.to_owned()))
-// //             }
-
-// //             let field_template = json!({
-// //                 "path_match": name,
-// //                 "mapping": {
-// //                     "type": "keyword",
-// //                     "index": false
-// //                 }
-// //             });
-
-// //             return Ok(vec![json!({format!("{name}_tpl"): field_template})])
-// //         },
-        
-// //     // elif isinstance(field, (Mapping, List)):
-// //         Kind::Mapping(_, child) | Kind::Sequence(child) => {
-// //             let temp_name = name;
-// //             if field.name:
-// //                 temp_name = f"{name}.{field.name}"
-// //             return build_templates(temp_name, field.child_type, nested_template=True)
-// //         }
-
-// //     elif isinstance(field, Compound):
-// //         temp_name = name
-// //         if field.name:
-// //             temp_name = f"{name}.{field.name}"
-
-// //         out = []
-// //         for sub_name, sub_field in field.fields().items():
-// //             sub_name = f"{temp_name}.{sub_name}"
-// //             out.extend(build_templates(sub_name, sub_field))
-
-// //         return out
-
-// //     elif isinstance(field, Optional):
-// //         return build_templates(name, field.child_type, nested_template=nested_template)
-
-//     }
-
-
-//     todo!()
-
-// //     else:
-// //         raise NotImplementedError(f"Unknown type for elasticsearch dynamic mapping: {field.__class__}")
-
-// }

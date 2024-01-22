@@ -122,13 +122,12 @@ impl FromStr for Sha256 {
 /// MD5 hash of a file
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
-pub struct MD5 {
-    hex: String
-}
+#[metadata(normalizer="lowercase_normalizer")]
+pub struct MD5(String);
 
 impl std::fmt::Display for MD5 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.hex)
+        f.write_str(&self.0)
     }
 }
 
@@ -136,7 +135,7 @@ impl std::ops::Deref for MD5 {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.hex
+        &self.0
     }
 }
 
@@ -148,7 +147,7 @@ impl std::str::FromStr for MD5 {
         if hex.len() != 32 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(ModelError::InvalidMd5(hex))
         }
-        Ok(MD5{ hex })
+        Ok(MD5(hex))
     }
 }
 
@@ -156,13 +155,12 @@ impl std::str::FromStr for MD5 {
 /// Sha1 hash of a file
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
-pub struct Sha1 {
-    hex: String
-}
+#[metadata(normalizer="lowercase_normalizer")]
+pub struct Sha1(String);
 
 impl std::fmt::Display for Sha1 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.hex)
+        f.write_str(&self.0)
     }
 }
 
@@ -170,7 +168,7 @@ impl std::ops::Deref for Sha1 {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.hex
+        &self.0
     }
 }
 
@@ -182,7 +180,7 @@ impl std::str::FromStr for Sha1 {
         if hex.len() != 40 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(ModelError::InvalidSha1(hex))
         }
-        Ok(Sha1{ hex })
+        Ok(Sha1(hex))
     }
 }
 
@@ -322,7 +320,10 @@ pub type Platform = String;
 pub type Processor = String;
 
 /// Unvalidated ssdeep type
-pub type SSDeepHash = String;
+#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(mapping="text", analyzer="text_fuzzy")]
+pub struct SSDeepHash(String);
 
 /// Unvalidated phone number type
 pub type PhoneNumber = String;
