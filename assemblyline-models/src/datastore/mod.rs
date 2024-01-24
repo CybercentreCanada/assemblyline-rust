@@ -85,6 +85,7 @@ mod python {
 
         let (properties, dynamic_templates): (serde_json::Value, serde_json::Value) = serde_json::from_str(&stdout).unwrap();
         let py_mapping = json!({
+            "dynamic": false,
             "properties": properties,
             "dynamic_templates": dynamic_templates,
         });
