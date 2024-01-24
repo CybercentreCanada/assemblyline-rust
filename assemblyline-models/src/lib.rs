@@ -10,7 +10,7 @@ pub mod datastore;
 pub mod config;
 pub mod messages;
 pub mod serialize;
-mod meta;
+pub mod meta;
 
 pub use meta::ElasticMeta;
 
