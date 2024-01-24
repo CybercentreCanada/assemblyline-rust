@@ -423,3 +423,18 @@ pub enum MappingError {
     NoIndexedAny(String),
     OnlyStringKeys
 }
+
+impl std::fmt::Display for MappingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MappingError::OnlyStructs => f.write_str("Mappings can only be created for structs"),
+            MappingError::UnsupportedType(name, kind) => f.write_fmt(format_args!("The field {name} is assigned an unsupported type {kind}")),
+            MappingError::NoIndexedAny(name) => f.write_fmt(format_args!("The field {name} can't be Any type while being indexed.")),
+            MappingError::OnlyStringKeys => f.write_str("Mapping keys must be strings"),
+        }
+    }
+}
+
+impl std::error::Error for MappingError {
+
+}
