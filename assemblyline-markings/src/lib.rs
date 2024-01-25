@@ -10,3 +10,22 @@
 pub mod errors;
 pub mod config;
 pub mod classification;
+
+use std::sync::{Arc, Mutex};
+
+
+/// Mutex to hold a default parser the loaded system uses. 
+/// The classification engine is often treated as an aspect of the execution environment 
+/// that should be globally accessable. Rather than reloading a configuration file repeatedly or having 
+/// several different modules all track the same parser redundantly we will create a common mutex here.
+pub static DEFAULT_PARSER: Mutex<Option<Arc<classification::ClassificationParser>>> = Mutex::new(None);
+
+/// Load the assigned default parser
+pub fn get_default() -> Option<Arc<classification::ClassificationParser>> {
+    DEFAULT_PARSER.lock().unwrap().clone()
+}
+
+/// Set the default parser 
+pub fn set_default(parser: Arc<classification::ClassificationParser>)  {
+    *DEFAULT_PARSER.lock().unwrap() = Some(parser);
+}
