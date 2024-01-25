@@ -227,9 +227,6 @@ pub type IP = String;
 /// Unvalidated uri type
 pub type Uri = String;
 
-/// 
-pub static DEFAULT_CLASSIFICATION_PARSER: std::sync::Mutex<Option<assemblyline_markings::classification::ClassificationParser>> = std::sync::Mutex::new(None);
-
 /// Expanding classification type
 #[derive(Serialize, PartialEq, Debug, Clone)]
 // #[metadata_type(ElasticMeta)]
@@ -245,8 +242,7 @@ pub struct ExpandingClassification<const USER: bool=false> {
 
 impl<const USER: bool> ExpandingClassification<USER> {
     pub fn new(classification: String) -> Result<Self, ModelError> {
-        let parser = DEFAULT_CLASSIFICATION_PARSER.lock().or_else(|_| Err(ModelError::ClassificationNotInitialized))?;
-        let parser = parser.as_ref().ok_or(ModelError::ClassificationNotInitialized)?;
+        let parser = assemblyline_markings::get_default().ok_or(ModelError::ClassificationNotInitialized)?;
 
         let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
         let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
@@ -293,8 +289,7 @@ pub struct ClassificationString(String);
 
 impl ClassificationString {
     pub fn new(classification: String) -> Result<Self, ModelError> {
-        let parser = DEFAULT_CLASSIFICATION_PARSER.lock().map_err(|_| ModelError::ClassificationNotInitialized)?;
-        let parser = parser.as_ref().ok_or(ModelError::ClassificationNotInitialized)?;
+        let parser = assemblyline_markings::get_default().ok_or(ModelError::ClassificationNotInitialized)?;
 
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
     }
