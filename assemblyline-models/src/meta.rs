@@ -52,18 +52,21 @@ pub struct FieldMapping {
     pub analyzer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normalizer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
 }
 
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Debug)]
 pub struct DynamicTemplate {
-    #[serde(rename="match")]
+    #[serde(rename="match", skip_serializing_if = "Option::is_none")]
     pub match_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub match_mapping_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path_match: Option<String>,
     pub mapping: FieldMapping,
 }
-
 
 fn dynamic_default() -> bool { true }
 
@@ -116,6 +119,13 @@ impl Mappings {
                     self.properties.insert("__access_grp1__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_grp2__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                 }
+            } else if mapping.eq_ignore_ascii_case("date") {
+                self.insert(&full_name, meta, FieldMapping{ 
+                    type_: Some(mapping.to_owned()), 
+                    // The maximum always safe value in elasticsearch
+                    format: Some("date_optional_time||epoch_millis".to_owned()),
+                    ..Default::default()
+                });                
             } else if mapping.eq_ignore_ascii_case("keyword") {
                 self.insert(&full_name, meta, FieldMapping{ 
                     type_: Some(mapping.to_owned()), 
@@ -320,7 +330,47 @@ impl Mappings {
 
 }
 
-
+pub fn default_settings(index: serde_json::Value) -> serde_json::Value {
+     json!({
+        "analysis": {
+            "filter": {
+                "text_ws_dsplit": {
+                    "type": "pattern_replace",
+                    "pattern": r"(\.)",
+                    "replacement": " "
+                }
+            },
+            "analyzer": {
+                "string_ci": {
+                    "type": "custom",
+                    "tokenizer": "keyword",
+                    "filter": ["lowercase"]
+                },
+                "text_fuzzy": {
+                    "type": "pattern",
+                    "pattern": r"\s*:\s*",
+                    "lowercase": false
+                },
+                "text_whitespace": {
+                    "type": "whitespace"
+                },
+                "text_ws_dsplit": {
+                    "type": "custom",
+                    "tokenizer": "whitespace",
+                    "filters": ["text_ws_dsplit"]
+                }
+            },
+            "normalizer": {
+                "lowercase_normalizer": {
+                    "type": "custom",
+                    "char_filter": [],
+                    "filter": ["lowercase"]
+                }
+            }
+        },
+        "index": index,
+    })
+}
 
 pub fn build_mapping<T: Described<ElasticMeta>>() -> Result<Mappings, MappingError> {
     let metadata = T::metadata();
