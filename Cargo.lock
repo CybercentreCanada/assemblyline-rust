@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "assemblyline-markings 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "base62",
@@ -145,7 +145,7 @@ dependencies = [
 name = "assemblyline-server"
 version = "0.1.0"
 dependencies = [
- "assemblyline-models 0.1.14",
+ "assemblyline-models 0.1.15",
  "chrono",
  "elasticsearch",
  "futures",
