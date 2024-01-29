@@ -65,8 +65,11 @@ pub struct DynamicTemplate {
 }
 
 
+fn dynamic_default() -> bool { true }
+
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Debug)]
 pub struct Mappings {
+    #[serde(default="dynamic_default")]
     pub dynamic: bool,
     pub properties: BTreeMap<String, FieldMapping>,
     pub dynamic_templates: Vec<HashMap<String, DynamicTemplate>>,
