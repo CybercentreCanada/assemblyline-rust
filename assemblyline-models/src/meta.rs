@@ -29,32 +29,31 @@ impl MetadataKind for ElasticMeta {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Default)]
 #[serde(default)]
 pub struct FieldMapping {
-    pub enabled: bool,
-    #[serde(rename="type")]
-    pub type_: String,
-    pub index: bool,
-    pub store: bool,
-    pub ignore_malformed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(rename="type", skip_serializing_if = "Option::is_none")]
+    pub type_: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignore_malformed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_values: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ignore_above: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub analyzer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub normalizer: Option<String>,
 }
 
-impl Default for FieldMapping {
-    fn default() -> Self {
-        Self { 
-            enabled: true, 
-            ignore_malformed: false,
-            store: false,
-            type_: Default::default(), index: Default::default(), doc_values: Default::default(), ignore_above: Default::default(), copy_to: Default::default(), analyzer: Default::default(), normalizer: Default::default() 
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Debug)]
 pub struct DynamicTemplate {
@@ -75,10 +74,10 @@ pub struct Mappings {
 
 impl Mappings {
     fn insert(&mut self, name: &str, meta: &ElasticMeta, mut field: FieldMapping) {
-        field.index |= meta.index.unwrap_or_default();
-        // field.store |= meta.store.unwrap_or_default();
+        field.index = field.index.or(meta.index);
+        field.store = field.store.or(meta.store);
 
-        if field.type_ != "text" {
+        if field.type_.clone().map_or(false, |x| x != "text") {
             field.doc_values = meta.index;
         }
 
@@ -101,23 +100,23 @@ impl Mappings {
         let simple_mapping = meta.mapping.or(simple_mapping(kind));
         if let Some(mapping) = simple_mapping {
             if mapping.eq_ignore_ascii_case("classification") {
-                self.insert(&full_name, meta, FieldMapping{type_: "keyword".to_owned(), ..Default::default()});
+                self.insert(&full_name, meta, FieldMapping{type_: "keyword".to_owned().into(), ..Default::default()});
                 if !full_name.contains(".") {
-                    self.properties.insert("__access_lvl__".to_owned(), FieldMapping{type_: "integer".to_owned(), index: true, ..Default::default()});
-                    self.properties.insert("__access_req__".to_owned(), FieldMapping{type_: "keyword".to_owned(), index: true, ..Default::default()});
-                    self.properties.insert("__access_grp1__".to_owned(), FieldMapping{type_: "keyword".to_owned(), index: true, ..Default::default()});
-                    self.properties.insert("__access_grp2__".to_owned(), FieldMapping{type_: "keyword".to_owned(), index: true, ..Default::default()});
+                    self.properties.insert("__access_lvl__".to_owned(), FieldMapping{type_: "integer".to_owned().into(), index: true.into(), ..Default::default()});
+                    self.properties.insert("__access_req__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
+                    self.properties.insert("__access_grp1__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
+                    self.properties.insert("__access_grp2__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                 }
             } else if mapping.eq_ignore_ascii_case("keyword") {
                 self.insert(&full_name, meta, FieldMapping{ 
-                    type_: mapping.to_owned(), 
+                    type_: Some(mapping.to_owned()), 
                     // The maximum always safe value in elasticsearch
                     ignore_above: Some(8191),
                     ..Default::default()
                 });
             } else {
                 self.insert(&full_name, meta, FieldMapping{ 
-                    type_: mapping.to_owned(), 
+                    type_: Some(mapping.to_owned()), 
                     ..Default::default()
                 });
             }
@@ -154,8 +153,8 @@ impl Mappings {
                 let index = meta.index.unwrap_or(false);
                 if !index || value.kind == struct_metadata::Kind::Any {
                     self.insert(&full_name, meta, FieldMapping{
-                        type_: "object".to_owned(),
-                        enabled: false,
+                        type_: "object".to_owned().into(),
+                        enabled: false.into(),
                         ..Default::default()
                     });
                 } else {
@@ -192,7 +191,7 @@ impl Mappings {
                     self.insert_dynamic("nested_".to_owned() + name, DynamicTemplate {
                         match_: Some(name.to_string()),
                         mapping: FieldMapping {
-                            type_: "nested".to_string(),
+                            type_: "nested".to_string().into(),
                             ..Default::default()
                         },
                         ..Default::default()
@@ -201,8 +200,8 @@ impl Mappings {
                     self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
                         path_match: Some(name.to_owned()),
                         mapping: FieldMapping{
-                            type_: mapping.to_owned(),
-                            index: index,
+                            type_: mapping.to_owned().into(),
+                            index: index.into(),
                             copy_to: meta.copyto.map(ToOwned::to_owned),
                             ..Default::default()
                         },
@@ -222,8 +221,8 @@ impl Mappings {
                 self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
                     path_match: Some(name.to_owned()),
                     mapping: FieldMapping {
-                        type_: "keyword".to_owned(),
-                        index: false,
+                        type_: "keyword".to_owned().into(),
+                        index: false.into(),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -287,7 +286,7 @@ impl Mappings {
             path_match: None,
             match_mapping_type: Some("string".to_owned()),
             mapping: FieldMapping {
-                type_: "keyword".to_owned(),
+                type_: "keyword".to_owned().into(),
                 ignore_above: Some(8191),
                 ..Default::default()
             }
@@ -295,16 +294,16 @@ impl Mappings {
 
         if !self.properties.contains_key("id") {
             self.properties.insert("id".to_owned(), FieldMapping {
-                store: true,
+                store: true.into(),
                 doc_values: Some(true),
-                type_: "keyword".to_owned(),
+                type_: "keyword".to_owned().into(),
                 ..Default::default()
             });
         }
     
         self.properties.insert("__text__".to_owned(), FieldMapping {
-            store: false,
-            type_: "text".to_owned(),
+            store: false.into(),
+            type_: "text".to_owned().into(),
             ..Default::default()
         });
     
@@ -342,8 +341,8 @@ fn build_mapping_inner(children: &[(Option<&'static str>, &Kind<ElasticMeta>, &E
         mappings.insert_dynamic("refuse_all_implicit_mappings".to_owned(), DynamicTemplate {
             match_: Some("*".to_owned()),
             mapping: FieldMapping {
-                index: false,
-                ignore_malformed: true,
+                index: false.into(),
+                ignore_malformed: true.into(),
                 ..Default::default()
             },
             ..Default::default()

@@ -48,6 +48,7 @@ pub struct Retrohunt {
     /// Start time for the search.
     pub started_time: DateTime<Utc>,
     /// Time that the search finished
+    #[metadata(store=false)]
     pub completed_time: Option<DateTime<Utc>>,
 
     /// Unique id identifying this retrohunt job
