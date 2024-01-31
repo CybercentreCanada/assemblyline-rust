@@ -73,7 +73,7 @@ pub struct Retrohunt {
 }
 
 /// A hit encountered during a retrohunt search.
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct RetrohuntHit {
@@ -89,3 +89,27 @@ pub struct RetrohuntHit {
     pub search: String,
 }
 
+#[cfg(test)]
+mod test {
+    use chrono::Utc;
+
+    use super::RetrohuntHit;
+    use crate::{serialize::test::setup_classification, ExpandingClassification};
+
+    #[test]
+    fn hit_roundtrip(){
+        setup_classification();
+        let data = RetrohuntHit {
+            key: "abc123".to_owned(),
+            classification: ExpandingClassification::new("L0".to_owned()).unwrap(),
+            sha256: "cb3f7b194d220004ffa6eef1305849bcef38033c49cb1b16c5ab3c3d60bd9d20".parse().unwrap(),
+            expiry_ts: Utc::now().into(),
+            search: "search".to_owned(),
+        };
+
+        let json = serde_json::to_string_pretty(&data).unwrap();
+        println!("{json}");
+        let data_copy = serde_json::from_str(&json).unwrap();
+        assert_eq!(data, data_copy);
+    }
+}

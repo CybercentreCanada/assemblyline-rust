@@ -228,10 +228,7 @@ pub type IP = String;
 pub type Uri = String;
 
 /// Expanding classification type
-#[derive(Serialize, PartialEq, Debug, Clone)]
-// #[metadata_type(ElasticMeta)]
-// #[metadata(mapping="classification")]
-// #[metadata(index=true, store=true)]
+#[derive(Serialize, PartialEq, Debug, Clone, Eq)]
 pub struct ExpandingClassification<const USER: bool=false> { 
     classification: String, 
     __access_lvl__: i32,
@@ -264,8 +261,15 @@ impl<const USER: bool> ExpandingClassification<USER> {
 impl<'de> Deserialize<'de> for ExpandingClassification {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> {
-        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+        D: serde::Deserializer<'de> 
+    {
+        #[derive(Deserialize)]
+        struct UncheckedClassification {
+            classification: String,
+        }
+
+        let unchecked = UncheckedClassification::deserialize(deserializer)?;
+        Self::new(unchecked.classification).map_err(serde::de::Error::custom)
     }
 }
 
