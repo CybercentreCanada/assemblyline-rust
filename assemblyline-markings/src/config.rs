@@ -142,7 +142,7 @@ pub fn ready_classification(config_data: Option<&str>) -> Result<ClassificationC
     if let Some(config_data) = config_data {
         // Load modifiers from the yaml config
         let yml_data: serde_yaml::mapping::Mapping = serde_yaml::from_str(config_data)?;
-        let mut config = serde_yaml::to_value(&DEFAULT_CLASSIFICATION_DATA)?;
+        let mut config: serde_yaml::Value = serde_yaml::from_str(&DEFAULT_CLASSIFICATION_DATA)?;
         config.as_mapping_mut().unwrap().extend(yml_data);
         Ok(serde_yaml::from_value(config)?)
     } else {
@@ -504,4 +504,15 @@ impl Serialize for NameString {
         S: serde::Serializer {
         self.0.serialize(serializer)
     }
+}
+
+#[test]
+fn check_default_configurations() {
+    let config = ready_classification(None).unwrap();
+    assert!(!config.enforce);
+
+    println!("{:?}", serde_yaml::to_value(&DEFAULT_CLASSIFICATION_DATA).unwrap());
+       
+    let config = ready_classification(Some("enforce: true")).unwrap();
+    assert!(config.enforce);
 }
