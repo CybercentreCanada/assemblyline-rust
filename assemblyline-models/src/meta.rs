@@ -150,7 +150,9 @@ impl Mappings {
             },
             Kind::Aliased { name, kind } => todo!(),
             Kind::Enum { name, variants } => todo!(),
-            Kind::Sequence(_) => todo!(),
+            Kind::Sequence(kind) => {
+                self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
+            },
             Kind::Option(kind) => {
                 self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
             },

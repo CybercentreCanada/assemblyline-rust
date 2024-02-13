@@ -14,12 +14,15 @@ pub mod meta;
 
 pub use meta::ElasticMeta;
 
+pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+
 #[derive(Debug)]
 pub enum ModelError {
     InvalidSha256(String),
     InvalidMd5(String),
     InvalidSha1(String),
     InvalidSid(String),
+    InvalidSSDeep(String),
     ClassificationNotInitialized,
     InvalidClassification(Option<assemblyline_markings::errors::Errors>),
 }
@@ -33,6 +36,7 @@ impl Display for ModelError {
             ModelError::InvalidSid(content) => f.write_fmt(format_args!("Invalid value provided for a sid: {content}")),
             ModelError::ClassificationNotInitialized => f.write_str("The classification engine has not been initialized."),
             ModelError::InvalidClassification(_) => f.write_str("An invalid classification string was provided."),
+            ModelError::InvalidSSDeep(content) =>  f.write_fmt(format_args!("Invalid value provided for a ssdeep hash: {content}")),
         }
     }
 }
@@ -119,8 +123,25 @@ impl FromStr for Sha256 {
     }
 }
 
+#[cfg(feature = "rand")]
+pub fn random_hex<R: rand::prelude::Rng + ?Sized>(rng: &mut R, size: usize) -> String {
+    let mut buffer = String::with_capacity(size);
+    for _ in 0..size {
+        let index = rng.gen_range(0..HEXCHARS.len());
+        buffer.push(HEXCHARS[index]);
+    }
+    buffer
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Sha256> for rand::distributions::Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha256 {
+        Sha256{hex: random_hex(rng, 64)}
+    }
+}
+
 /// MD5 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(normalizer="lowercase_normalizer")]
 pub struct MD5(String);
@@ -151,9 +172,15 @@ impl std::str::FromStr for MD5 {
     }
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<MD5> for rand::distributions::Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> MD5 {
+        MD5(random_hex(rng, 32))
+    }
+}
 
 /// Sha1 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(normalizer="lowercase_normalizer")]
 pub struct Sha1(String);
@@ -184,6 +211,13 @@ impl std::str::FromStr for Sha1 {
     }
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Sha1> for rand::distributions::Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha1 {
+        Sha1(random_hex(rng, 40))
+    }
+}
+
 /// Validated uuid type with base62 encoding
 #[derive(SerializeDisplay, DeserializeFromStr, Debug, Described, Hash, PartialEq, Eq, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
@@ -207,6 +241,13 @@ impl std::str::FromStr for Sid {
 impl Sid {
     pub fn assign(&self, bins: usize) -> usize {
         (self.0 % bins as u128) as usize
+    }
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Sid> for rand::distributions::Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sid {
+        Sid(rng.gen())
     }
 }
 
@@ -319,10 +360,56 @@ pub type Platform = String;
 pub type Processor = String;
 
 /// Unvalidated ssdeep type
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[derive(SerializeDisplay, DeserializeFromStr, Described, PartialEq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text", analyzer="text_fuzzy")]
 pub struct SSDeepHash(String);
+
+impl std::fmt::Display for SSDeepHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+pub fn is_ssdeep_char(value: char) -> bool {
+    value.is_ascii_alphanumeric() || value == '/' || value == '+'
+}
+
+impl std::str::FromStr for SSDeepHash {
+    type Err = ModelError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // SSDEEP_REGEX = r"^[0-9]{1,18}:[a-zA-Z0-9/+]{0,64}:[a-zA-Z0-9/+]{0,64}$"
+        let (numbers, hashes) = s.split_once(":").ok_or_else(||ModelError::InvalidSSDeep(s.to_owned()))?;
+        let (hasha, hashb) = hashes.split_once(":").ok_or_else(||ModelError::InvalidSSDeep(s.to_owned()))?;
+        if numbers.len() < 1 || numbers.len() > 18 || numbers.chars().any(|c|!c.is_ascii_digit()) {
+            return Err(ModelError::InvalidSSDeep(s.to_owned()))
+        }
+        if hasha.len() > 64 || hasha.chars().any(|c|!is_ssdeep_char(c)) {
+            return Err(ModelError::InvalidSSDeep(s.to_owned()))
+        }
+        if hashb.len() > 64 || hashb.chars().any(|c|!is_ssdeep_char(c)) {
+            return Err(ModelError::InvalidSSDeep(s.to_owned()))
+        }
+        Ok(SSDeepHash(s.to_owned()))
+    }
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<SSDeepHash> for rand::distributions::Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> SSDeepHash {
+        use rand::distributions::{Alphanumeric, DistString};
+        let mut output = String::new();
+        output += &rng.gen_range(0..10000).to_string();
+        output += ":";
+        let len = rng.gen_range(0..64);
+        output += &Alphanumeric.sample_string(rng, len);
+        output += ":";
+        let len = rng.gen_range(0..64);
+        output += &Alphanumeric.sample_string(rng, len);
+        SSDeepHash(output)
+    }
+}
 
 /// Unvalidated phone number type
 pub type PhoneNumber = String;
@@ -338,3 +425,47 @@ pub type UriPath = String;
 
 /// Unvalidated Email type
 pub type Email = String;
+
+
+#[cfg(test)]
+mod test {
+    use rand::{thread_rng, Rng};
+
+    use crate::{SSDeepHash, Sha1, Sha256, MD5};
+    
+    #[test]
+    fn random_ssdeep() {
+        let mut prng = thread_rng();
+        for _ in 0..100 {
+            let hash: SSDeepHash = prng.gen();
+            assert_eq!(hash, hash.to_string().parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn random_sha256() {
+        let mut prng = thread_rng();
+        for _ in 0..100 {
+            let hash: Sha256 = prng.gen();
+            assert_eq!(hash, hash.to_string().parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn random_sha1() {
+        let mut prng = thread_rng();
+        for _ in 0..100 {
+            let hash: Sha1 = prng.gen();
+            assert_eq!(hash, hash.to_string().parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn random_md5() {
+        let mut prng = thread_rng();
+        for _ in 0..100 {
+            let hash: MD5 = prng.gen();
+            assert_eq!(hash, hash.to_string().parse().unwrap());
+        }
+    }
+}
