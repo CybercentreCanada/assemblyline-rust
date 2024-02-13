@@ -5,61 +5,8 @@ use struct_metadata::Described;
 
 use crate::{ElasticMeta, ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
 
-
-/// URI Information Model
-#[derive(Serialize, Deserialize, Described, Clone)]
-#[metadata_type(ElasticMeta)]
-#[metadata(index=true, store=true)]
-pub struct URIInfo {
-    /// full URI
-    pub uri: String,
-
-    // https://www.rfc-editor.org/rfc/rfc1808.html#section-2.1
-    scheme: String,
-    netloc: String,
-    path: Option<String>,
-    params: Option<String>,
-    query: Option<String>,
-    fragment: Option<String>,
-
-    // Ease-of-use elements
-    username: Option<String>,
-    password: Option<String>,
-    hostname: String,
-    port: Option<u16>,
-}
-
-/// File Seen Model
-#[derive(Serialize, Deserialize, Described, Clone)]
-#[metadata_type(ElasticMeta)]
-#[metadata(index=true, store=true)]
-pub struct Seen {
-    /// How many times have we seen this file?
-    #[serde(default = "default_seen_count")]
-    pub count: u64,
-    /// First seen timestamp
-    #[serde(default = "default_now")]
-    pub first: DateTime<Utc>,
-    /// Last seen timestamp
-    #[serde(default = "default_now")]
-    pub last: DateTime<Utc>,
-}
-
-fn default_seen_count() -> u64 { 1 }
-fn default_now() -> DateTime<Utc> { Utc::now() }
-
-impl Default for Seen {
-    fn default() -> Self {
-        Self {
-            count: default_seen_count(),
-            first: default_now(),
-            last: default_now()
-        }
-    }
-}
-
 /// Model of File
-#[derive(Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct File {
@@ -132,8 +79,62 @@ pub struct File {
     pub comments: Vec<Comment>,
 }
 
+
+/// URI Information Model
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
+pub struct URIInfo {
+    /// full URI
+    pub uri: String,
+
+    // https://www.rfc-editor.org/rfc/rfc1808.html#section-2.1
+    scheme: String,
+    netloc: String,
+    path: Option<String>,
+    params: Option<String>,
+    query: Option<String>,
+    fragment: Option<String>,
+
+    // Ease-of-use elements
+    username: Option<String>,
+    password: Option<String>,
+    hostname: String,
+    port: Option<u16>,
+}
+
+/// File Seen Model
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
+pub struct Seen {
+    /// How many times have we seen this file?
+    #[serde(default = "default_seen_count")]
+    pub count: u64,
+    /// First seen timestamp
+    #[serde(default = "default_now")]
+    pub first: DateTime<Utc>,
+    /// Last seen timestamp
+    #[serde(default = "default_now")]
+    pub last: DateTime<Utc>,
+}
+
+fn default_seen_count() -> u64 { 1 }
+fn default_now() -> DateTime<Utc> { Utc::now() }
+
+impl Default for Seen {
+    fn default() -> Self {
+        Self {
+            count: default_seen_count(),
+            first: default_now(),
+            last: default_now()
+        }
+    }
+}
+
+
 /// Label Categories Model
-#[derive(Serialize, Deserialize, Described, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, Default)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
@@ -147,7 +148,7 @@ pub struct LabelCategories {
 }
 
 /// Comment Model
-#[derive(Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Comment {
@@ -167,7 +168,7 @@ pub struct Comment {
 }
 
 /// Reaction Model
-#[derive(Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Reaction {
