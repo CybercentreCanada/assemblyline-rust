@@ -432,8 +432,11 @@ fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
         Kind::DateTime => Some("date"),
         Kind::String => Some("keyword"),
         Kind::U128 | Kind::I128 => None,
-        Kind::U64 | Kind::I64 | Kind::U32 | Kind::I32 | Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 => Some("integer"),
-        Kind::F64 | Kind::F32 => Some("float"),
+        Kind::U64 => Some("unsigned_long"),
+        Kind::I64 | Kind::U32 => Some("long"),
+        Kind::I32 | Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 => Some("integer"),
+        Kind::F64 => Some("double"),
+        Kind::F32 => Some("float"),
         Kind::Bool => Some("boolean"),
         Kind::Any => Some("keyword"),
     }

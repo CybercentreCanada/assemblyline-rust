@@ -17,7 +17,7 @@ pub struct File {
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Entropy of the file
-    pub entropy: f64,
+    pub entropy: f32,
     /// Expiry timestamp
     #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
@@ -56,6 +56,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub sha256: Sha256,
     /// Size of the file in bytes
+    #[metadata(mapping="integer")]
     pub size: u64,
     /// SSDEEP hash of the file
     #[metadata(store=false)]
@@ -110,6 +111,7 @@ pub struct URIInfo {
 pub struct Seen {
     /// How many times have we seen this file?
     #[serde(default = "default_seen_count")]
+    #[metadata(mapping="integer")]
     pub count: u64,
     /// First seen timestamp
     #[serde(default = "default_now")]

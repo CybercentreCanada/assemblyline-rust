@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.1.19"
+version = "0.1.20"
 dependencies = [
  "assemblyline-markings 0.1.6",
  "base62",
@@ -146,7 +146,7 @@ dependencies = [
 name = "assemblyline-server"
 version = "0.1.0"
 dependencies = [
- "assemblyline-models 0.1.19",
+ "assemblyline-models 0.1.20",
  "chrono",
  "elasticsearch",
  "futures",
