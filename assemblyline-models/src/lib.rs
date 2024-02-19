@@ -282,16 +282,26 @@ impl<const USER: bool> ExpandingClassification<USER> {
     pub fn new(classification: String) -> Result<Self, ModelError> {
         let parser = assemblyline_markings::get_default().ok_or(ModelError::ClassificationNotInitialized)?;
 
-        let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
-        let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
+        if parser.original_definition.enforce {
+            let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
+            let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
 
-        Ok(Self {
-            classification,
-            __access_lvl__: parts.level,
-            __access_req__: parts.required,
-            __access_grp1__: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
-            __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
-        })
+            Ok(Self {
+                classification,
+                __access_lvl__: parts.level,
+                __access_req__: parts.required,
+                __access_grp1__: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
+                __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
+            })
+        } else {
+            Ok(Self {
+                classification,
+                __access_lvl__: Default::default(),
+                __access_req__: Default::default(),
+                __access_grp1__: vec!["__EMPTY__".to_owned()],
+                __access_grp2__: vec!["__EMPTY__".to_owned()],
+            })
+        }
     }
 
     pub fn as_str(&self) -> &str {

@@ -508,11 +508,16 @@ impl Serialize for NameString {
 
 #[test]
 fn check_default_configurations() {
-    let config = ready_classification(None).unwrap();
-    assert!(!config.enforce);
+    let default_config = ready_classification(None).unwrap();
+    assert!(!default_config.enforce);
 
     println!("{:?}", serde_yaml::to_value(&DEFAULT_CLASSIFICATION_DATA).unwrap());
        
     let config = ready_classification(Some("enforce: true")).unwrap();
     assert!(config.enforce);
+
+    use crate::classification::ClassificationParser;
+    let ce = ClassificationParser::new(default_config).unwrap();
+
+    assert_eq!(ce.normalize_classification("ABC123").unwrap(), "");
 }
