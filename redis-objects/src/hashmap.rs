@@ -46,23 +46,28 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     async fn conditional_expire(&self) -> Result<(), ErrorTypes> {
         // load the ttl of this object has one set
         if let Some(ttl) = self.ttl {
-            // the last expire time is behind a mutex so that the queue object is threadsafe
-            let mut last_expire_time = self.last_expire_time.lock().unwrap();
+            let call = {
+                // the last expire time is behind a mutex so that the queue object is threadsafe
+                let mut last_expire_time = self.last_expire_time.lock().unwrap();
 
-            // figure out if its time to update the expiry, wait until we are half way through the
-            // ttl to avoid resetting something only milliseconds old
-            let call = match *last_expire_time {
-                Some(time) => {
-                    time.elapsed() > (ttl / 2)
-                },
-                None => true // always update the expiry if we haven't run it before on this object
+                // figure out if its time to update the expiry, wait until we are half way through the
+                // ttl to avoid resetting something only milliseconds old
+                let call = match *last_expire_time {
+                    Some(time) => {
+                        time.elapsed() > (ttl / 2)
+                    },
+                    None => true // always update the expiry if we haven't run it before on this object
+                };
+
+                if call {
+                    // update the time in the mutex then drop it so we aren't holding the lock 
+                    // while we make the call to the redis server
+                    *last_expire_time = Some(std::time::Instant::now());
+                }
+                call
             };
 
             if call {
-                // update the time in the mutex then drop it so we aren't holding the lock 
-                // while we make the call to the redis server
-                *last_expire_time = Some(std::time::Instant::now());
-                drop(last_expire_time);
                 retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as usize)?;
             }
         }
@@ -111,6 +116,11 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
             Some(data) => Some(serde_json::from_slice(&data)?),
             None => None,
         })
+    }
+
+    /// Read the value stored at the given key
+    pub async fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>, ErrorTypes> {
+        Ok(retry_call!(self.store.pool, hget, &self.name, key)?)
     }
 
     /// Load all keys from the hash
@@ -168,3 +178,76 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
 }
 
 
+#[cfg(test)]
+mod test {
+    use crate::test::redis_connection;
+    use crate::ErrorTypes;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn hash() -> Result<(), ErrorTypes> {
+        let redis = redis_connection().await;
+        let h = redis.hashmap("test-hashmap".to_string(), None);
+        h.delete().await?;
+
+        let value_string = "value".to_owned();
+        let new_value_string = "new-value".to_owned();
+
+        assert!(h.add("key", &value_string).await?);
+        assert!(!h.add("key", &value_string).await?);
+        assert!(h.exists("key").await?);
+        assert_eq!(h.get("key").await?.unwrap(), value_string);
+        assert_eq!(h.set("key", &new_value_string).await?, 0);
+        assert!(!h.add("key", &value_string).await?);
+        assert_eq!(h.keys().await?, ["key"]);
+        assert_eq!(h.length().await?, 1);
+        assert_eq!(h.items().await?, [("key".to_owned(), new_value_string.clone())].into_iter().collect());
+        assert_eq!(h.pop("key").await?.unwrap(), new_value_string);
+        assert_eq!(h.length().await?, 0);
+        assert!(h.add("key", &value_string).await?);
+        // assert h.conditional_remove("key", "value1") is False
+        // assert h.conditional_remove("key", "value") is True
+        // assert h.length(), 0
+
+        // // Make sure we can limit the size of a hash table
+        // assert h.limited_add("a", 1, 2) == 1
+        // assert h.limited_add("a", 1, 2) == 0
+        // assert h.length() == 1
+        // assert h.limited_add("b", 10, 2) == 1
+        // assert h.length() == 2
+        // assert h.limited_add("c", 1, 2) is None
+        // assert h.length() == 2
+        // assert h.pop("a")
+
+        // Can we increment integer values in the hash
+        assert_eq!(h.increment("a", 1).await?, 1);
+        assert_eq!(h.increment("a", 1).await?, 2);
+        assert_eq!(h.increment("a", 10).await?, 12);
+        assert_eq!(h.increment("a", -22).await?, -10);
+        h.delete().await?;
+
+        // // Load a bunch of items and test iteration
+        // data_before = [''.join(_x) for _x in itertools.product('abcde', repeat=5)]
+        // data_before = {_x: _x + _x for _x in data_before}
+        // h.multi_set(data_before)
+
+        // data_after = {}
+        // for key, value in h:
+        //     data_after[key] = value
+        // assert data_before == data_after
+        Ok(())
+    }
+
+    #[tokio::test] 
+    async fn expiring_hash() -> Result<(), ErrorTypes> {
+        let redis = redis_connection().await;
+        let eh = redis.hashmap("test-expiring-hashmap".to_string(), Duration::from_secs(1).into());
+        eh.delete().await?;
+        assert!(eh.add("key", &"value".to_owned()).await?);
+        assert_eq!(eh.length().await?, 1);
+        tokio::time::sleep(Duration::from_secs_f32(1.1)).await;
+        assert_eq!(eh.length().await?, 0);
+        Ok(())
+    }
+
+}

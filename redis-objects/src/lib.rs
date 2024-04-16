@@ -11,31 +11,43 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use redis::AsyncCommands;
+pub use redis::Msg;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc;
 
 pub use self::queue::PriorityQueue;
 pub use self::queue::Queue;
 pub use self::quota::QuotaGuard;
 pub use self::events::EventWatcher;
 pub use self::hashmap::Hashmap;
+pub use self::counters::{AutoExportingMetrics, AutoExportingMetricsBuilder, MetricMessage};
+pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder};
 
-mod queue;
-mod quota;
-mod events;
-mod hashmap;
+pub mod queue;
+pub mod quota;
+pub mod events;
+pub mod hashmap;
+pub mod counters;
+pub mod pubsub;
 
 /// Handle for a pool of connections to a redis server.
 pub struct RedisObjects {
     pool: deadpool_redis::Pool,
+    client: redis::Client,
 }
 
 impl RedisObjects {
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
-        let cfg = deadpool_redis::Config::from_connection_info(config);
+        let cfg = deadpool_redis::Config::from_connection_info(config.clone());
         let pool = cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
-        Ok(Arc::new(Self{ pool }))
+        let client = redis::Client::open(config)?;
+        Ok(Arc::new(Self{ 
+            pool,
+            client,
+        }))
     }
 
     /// Open a priority queue under the given key
@@ -53,68 +65,104 @@ impl RedisObjects {
         Hashmap::new(name, self.clone(), ttl)
     }
 
+    pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
+        retry_call!(self.pool, publish, channel, data)
+    }
+
+    pub fn auto_exporting_metrics<T: MetricMessage>(self: &Arc<Self>, name: String, counter_type: String) -> AutoExportingMetricsBuilder<T> {
+        AutoExportingMetricsBuilder::new(self.clone(), name, counter_type)
+    }
+
+    pub fn pubsub_json_listener<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>) -> JsonListenerBuilder<T> {
+        JsonListenerBuilder::new(self.clone())
+    }
+
+    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Result<T, ErrorTypes>> {
+        self.pubsub_json_listener()
+            .subscribe(channel)
+            .listen()
+    }
+
+    pub fn pubsub_listener(self: &Arc<Self>) -> ListenerBuilder {
+        ListenerBuilder::new(self.clone())
+    }
+
+    pub fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Msg> {
+        self.pubsub_listener()
+            .subscribe(channel)
+            .listen()
+    }
 }
 
+/// Enumeration over all possible errors
 #[derive(Debug)]
 pub enum ErrorTypes {
-    Configuration(deadpool_redis::CreatePoolError),
-    Pool(deadpool_redis::PoolError),
-    Redis(redis::RedisError),
+    /// There is something wrong with the redis configuration
+    Configuration(Box<deadpool_redis::CreatePoolError>),
+    /// Could not get a connection from the redis connection pool
+    Pool(Box<deadpool_redis::PoolError>),
+    /// Returned by the redis server
+    Redis(Box<redis::RedisError>),
+    /// Unexpected result from the redis server
+    UnknownRedisError,
+    /// Could not serialize or deserialize a payload
     Serde(serde_json::Error),
-    SelectRequiresQueues,
+}
+
+impl std::fmt::Display for ErrorTypes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorTypes::Configuration(err) => write!(f, "Redis configuration: {err}"),
+            ErrorTypes::Pool(err) => write!(f, "Redis connection pool: {err}"),
+            ErrorTypes::Redis(err) => write!(f, "Redis runtime error: {err}"),
+            ErrorTypes::UnknownRedisError => write!(f, "Unexpected response from redis server"),
+            ErrorTypes::Serde(err) => write!(f, "Encoding issue with message: {err}"),
+        }
+    }
 }
 
 impl From<deadpool_redis::CreatePoolError> for ErrorTypes {
-    fn from(value: deadpool_redis::CreatePoolError) -> Self { Self::Configuration(value) }
+    fn from(value: deadpool_redis::CreatePoolError) -> Self { Self::Configuration(Box::new(value)) }
 }
 
 impl From<deadpool_redis::PoolError> for ErrorTypes {
-    fn from(value: deadpool_redis::PoolError) -> Self { Self::Pool(value) }
+    fn from(value: deadpool_redis::PoolError) -> Self { Self::Pool(Box::new(value)) }
 }
 
 impl From<redis::RedisError> for ErrorTypes {
-    fn from(value: redis::RedisError) -> Self { Self::Redis(value) }
+    fn from(value: redis::RedisError) -> Self { Self::Redis(Box::new(value)) }
 }
 
 impl From<serde_json::Error> for ErrorTypes {
     fn from(value: serde_json::Error) -> Self { Self::Serde(value) }
 }
 
-// macro_rules! retry_call {
-//     ($pool:expr, $method:ident, $($args:expr),+) => {
-//         {
-//             // track our backoff parameters
-//             let mut exponent = -7.0;
-//             let maximum = 2.0;
-//             loop {
-//                 // get a (fresh if needed) connection form the pool
-//                 let mut con = $pool.get().await?;
-//                 // execute the method given with the argments specified
-//                 match con.$method($($args),+).await {
-//                     Ok(val) => {
-//                         if exponent > -7.0 {
-//                             log::info!("Reconnected to Redis!")
-//                         }
-//                         break Ok(val)
-//                     },
-//                     Err(err) => {
-//                         // If the error from redis is something not related to IO let the error propagate
-//                         if !err.is_io_error() {
-//                             break Result::<_, ErrorTypes>::Err(err.into())
-//                         }
-            
-//                         // For IO errors print a warning and sleep
-//                         log::warn!("No connection to Redis, reconnecting... [{}]", err);
-//                         tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf(exponent))).await;
-//                         exponent = (exponent + 1.0).min(maximum);                    
-//                     },
-//                 }
-//             }
-//         }
-//     };
-// }
+/// A convenience trait that lets you pass an i32 value or None for arguments
+pub trait Ii32: Into<Option<i32>> + Copy {}
+impl<T: Into<Option<i32>> + Copy> Ii32 for T {}
 
+/// A convenience trait that lets you pass an usize value or None for arguments
+pub trait Iusize: Into<Option<usize>> + Copy {}
+impl<T: Into<Option<usize>> + Copy> Iusize for T {}
+
+
+/// A macro for retrying calls to redis when an IO error occurs
 macro_rules! retry_call {
+
+    (handle_error, $err:ident, $exponent:ident, $maximum:ident) => {
+        {
+            // If the error from redis is something not related to IO let the error propagate
+            if !$err.is_io_error() {
+                break Result::<_, ErrorTypes>::Err($err.into())
+            }
+
+            // For IO errors print a warning and sleep
+            log::warn!("No connection to Redis, reconnecting... [{}]", $err);
+            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf($exponent))).await;
+            $exponent = ($exponent + 1.0).min($maximum);
+        }
+    };
+
     (handle_output, $call:expr, $exponent:ident, $maximum:ident) => {
         {
             match $call {
@@ -124,17 +172,7 @@ macro_rules! retry_call {
                     }
                     break Ok(val)
                 },
-                Err(err) => {
-                    // If the error from redis is something not related to IO let the error propagate
-                    if !err.is_io_error() {
-                        break Result::<_, ErrorTypes>::Err(err.into())
-                    }
-        
-                    // For IO errors print a warning and sleep
-                    log::warn!("No connection to Redis, reconnecting... [{}]", err);
-                    tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf($exponent))).await;
-                    $exponent = ($exponent + 1.0).min($maximum);                    
-                },
+                Err(err) => retry_call!(handle_error, err, $exponent, $maximum),
             }
         }
     };
@@ -143,10 +181,18 @@ macro_rules! retry_call {
         {
             // track our backoff parameters
             let mut exponent = -7.0;
-            let maximum = 2.0;
+            let maximum = 3.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = $pool.get().await?;
+                let mut con = match $pool.get().await {
+                    Ok(connection) => connection,
+                    Err(deadpool_redis::PoolError::Backend(err)) => {
+                        retry_call!(handle_error, err, exponent, maximum);
+                        continue
+                    },
+                    Err(err) => break Err(err.into())
+                };
+
                 // execute the method given with the argments specified
                 retry_call!(handle_output, con.$method($($args),+).await, exponent, maximum)
             }
@@ -157,10 +203,18 @@ macro_rules! retry_call {
         {
             // track our backoff parameters
             let mut exponent = -7.0;
-            let maximum = 2.0;
+            let maximum = 3.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = $pool.get().await?;
+                let mut con = match $pool.get().await {
+                    Ok(connection) => connection,
+                    Err(deadpool_redis::PoolError::Backend(err)) => {
+                        retry_call!(handle_error, err, exponent, maximum);
+                        continue
+                    },
+                    Err(err) => break Err(err.into())
+                };
+                
                 // execute the method given with the argments specified
                 retry_call!(handle_output, $obj.$method(&mut con).await, exponent, maximum)
             }
@@ -171,182 +225,44 @@ macro_rules! retry_call {
 pub (crate) use retry_call;
 
 #[cfg(test)]
-mod test {
-    use std::{sync::Arc, num::NonZeroUsize, time::Duration};
+pub (crate) mod test {
+    use std::sync::Arc;
 
     use redis::ConnectionInfo;
 
     use crate::{RedisObjects, Queue, ErrorTypes};
 
 
-    async fn redis_connection() -> Arc<RedisObjects> {
+    pub (crate) async fn redis_connection() -> Arc<RedisObjects> {
         RedisObjects::open(ConnectionInfo{
             addr: redis::ConnectionAddr::Tcp("localhost".to_string(), 6379),
             redis: Default::default(),
         }).unwrap()
     }
 
-    #[tokio::test]
-    async fn queue() {
-        let redis = redis_connection().await;
-
-        let nq = redis.queue("test-named-queue".to_owned(), None);
-        nq.delete().await.unwrap();
-
-        assert!(nq.pop().await.unwrap().is_none());
-        assert!(nq.pop_batch(NonZeroUsize::new(100).unwrap()).await.unwrap().is_empty());
-
-        for x in 0..5 {
-            nq.push(&x).await.unwrap();
-        }
-
-        assert_eq!(nq.content().await.unwrap(), [0, 1, 2, 3, 4]);
-
-        assert_eq!(nq.pop_batch(NonZeroUsize::new(100).unwrap()).await.unwrap(), [0, 1, 2, 3, 4]);
-
-        for x in 0..5 {
-            nq.push(&x).await.unwrap();
-        }
-
-        assert_eq!(nq.length().await.unwrap(), 5);
-        nq.push_batch(&(0..5).collect::<Vec<i32>>()).await.unwrap();
-        assert_eq!(nq.length().await.unwrap(), 10);
-
-        assert_eq!(nq.peek_next().await.unwrap(), nq.pop().await.unwrap());
-        assert_eq!(nq.peek_next().await.unwrap(), Some(1));
-        let v = nq.pop().await.unwrap().unwrap();
-        assert_eq!(v, 1);
-        assert_eq!(nq.peek_next().await.unwrap().unwrap(), 2);
-        nq.unpop(&v).await.unwrap();
-        assert_eq!(nq.peek_next().await.unwrap().unwrap(), 1);
-
-        assert_eq!(Queue::select(&[&nq], None).await.unwrap().unwrap(), ("test-named-queue".to_owned(), 1));
-
-        let nq1 = redis.queue("test-named-queue-1".to_owned(), None);
-        nq1.delete().await.unwrap();
-        let nq2 = redis.queue("test-named-queue-2".to_owned(), None);
-        nq2.delete().await.unwrap();
-
-        nq1.push(&1).await.unwrap();
-        nq2.push(&2).await.unwrap();
-
-        assert_eq!(Queue::select(&[&nq1, &nq2], None).await.unwrap().unwrap(), ("test-named-queue-1".to_owned(), 1));
-        assert_eq!(Queue::select(&[&nq1, &nq2], None).await.unwrap().unwrap(), ("test-named-queue-2".to_owned(), 2));
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
-
-    #[tokio::test]
-    async fn hash() -> Result<(), ErrorTypes> {
-        let redis = redis_connection().await;
-        let h = redis.hashmap("test-hashmap".to_string(), None);
-        h.delete().await?;
-
-        let value_string = "value".to_owned();
-        let new_value_string = "new-value".to_owned();
-
-        assert!(h.add("key", &value_string).await?);
-        assert!(!h.add("key", &value_string).await?);
-        assert!(h.exists("key").await?);
-        assert_eq!(h.get("key").await?.unwrap(), value_string);
-        assert_eq!(h.set("key", &new_value_string).await?, 0);
-        assert!(!h.add("key", &value_string).await?);
-        assert_eq!(h.keys().await?, ["key"]);
-        assert_eq!(h.length().await?, 1);
-        assert_eq!(h.items().await?, [("key".to_owned(), new_value_string.clone())].into_iter().collect());
-        assert_eq!(h.pop("key").await?.unwrap(), new_value_string);
-        assert_eq!(h.length().await?, 0);
-        assert_eq!(h.add("key", &value_string).await?, true);
-        // assert h.conditional_remove("key", "value1") is False
-        // assert h.conditional_remove("key", "value") is True
-        // assert h.length(), 0
-
-        // // Make sure we can limit the size of a hash table
-        // assert h.limited_add("a", 1, 2) == 1
-        // assert h.limited_add("a", 1, 2) == 0
-        // assert h.length() == 1
-        // assert h.limited_add("b", 10, 2) == 1
-        // assert h.length() == 2
-        // assert h.limited_add("c", 1, 2) is None
-        // assert h.length() == 2
-        // assert h.pop("a")
-
-        // Can we increment integer values in the hash
-        assert_eq!(h.increment("a", 1).await?, 1);
-        assert_eq!(h.increment("a", 1).await?, 2);
-        assert_eq!(h.increment("a", 10).await?, 12);
-        assert_eq!(h.increment("a", -22).await?, -10);
-        h.delete().await?;
-
-        // // Load a bunch of items and test iteration
-        // data_before = [''.join(_x) for _x in itertools.product('abcde', repeat=5)]
-        // data_before = {_x: _x + _x for _x in data_before}
-        // h.multi_set(data_before)
-
-        // data_after = {}
-        // for key, value in h:
-        //     data_after[key] = value
-        // assert data_before == data_after
-        Ok(())
-    }
-
-    #[tokio::test] 
-    async fn expiring_hash() -> Result<(), ErrorTypes> {
-        let redis = redis_connection().await;
-        let eh = redis.hashmap("test-expiring-hashmap".to_string(), Duration::from_secs(1).into());
-        eh.delete().await?;
-        assert!(eh.add("key", &"value".to_owned()).await?);
-        assert_eq!(eh.length().await?, 1);
-        tokio::time::sleep(Duration::from_secs_f32(1.1)).await;
-        assert_eq!(eh.length().await?, 0);
-        Ok(())
-    }
-    
-    
-    // # noinspection PyShadowingNames
-    // def test_basic_counters(redis_connection):
-    //     if redis_connection:
-    //         from assemblyline.remote.datatypes.counters import Counters
-    //         with Counters('test-counter') as ct:
-    //             ct.delete()
-    
-    //             for x in range(10):
-    //                 ct.inc('t1')
-    //             for x in range(20):
-    //                 ct.inc('t2', value=2)
-    //             ct.dec('t1')
-    //             ct.dec('t2')
-    //             assert sorted(ct.get_queues()) == ['test-counter-t1',
-    //                                                'test-counter-t2']
-    //             assert ct.get_queues_sizes() == {'test-counter-t1': 9,
-    //                                              'test-counter-t2': 39}
-    //             ct.reset_queues()
-    //             assert ct.get_queues_sizes() == {'test-counter-t1': 0,
-    //                                              'test-counter-t2': 0}
-    
-    
-    // # noinspection PyShadowingNames
-    // def test_tracked_counters(redis_connection):
-    //     if redis_connection:
-    //         from assemblyline.remote.datatypes.counters import Counters
-    //         with Counters('tracked-test-counter', track_counters=True) as ct:
-    //             ct.delete()
-    
-    //             for x in range(10):
-    //                 ct.inc('t1')
-    //             for x in range(20):
-    //                 ct.inc('t2', value=2)
-    //             assert ct.tracker.keys() == ['t1', 't2']
-    //             ct.dec('t1')
-    //             ct.dec('t2')
-    //             assert ct.tracker.keys() == []
-    //             assert sorted(ct.get_queues()) == ['tracked-test-counter-t1',
-    //                                                'tracked-test-counter-t2']
-    //             assert ct.get_queues_sizes() == {'tracked-test-counter-t1': 9,
-    //                                              'tracked-test-counter-t2': 39}
-    //             ct.reset_queues()
-    //             assert ct.get_queues_sizes() == {'tracked-test-counter-t1': 0,
-    //                                              'tracked-test-counter-t2': 0}
-    
+    // simple function to help test that reconnect is working. 
+    // Enable and run this then turn your redis server on and off.
+    // #[tokio::test]
+    // async fn reconnect() {
+    //     init();
+    //     let connection = redis_connection().await;
+    //     let mut listener = connection.subscribe("abc123".to_string());
+    //     // launch a thread that sends messages every second forever
+    //     tokio::spawn(async move {
+    //         loop {
+    //             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    //             connection.publish("abc123", b"100").await.unwrap();
+    //         }
+    //     });
+        
+    //     while let Some(msg) = listener.recv().await {
+    //         println!("{msg:?}");
+    //     }
+    // }
     
     // # noinspection PyShadowingNames
     // def test_sets(redis_connection):
@@ -425,55 +341,65 @@ mod test {
     //         assert not t1.is_alive()
     //         assert not t2.is_alive()
     
-    
-    // # noinspection PyShadowingNames,PyUnusedLocal
-    // def test_priority_queue(redis_connection):
-    //     from assemblyline.remote.datatypes.queues.priority import PriorityQueue, length, select
-    //     with PriorityQueue('test-priority-queue') as pq:
-    //         pq.delete()
-    
-    //         for x in range(10):
-    //             pq.push(100, x)
-    
-    //         a_key = pq.push(101, 'a')
-    //         z_key = pq.push(99, 'z')
-    //         assert pq.rank(a_key) == 0
-    //         assert pq.rank(z_key) == pq.length() - 1
-    
-    //         assert pq.pop() == 'a'
-    //         assert pq.unpush() == 'z'
-    //         assert pq.count(100, 100) == 10
-    //         assert pq.pop() == 0
-    //         assert pq.unpush() == 9
-    //         assert pq.length() == 8
-    //         assert pq.pop(4) == [1, 2, 3, 4]
-    //         assert pq.unpush(3) == [8, 7, 6]
-    //         assert pq.length() == 1  # Should be [<100, 5>] at this point
-    
-    //         for x in range(5):
-    //             pq.push(100 + x, x)
-    
-    //         assert pq.length() == 6
-    //         assert pq.dequeue_range(lower_limit=106) == []
-    //         assert pq.length() == 6
-    //         assert pq.dequeue_range(lower_limit=103) == [4]  # 3 and 4 are both options, 4 has higher score
-    //         assert pq.dequeue_range(lower_limit=102, skip=1) == [2]  # 2 and 3 are both options, 3 has higher score, skip it
-    //         assert pq.dequeue_range(upper_limit=100, num=10) == [5, 0]  # Take some off the other end
-    //         assert pq.length() == 2
-    
-    //         with PriorityQueue('second-priority-queue') as other:
-    //             other.push(100, 'a')
-    //             assert length(other, pq) == [1, 2]
-    //             select(other, pq)
-    //             select(other, pq)
-    //             select(other, pq)
-    //             assert length(other, pq) == [0, 0]
-    
-    //         pq.push(50, 'first')
-    //         pq.push(-50, 'second')
-    
-    //         assert pq.dequeue_range(0, 100) == ['first']
-    //         assert pq.dequeue_range(-100, 0) == ['second']
+    #[tokio::test]
+    async fn priority_queue() -> Result<(), ErrorTypes> {
+        let redis = redis_connection().await;
+        let pq = redis.priority_queue("test-priority-queue".to_string());
+        pq.delete().await?;
+
+        for x in 0..10 {
+            pq.push(100, &x.to_string()).await?;
+        }
+
+        let a_key = pq.push(101, &"a".to_string()).await?;
+        let z_key = pq.push(99, &"z".to_string()).await?;
+        assert_eq!(pq.rank(&a_key).await?.unwrap(), 0);
+        assert_eq!(pq.rank(&z_key).await?.unwrap(), pq.length().await? - 1);
+        assert!(pq.rank(b"onethuosentuh").await?.is_none());
+
+        assert_eq!(pq.pop(1).await?, ["a"]);
+        assert_eq!(pq.unpush(1).await?, ["z"]);
+        assert_eq!(pq.count(100, 100).await?, 10);
+        assert_eq!(pq.pop(1).await?, ["0"]);
+        assert_eq!(pq.unpush(1).await?, ["9"]);
+        assert_eq!(pq.length().await?, 8);
+        assert_eq!(pq.pop(4).await?, ["1", "2", "3", "4"]);
+        assert_eq!(pq.unpush(3).await?, ["8", "7", "6"]);
+        assert_eq!(pq.length().await?, 1);
+        // Should be [(100, 5)] at this point
+
+        // for x in 0..5 {
+        for x in 0..1 {
+            pq.push(100 + x, &x.to_string()).await?;
+        }
+
+        // assert_eq!(pq.length().await?, 6);
+        // assert_eq!(pq.dequeue_range(106, None, None, None).await?, []);
+        // assert_eq!(pq.length().await?, 6);
+        // // 3 and 4 are both options, 4 has higher score
+        // assert_eq!(pq.dequeue_range(103, None, None, None), [4]  );
+        // // 2 and 3 are both options, 3 has higher score, skip it
+        // assert_eq!(pq.dequeue_range(102, None, 1, None), [2]  );
+        // // Take some off the other end
+        // assert_eq!(pq.dequeue_range(None, 100, None, 10), [5, 0]  );
+        // assert_eq!(pq.length().await?, 2);
+
+        // let other = redis.priority_queue("second-priority-queue".to_string());
+        // other.delete().await?;
+        // other.push(100, &"a".to_string()).await?;
+        // assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [1, 2]);
+        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        // assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [0, 0]);
+
+        // pq.push(50, &"first".to_string()).await?;
+        // pq.push(-50, &"second".to_string()).await?;
+
+        // assert pq.dequeue_range(0, 100) == ['first']
+        // assert pq.dequeue_range(-100, 0) == ['second']
+        todo!();
+    }
     
     
     // # noinspection PyShadowingNames,PyUnusedLocal
@@ -520,51 +446,56 @@ mod test {
     //         pq.push(-50, 'second')
     
     //         assert pq.dequeue_range(0, 100) == ['first']
-    //         assert pq.dequeue_range(-100, 0) == ['second']
+    //         assert pq.dequeue_range(-100, 0) == ['second']   
     
-    
-    // # noinspection PyShadowingNames
-    // def test_named_queue(redis_connection):
-    //     if redis_connection:
-    //         from assemblyline.remote.datatypes.queues.named import NamedQueue, select
-    //         with NamedQueue('test-named-queue') as nq:
-    //             nq.delete()
-    
-    //             for x in range(5):
-    //                 nq.push(x)
-    
-    //             assert nq.pop_batch(100) == [0, 1, 2, 3, 4]
-    
-    //             for x in range(5):
-    //                 nq.push(x)
-    
-    //             assert nq.length() == 5
-    //             nq.push(*list(range(5)))
-    //             assert nq.length() == 10
-    
-    //             assert nq.peek_next() == nq.pop()
-    //             assert nq.peek_next() == 1
-    //             v = nq.pop()
-    //             assert v == 1
-    //             assert nq.peek_next() == 2
-    //             nq.unpop(v)
-    //             assert nq.peek_next() == 1
-    
-    //             assert select(nq) == ('test-named-queue', 1)
-    
-    //         with NamedQueue('test-named-queue-1') as nq1:
-    //             nq1.delete()
-    
-    //             with NamedQueue('test-named-queue-2') as nq2:
-    //                 nq2.delete()
-    
-    //                 nq1.push(1)
-    //                 nq2.push(2)
-    
-    //                 assert select(nq1, nq2) == ('test-named-queue-1', 1)
-    //                 assert select(nq1, nq2) == ('test-named-queue-2', 2)
-    
-    
+    #[tokio::test]
+    async fn named_queue() {
+        let redis = redis_connection().await;
+
+        let nq = redis.queue("test-named-queue".to_owned(), None);
+        nq.delete().await.unwrap();
+
+        assert!(nq.pop().await.unwrap().is_none());
+        assert!(nq.pop_batch(100).await.unwrap().is_empty());
+
+        for x in 0..5 {
+            nq.push(&x).await.unwrap();
+        }
+
+        assert_eq!(nq.content().await.unwrap(), [0, 1, 2, 3, 4]);
+
+        assert_eq!(nq.pop_batch(100).await.unwrap(), [0, 1, 2, 3, 4]);
+
+        for x in 0..5 {
+            nq.push(&x).await.unwrap();
+        }
+
+        assert_eq!(nq.length().await.unwrap(), 5);
+        nq.push_batch(&(0..5).collect::<Vec<i32>>()).await.unwrap();
+        assert_eq!(nq.length().await.unwrap(), 10);
+
+        assert_eq!(nq.peek_next().await.unwrap(), nq.pop().await.unwrap());
+        assert_eq!(nq.peek_next().await.unwrap(), Some(1));
+        let v = nq.pop().await.unwrap().unwrap();
+        assert_eq!(v, 1);
+        assert_eq!(nq.peek_next().await.unwrap().unwrap(), 2);
+        nq.unpop(&v).await.unwrap();
+        assert_eq!(nq.peek_next().await.unwrap().unwrap(), 1);
+
+        assert_eq!(Queue::select(&[&nq], None).await.unwrap().unwrap(), ("test-named-queue".to_owned(), 1));
+
+        let nq1 = redis.queue("test-named-queue-1".to_owned(), None);
+        nq1.delete().await.unwrap();
+        let nq2 = redis.queue("test-named-queue-2".to_owned(), None);
+        nq2.delete().await.unwrap();
+
+        nq1.push(&1).await.unwrap();
+        nq2.push(&2).await.unwrap();
+
+        assert_eq!(Queue::select(&[&nq1, &nq2], None).await.unwrap().unwrap(), ("test-named-queue-1".to_owned(), 1));
+        assert_eq!(Queue::select(&[&nq1, &nq2], None).await.unwrap().unwrap(), ("test-named-queue-2".to_owned(), 2));
+    }
+
     // # noinspection PyShadowingNames
     // def test_multi_queue(redis_connection):
     //     if redis_connection:
@@ -650,20 +581,6 @@ mod test {
     //         for _ in range(max_quota):
     //             assert uqt.begin(name, max_quota) is True
     
-
-//     from __future__ import annotations
-// import uuid
-// import time
-// import enum
-// import json
-// from typing import Any, Optional
-// from dataclasses import dataclass, asdict
-
-// from assemblyline.remote.datatypes.events import EventSender, EventWatcher
-
-// import pytest
-// from redis import Redis
-
 
 // def test_exact_event(redis_connection: Redis[Any]):
 //     calls: list[dict[str, Any]] = []

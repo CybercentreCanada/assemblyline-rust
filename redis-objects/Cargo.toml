@@ -8,15 +8,25 @@ homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
 description = """Object oriented wrapper around redis client."""
 
 [dependencies]
-serde = { version = "1.0", features = ["derive", "std"] }
-# serde_with = "3.3"
-serde_json = "1.0"
-# strum = { version = "0.25", features = ["derive"] }
-
+# Async Runtime 
 tokio = { version = "1", features = ["full"] }
-log = "0.4"
+futures = "*"
 
+# Serialization
+serde = { version = "1.0", features = ["derive", "std"] }
+serde_json = "1.0"
+
+# General system utilities
+log = "0.4"
+chrono = "0.4"
+parking_lot = "0.12"
+rand = "0.8"
+
+# Redis libraries
 # The versions of these two packages are tied togeather, don't change one without 
 # making sure the pool is using the same redis version
 redis = { version = "0.23", features = ["tokio-comp", "connection-manager", "keep-alive", "native-tls"] }
 deadpool-redis = { version = "0.13.0", features = ["serde"] }
+
+[dev-dependencies]
+env_logger = "0.11"
