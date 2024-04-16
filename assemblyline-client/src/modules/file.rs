@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use assemblyline_models::{Sha256, Classification};
+use assemblyline_models::Sha256;
 use assemblyline_models::datastore::file::File as FileModel;
 use assemblyline_models::datastore::result::Result as ResultModel;
 use serde::Deserialize;
@@ -37,7 +37,7 @@ pub struct FileResults {
     /// List of children files
     pub childrens: Vec<Child>,
     /// List tags generated
-    pub tags: HashMap<String, Vec<(String, String, bool, Classification)>>,
+    pub tags: HashMap<String, Vec<(String, String, bool, String)>>,
     /// Metadata facets results
     // pub metadata: HashMap<String, FacetResult>,
     /// UI switch to disable features
