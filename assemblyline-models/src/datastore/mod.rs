@@ -8,6 +8,7 @@ pub mod tagging;
 pub mod file;
 pub mod service;
 pub mod retrohunt;
+pub mod user;
 
 pub use submission::Submission;
 pub use error::Error;

@@ -309,7 +309,7 @@ impl<const USER: bool> ExpandingClassification<USER> {
     }
 }
 
-impl<'de> Deserialize<'de> for ExpandingClassification {
+impl<'de, const USER: bool> Deserialize<'de> for ExpandingClassification<USER> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de> 
@@ -369,7 +369,7 @@ pub type Platform = String;
 /// Unvalidated processor type
 pub type Processor = String;
 
-/// Unvalidated ssdeep type
+/// Validated ssdeep type
 #[derive(SerializeDisplay, DeserializeFromStr, Described, PartialEq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text", analyzer="text_fuzzy")]

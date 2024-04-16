@@ -4,6 +4,118 @@ use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
+
+
+/// Named Value
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub struct NamedValue {
+    /// Name
+    pub name: String,
+    /// Value
+    pub value: String
+}
+
+/// Webhook Configuration
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub struct Webhook {
+    /// Password used to authenticate with source
+    #[serde(default)]
+    pub password: Option<String>,
+    /// CA cert for source
+    #[serde(default)]
+    pub ca_cert: Option<String>,
+    /// Ignore SSL errors when reaching out to source?
+    #[serde(default)]
+    pub ssl_ignore_errors: bool,
+    #[serde(default)]
+    pub ssl_ignore_hostname: bool,
+    /// Proxy server for source
+    #[serde(default)]
+    pub proxy: Option<String>,
+    /// HTTP method used to access webhook
+    #[serde(default="default_webhook_method")]
+    pub method: String,
+    /// URI to source
+    pub uri: String,
+    /// Username used to authenticate with source
+    #[serde(default)]
+    pub username: Option<String>,
+    /// Headers
+    #[serde(default)]
+    pub headers: Vec<NamedValue>,
+    /// Number of attempts to connect to webhook endpoint
+    #[serde(default="default_webhook_retries")]
+    pub retries: Option<u32>,
+}
+
+fn default_webhook_method() -> String { "POST".to_string() }
+fn default_webhook_retries() -> Option<u32> { Some(3) }
+
+/// Resubmission Options
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResubmitOptions {
+    pub additional_services: Vec<String>,
+    pub random_below: Option<i32>,
+}
+
+/// Postprocessing Action
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PostprocessAction {
+    /// Is this action active
+    #[serde(default)]
+    pub enabled: bool,
+    /// Should this action run on cache hits
+    #[serde(default)]
+    pub run_on_cache: bool,
+    /// Should this action run on newly completed submissions
+    #[serde(default)]
+    pub run_on_completed: bool,
+    /// Query string to select submissions
+    pub filter: String,
+    /// Webhook action configuration
+    #[serde(default)]
+    pub webhook: Option<Webhook>,
+    /// Raise an alert when this action is triggered
+    #[serde(default)]
+    pub raise_alert: bool,
+    /// Resubmission configuration
+    #[serde(default)]
+    pub resubmit: Option<ResubmitOptions>,
+    /// Archive the submission when this action is triggered
+    #[serde(default)]
+    pub archive_submission: bool,
+}
+
+pub fn default_postprocess_actions() -> HashMap<String, PostprocessAction> {
+    // Raise alerts for all submissions over 500, both on cache hits and submission complete
+    [("default_alerts".to_string(), PostprocessAction{
+        enabled: true,
+        run_on_cache: true,
+        run_on_completed: true,
+        filter: "max_score: >=500".to_string(),
+        webhook: None,
+        raise_alert: true,
+        resubmit: None,
+        archive_submission: false
+    }),
+    // Resubmit submissions on completion. All submissions with score >= 0 are elegable, but sampling
+    // is applied to scores below 500
+    ("default_resubmit".to_string(), PostprocessAction{
+        enabled: true,
+        run_on_cache: true,
+        run_on_completed: true,
+        filter: "max_score: >=0".to_string(),
+        webhook: None,
+        raise_alert: false,
+        resubmit: Some(ResubmitOptions{
+            additional_services: vec![],
+            random_below: Some(500)
+        }),
+        archive_submission: false
+    })].into_iter().collect()
+}
+
 // from typing import Dict, List
 
 // from assemblyline import odm

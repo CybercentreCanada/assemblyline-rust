@@ -31,8 +31,8 @@ pub struct Submission {
     /// Total number of files in the submission
     pub file_count: i32,
     /// List of files that were originally submitted
-    // pub files: Vec<File>,
-    pub file: File,
+    pub files: Vec<File>, 
+    // pub file: File,
     /// Maximum score of all the files in the scan
     pub max_score: i32,
     /// Metadata associated to the submission
