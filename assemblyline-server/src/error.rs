@@ -7,7 +7,9 @@ pub enum Error {
     SearchException(String),
     ArchiveDisabled(String),
     VersionConflictException(String),
-    DataStoreException(&'static str)
+    DataStoreException(&'static str),
+    /// An error with the runtime or execution environment itself
+    RuntimeError(String)
 }
 
 impl std::fmt::Display for Error {
@@ -64,7 +66,13 @@ impl From<reqwest::Error> for Error {
 
 impl From<tokio::task::JoinError> for Error {
     fn from(value: tokio::task::JoinError) -> Self {
-        todo!()
+        Self::RuntimeError(value.to_string())
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for Error {
+    fn from(value: tokio::sync::oneshot::error::RecvError) -> Self {
+        Self::RuntimeError(value.to_string())
     }
 }
 

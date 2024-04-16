@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use assemblyline_models::datastore::submission::SubmissionState;
-use assemblyline_models::{Sid, Sha256};
+use assemblyline_models::messages::task::TagItem;
+use assemblyline_models::{Sid, Sha256, JsonMap};
 use assemblyline_models::datastore::Submission;
 use poem::listener::{TcpListener, OpensslTlsConfig, Listener};
 use poem::web::{Data, Json, Path};
@@ -18,9 +19,9 @@ use crate::logging::LoggerMiddleware;
 use crate::tls::random_tls_certificate;
 use crate::error::Error;
 
-use super::Session;
+use super::{DispatcherSession, ResultSummary, TagCollection};
 
-pub async fn start_interface(session: Arc<Session>) -> Result<(), Error> {
+pub async fn start_interface(session: Arc<DispatcherSession>) -> Result<(), Error> {
 
     let config = &session.config.core.dispatcher.broker_bind;
 
@@ -78,7 +79,7 @@ pub struct PostSubmissionResponse {
 
 #[handler]
 async fn post_submission(
-    Data(session): Data<&Arc<Session>>,
+    Data(session): Data<&Arc<DispatcherSession>>,
     Json(submission): Json<Submission>
 ) -> poem::Result<Json<PostSubmissionResponse>> {
     todo!()
@@ -115,7 +116,7 @@ pub struct GetSubmissionResponse {
 
 #[handler]
 async fn get_submission(
-    Data(session): Data<&Arc<Session>>,
+    Data(session): Data<&Arc<DispatcherSession>>,
     Path(sid): Path<Sid>,
 ) -> poem::Result<Json<GetSubmissionResponse>> {
     todo!();
@@ -165,14 +166,23 @@ pub enum DispatchStatusMessage {
 // }
 
 
-// #[derive(Serialize, Deserialize)]
-// pub struct TaskResult {
-//     pub sid: Sid,
-//     pub service_name: String,
-//     pub sha256: Sha256,
+#[derive(Serialize, Deserialize)]
+pub struct TaskResult {
+    pub sid: Sid,
+    pub sha256: Sha256,
+    pub task_id: u64,
 
-//     pub worker: String,
-// }
+    pub service_name: String,
+    pub service_version: String,
+    pub service_tool_version: String,
+    // pub expiry_ts: 
+//             expiry_ts = data['expiry_ts']
+
+    pub result_summary: ResultSummary,
+    pub tags: Vec<TagItem>,
+    pub temporary_data: JsonMap,
+    pub dynamic_recursion_bypass: Vec<Sha256>,
+}
 
 // #[handler]
 // async fn post_result_task(
@@ -187,15 +197,15 @@ pub enum DispatchStatusMessage {
 //     session.result_messages.send(ResultMessage::Response(sig, result.worker.clone(), ResultResponse::Result(result))).await;
 // }
 
-// #[derive(Serialize, Deserialize)]
-// pub struct TaskError {
-//     pub sid: Sid,
-//     pub service_name: String,
-//     pub sha256: Sha256,
+#[derive(Serialize, Deserialize)]
+pub struct TaskError {
+    pub task_id: u64,
+    pub sid: Sid,
+    pub service_name: String,
+    pub sha256: Sha256,
 
-//     pub worker: String,
-
-// }
+    pub worker: String,
+}
 
 // #[handler]
 // async fn post_error_task(
@@ -220,3 +230,85 @@ pub enum DispatchStatusMessage {
 //     todo!()
 // }
 
+
+
+
+//     def handle_commands(self):
+//         while self.running:
+
+//             message = self.command_queue.pop(timeout=3)
+//             if not message:
+//                 continue
+
+//             cpu_mark = time.process_time()
+//             time_mark = time.time()
+
+//             # Start of process dispatcher transaction
+//             with apm_span(self.apm_client, 'command_message'):
+
+//                 command = DispatcherCommandMessage(message)
+//                 if command.kind == CREATE_WATCH:
+//                     watch_payload: CreateWatch = command.payload()
+//                     self.setup_watch_queue(watch_payload.submission, watch_payload.queue_name)
+//                 elif command.kind == LIST_OUTSTANDING:
+//                     payload: ListOutstanding = command.payload()
+//                     self.list_outstanding(payload.submission, payload.response_queue)
+//                 elif command.kind == UPDATE_BAD_SID:
+//                     self.update_bad_sids()
+//                     NamedQueue(command.payload_data, host=self.redis).push(self.instance_id)
+//                 else:
+//                     self.log.warning(f"Unknown command code: {command.kind}")
+
+//                 self.counter.increment_execution_time('cpu_seconds', time.process_time() - cpu_mark)
+//                 self.counter.increment_execution_time('busy_seconds', time.time() - time_mark)
+
+//     @elasticapm.capture_span(span_type='dispatcher')
+//     def setup_watch_queue(self, sid, queue_name):
+//         # Create a unique queue
+//         watch_queue = NamedQueue(queue_name, ttl=30)
+//         watch_queue.push(WatchQueueMessage({'status': 'START'}).as_primitives())
+
+//         #
+//         task = self.tasks.get(sid)
+//         if not task:
+//             watch_queue.push(WatchQueueMessage({"status": "STOP"}).as_primitives())
+//             return
+
+//         # Add the newly created queue to the list of queues for the given submission
+//         self._watcher_list(sid).add(queue_name)
+
+//         # Push all current keys to the newly created queue (Queue should have a TTL of about 30 sec to 1 minute)
+//         for result_data in list(task.service_results.values()):
+//             watch_queue.push(WatchQueueMessage({"status": "OK", "cache_key": result_data.key}).as_primitives())
+
+//         for error_key in list(task.service_errors.values()):
+//             watch_queue.push(WatchQueueMessage({"status": "FAIL", "cache_key": error_key}).as_primitives())
+
+//     @elasticapm.capture_span(span_type='dispatcher')
+//     def list_outstanding(self, sid: str, queue_name: str):
+//         response_queue: NamedQueue[dict] = NamedQueue(queue_name, host=self.redis)
+//         outstanding: defaultdict[str, int] = defaultdict(int)
+//         task = self.tasks.get(sid)
+//         if task:
+//             for _sha, service_name in list(task.queue_keys.keys()):
+//                 outstanding[service_name] += 1
+//             for _sha, service_name in list(task.running_services):
+//                 outstanding[service_name] += 1
+//         response_queue.push(outstanding)
+
+
+//     def update_bad_sids(self):
+//         # Pull new sid list
+//         remote_sid_list = set(self.redis_bad_sids.members())
+//         new_sid_events = []
+
+//         # Kick off updates for any new sids
+//         for bad_sid in remote_sid_list - self.bad_sids:
+//             self.bad_sids.add(bad_sid)
+//             event = threading.Event()
+//             self.find_process_queue(bad_sid).put(DispatchAction(kind=Action.bad_sid, sid=bad_sid, event=event))
+//             new_sid_events.append(event)
+
+//         # Wait for those updates to finish
+//         for event in new_sid_events:
+//             event.wait()

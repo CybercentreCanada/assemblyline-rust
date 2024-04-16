@@ -12,6 +12,8 @@ chrono = "*"
 tempfile = "*"
 rand = "*"
 itertools = "*"
+anyhow = "*"
+bytes = "*"
 
 # Core framework
 tokio = { version = "1", features = ["full"] }
@@ -31,9 +33,15 @@ rustls = "0.20"
 
 # Database tools
 elasticsearch = "8.5.0-alpha.1"
-redis = { version = "0.23.0", features = ["tokio-native-tls-comp", "connection-manager"] }
+redis-objects = { version = "*", path = "../redis-objects" }
 
 # Data managing
 assemblyline-models = { version = "0.1", path = "../assemblyline-models" }
+struct-metadata = "*"
 serde = { version = "*", features = ["derive", "rc"] }
 serde_json = "*"
+serde_yaml = "*"
+
+# data parsing
+nom = "*"
+regex = "*"
