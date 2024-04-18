@@ -1325,61 +1325,52 @@ impl Default for ServiceSafelist {
 // }
 
 
-// @odm.model(index=False, store=False, description="UI Configuration")
-// class UI(odm.Model):
-//     alerting_meta: AlertingMeta = odm.Compound(AlertingMeta, default=DEFAULT_ALERTING_META,
-//                                                description="Alerting metadata fields")
-//     allow_malicious_hinting: bool = odm.Boolean(
-//         description="Allow user to tell in advance the system that a file is malicious?")
+/// UI Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct UI {
+//     alerting_meta: AlertingMeta = odm.Compound(AlertingMeta, default=DEFAULT_ALERTING_META,description="Alerting metadata fields")
+    /// Allow user to tell in advance the system that a file is malicious?
+    pub allow_malicious_hinting: bool,
 //     allow_raw_downloads: bool = odm.Boolean(description="Allow user to download raw files?")
 //     allow_zip_downloads: bool = odm.Boolean(description="Allow user to download files as password protected ZIPs?")
 //     allow_replay: bool = odm.Boolean(description="Allow users to request replay on another server?")
 //     allow_url_submissions: bool = odm.Boolean(description="Allow file submissions via url?")
 //     audit: bool = odm.Boolean(description="Should API calls be audited and saved to a separate log file?")
-//     banner: Dict[str, str] = odm.Optional(odm.Mapping(
-//         odm.Keyword()), description="Banner message display on the main page (format: {<language_code>: message})")
-//     banner_level: str = odm.Enum(
-//         values=["info", "warning", "success", "error"],
-//         description="Banner message level")
+//     banner: Dict[str, str] = odm.Optional(odm.Mapping(odm.Keyword()), description="Banner message display on the main page (format: {<language_code>: message})")
+//     banner_level: str = odm.Enum(values=["info", "warning", "success", "error"],description="Banner message level")
 //     debug: bool = odm.Boolean(description="Enable debugging?")
 //     discover_url: str = odm.Optional(odm.Keyword(), description="Discover URL")
 //     download_encoding = odm.Enum(values=["raw", "cart"], description="Which encoding will be used for downloads?")
 //     email: str = odm.Optional(odm.Email(), description="Assemblyline admins email address")
 //     enforce_quota: bool = odm.Boolean(description="Enforce the user's quotas?")
-//     external_links: List[ExternalLinks] = odm.List(
-//         odm.Compound(ExternalLinks),
-//         description="List of external pivot links")
-//     external_sources: List[ExternalSource] = odm.List(
-//         odm.Compound(ExternalSource), description="List of external sources to query")
+//     external_links: List[ExternalLinks] = odm.List(odm.Compound(ExternalLinks),description="List of external pivot links")
+//     external_sources: List[ExternalSource] = odm.List(odm.Compound(ExternalSource), description="List of external sources to query")
 //     fqdn: str = odm.Text(description="Fully qualified domain name to use for the 2-factor authentication validation")
 //     ingest_max_priority: int = odm.Integer(description="Maximum priority for ingest API")
 //     read_only: bool = odm.Boolean(description="Turn on read only mode in the UI")
-//     read_only_offset: str = odm.Keyword(
-//         default="", description="Offset of the read only mode for all paging and searches")
+//     read_only_offset: str = odm.Keyword(default="", description="Offset of the read only mode for all paging and searches")
 //     rss_feeds: List[str] = odm.List(odm.Keyword(), default=[], description="List of RSS feeds to display on the UI")
 //     services_feed: str = odm.Keyword(description="Feed of all the services available on AL")
 //     secret_key: str = odm.Keyword(description="Flask secret key to store cookies, etc.")
 //     session_duration: int = odm.Integer(description="Duration of the user session before the user has to login again")
-//     statistics: Statistics = odm.Compound(Statistics, default=DEFAULT_STATISTICS,
-//                                           description="Statistics configuration")
+//     statistics: Statistics = odm.Compound(Statistics, default=DEFAULT_STATISTICS, description="Statistics configuration")
 //     tos: str = odm.Optional(odm.Text(), description="Terms of service")
 //     tos_lockout: bool = odm.Boolean(description="Lock out user after accepting the terms of service?")
-//     tos_lockout_notify: List[str] = odm.Optional(odm.List(odm.Keyword()),
-//                                                  description="List of admins to notify when a user gets locked out")
-//     url_submission_headers: Dict[str, str] = odm.Optional(odm.Mapping(odm.Keyword()),
-//                                                           description="Headers used by the url_download method")
-//     url_submission_proxies: Dict[str, str] = odm.Optional(odm.Mapping(odm.Keyword()),
-//                                                           description="Proxy used by the url_download method")
+//     tos_lockout_notify: List[str] = odm.Optional(odm.List(odm.Keyword()), description="List of admins to notify when a user gets locked out")
+//     url_submission_headers: Dict[str, str] = odm.Optional(odm.Mapping(odm.Keyword()), description="Headers used by the url_download method")
+//     url_submission_proxies: Dict[str, str] = odm.Optional(odm.Mapping(odm.Keyword()), description="Proxy used by the url_download method")
 //     url_submission_timeout: int = odm.Integer(default=15, description="Request timeout for fetching URLs")
-//     validate_session_ip: bool = \
-//         odm.Boolean(description="Validate if the session IP matches the IP the session was created from")
-//     validate_session_useragent: bool = \
-//         odm.Boolean(description="Validate if the session useragent matches the useragent the session was created with")
+//     validate_session_ip: bool = odm.Boolean(description="Validate if the session IP matches the IP the session was created from")
+//     validate_session_useragent: bool = odm.Boolean(description="Validate if the session useragent matches the useragent the session was created with")
+}
 
-
+impl Default for UI {
+    fn default() -> Self {
+        Self { 
 // DEFAULT_UI = {
 //     "alerting_meta": DEFAULT_ALERTING_META,
-//     "allow_malicious_hinting": False,
+            allow_malicious_hinting: false,
 //     "allow_raw_downloads": True,
 //     "allow_zip_downloads": True,
 //     "allow_replay": False,
@@ -1418,7 +1409,9 @@ impl Default for ServiceSafelist {
 //     "validate_session_ip": True,
 //     "validate_session_useragent": True,
 // }
-
+        }
+    }
+}
 
 // # Options regarding all submissions, regardless of their input method
 // @odm.model(index=False, store=False)
@@ -1538,8 +1531,8 @@ pub struct Submission {
     // pub default_max_supplementary: u32,
     // /// Number of days submissions will remain in the system by default
     // pub dtl: u32,
-    // /// Maximum number of days submissions will remain in the system
-    // pub max_dtl: u32,
+    /// Maximum number of days submissions will remain in the system
+    pub max_dtl: u32,
     // /// Maximum files extraction depth
     // pub max_extraction_depth: u32,
     /// Maximum size for files submitted in the system
@@ -1565,7 +1558,7 @@ impl Default for Submission {
             // default_max_extracted: 500,
             // default_max_supplementary: 500,
             // dtl: 30,
-            // max_dtl: 0,
+            max_dtl: 0,
             // max_extraction_depth: 6,
             max_file_size: 104857600,
             max_metadata_length: 4096,
@@ -1614,8 +1607,8 @@ pub struct Config {
     // pub services: Services,
     // /// System configuration
     // pub system: System,
-    // /// UI configuration parameters
-    // pub ui: UI,
+    /// UI configuration parameters
+    pub ui: UI,
     /// Options for how submissions will be processed
     pub submission: Submission,
     // /// Retrohunt configuration for the frontend and server

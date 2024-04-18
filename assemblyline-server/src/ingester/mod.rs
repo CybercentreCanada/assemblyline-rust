@@ -24,6 +24,7 @@ use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Pub
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
+use crate::submission_common::SubmissionClient;
 use crate::{await_tasks, spawn_retry_forever, Core};
 
 mod http;
@@ -143,6 +144,7 @@ struct Ingester {
     // Output. Duplicate our input traffic into this queue so it may be cloned by other systems
     traffic_queue: Publisher,
 
+    submit_client: SubmissionClient,
 
     priority_value: HashMap<String, u16>,
     priority_range: HashMap<String, (u16, u16)>,
@@ -331,7 +333,7 @@ impl Ingester {
 
             // Check if this file has been previously processed.
             let (pprevious, previous, score, scan_key) = if !task.submission.params.ignore_cache {
-                self.check(&task, true).await
+                self.check(&mut task, true).await
             } else {
                 (None, None, None, Self::stamp_filescore_key(&mut task, None))
             };
@@ -364,7 +366,7 @@ impl Ingester {
 
             // We have managed to add the task to the scan table, so now we go
             // ahead with the submission process
-            let err = match self.submit(scan_key, &task).await {
+            let err = match self.submit(scan_key, task).await {
                 Ok(()) => continue,
                 Err(err) => err,
             };
@@ -373,18 +375,9 @@ impl Ingester {
             // The rest of this function is error handling/recovery
             increment!(self.counter, error);
 
-            let should_retry = true;
-            if isinstance(ex, CorruptedFileStoreException):
-                self.log.error("Submission for file '%s' failed due to corrupted filestore: %s" % (task.sha256, str(ex)))
-                should_retry = False
-            elif isinstance(ex, DataStoreException):
-                trace = exceptions.get_stacktrace_info(ex)
-                self.log.error("Submission for file '%s' failed due to data store error:\n%s" % (task.sha256, trace))
-            elif not isinstance(ex, FileStoreException):
-                trace = exceptions.get_stacktrace_info(ex)
-                self.log.error("Submission for file '%s' failed: %s" % (task.sha256, trace))
+            error!("Submission for file '{sha256}' failed due to: {err}");
 
-            let task = match self.scanning.pop(scan_key).await? {
+            let task = match self.scanning.pop(&scan_key).await? {
                 Some(task) => task,
                 None => {
                     error!("No scanning entry for for %s", task.sha256);
@@ -392,7 +385,6 @@ impl Ingester {
                 }
             };
 
-            if !should_retry { continue }
             self.retry(task, scan_key, ex)
             // End of ingest message (retry)
         }
@@ -479,7 +471,7 @@ impl Ingester {
 
             // Get jobs being processed by dispatcher or in dispatcher queue
             let mut assignment: HashMap<String, String> = Default::default();
-            for data in self.submit_client.dispatcher.queued_submissions() {
+            for data in self.core.dispatch_submission_queue.content().await? {
                 assignment[data['submission']['sid']] = ''
             }
             for dis in Dispatcher.all_instances(self.redis_persist) {
@@ -489,7 +481,7 @@ impl Ingester {
             }
 
             // Filter out outstanding tasks currently assigned or in queue
-            outstanding = {
+            outstanding: = {
                 key: doc
                 for key, doc in outstanding.items()
                 if doc["submission"]["sid"] not in assignment
@@ -564,17 +556,18 @@ impl Ingester {
 
         // Set the groups from the user, if they aren't already set
         if task.params().groups.is_empty() {
+            let classification_string = task.params().classification.to_string();
             for g in self.get_groups_from_user(task.params().submitter) {
-                // if g in str(task.params.classification {
+                if classification_string.contains(g) {
                     task.submission.params.groups.push(g);
-                // }
+                }
             }
         }
 
         // Check if this file is already being processed
         Self::stamp_filescore_key(&mut task, None);
         let (pprevious, previous, score, _) = if !task.params().ignore_cache {
-            self.check(&task, false).await
+            self.check(&mut task, false).await
         } else {
             (None, None, None, "".to_owned())
         };
@@ -583,47 +576,44 @@ impl Ingester {
         let low_priority = self.is_low_priority(&task);
 
         let priority = task.params().priority;
-        if priority < 0:
-            priority = self.priority_value['medium']
+        // if priority < 0:
+        //     priority = self.priority_value['medium']
 
-            if score is not None:
-                priority = self.priority_value['low']
-                for level, threshold in self.threshold_value.items():
-                    if score >= threshold:
-                        priority = self.priority_value[level]
-                        break
-            elif low_priority:
-                priority = self.priority_value['low']
+        //     if score is not None:
+        //         priority = self.priority_value['low']
+        //         for level, threshold in self.threshold_value.items():
+        //             if score >= threshold:
+        //                 priority = self.priority_value[level]
+        //                 break
+        //     elif low_priority:
+        //         priority = self.priority_value['low']
 
-        # Reduce the priority by an order of magnitude for very old files.
-        current_time = now()
-        if priority and self.expired(current_time - task.submission.time.timestamp(), 0):
-            priority = (priority / 10) or 1
+        // Reduce the priority by an order of magnitude for very old files.
+        let current_time = Utc::now();
+        if priority > 0 && self.expired(current_time.timestamp() - task.submission.time.timestamp(), 0) {
+            priority = (priority / 10).max(1);
+        }
+        task.submission.params.priority = priority;
 
-        param.priority = priority
+        // Do this after priority has been assigned.
+        // (So we don't end up dropping the resubmission).
+        if previous {
+            increment!(self.counter, duplicates);
+            self.finalize(pprevious, previous, score, &task, true).await?;
 
-        # Do this after priority has been assigned.
-        # (So we don't end up dropping the resubmission).
-        if previous:
-            self.counter.increment('duplicates')
-            self.finalize(pprevious, previous, score, task, cache=True)
-
-            # On cache hits of any kind we want to send out a completed message
-            self.traffic_queue.publish(SubmissionMessage({
-                'msg': task.submission,
-                'msg_type': 'SubmissionCompleted',
-                'sender': 'ingester',
-            }).as_primitives())
-            return
-
-        if self.drop(task) {
-            self.log.info(f"[{task.ingest_id} :: {task.sha256}] Dropped")
-            return
+            // On cache hits of any kind we want to send out a completed message
+            self.traffic_queue.publish(SubmissionMessage::completed(task.submission.clone(), "ingester")).await?;
+            return Ok(())
         }
 
-        if self.is_whitelisted(task) {
-            self.log.info(f"[{task.ingest_id} :: {task.sha256}] Whitelisted")
-            return
+        if self.drop_task(&mut task) {
+            info!("[{} :: {}] Dropped", task.ingest_id, task.sha256);
+            return Ok(())
+        }
+
+        if self.is_whitelisted(&task) {
+            info!("[{} :: {}] Whitelisted", task.ingest_id, task.sha256);
+            return Ok(())
         }
 
         if let Some(task) = self.push_internal_unique_queue(task) {
@@ -676,11 +666,10 @@ impl Ingester {
             sid: sid,
             time: now(),
         };
-        with self.cache_lock:
-            self.cache[scan_key] = fs
-        self.datastore.filescore.save(scan_key, fs)
+        self.cache.lock().insert(scan_key, fs.clone());
+        self.datastore.filescore.save(scan_key, fs).await?;
 
-        self.finalize(psid, sid, score, task)
+        self.finalize(psid, sid, score, &task, None).await?;
 
         def exhaust() -> Iterable[IngestTask]:
             while True:
@@ -792,7 +781,7 @@ impl Ingester {
 
 
 //     def check(self, task: IngestTask, count_miss=True) -> Tuple[Optional[str], Optional[str], Optional[float], str]:
-    async fn check(&self, task: &IngestTask, count_miss: bool) -> (Option<Sid>, Option<Sid>, Option<i64>, String) {
+    async fn check(&self, task: &mut IngestTask, count_miss: bool) -> (Option<Sid>, Option<Sid>, Option<i64>, String) {
         let key = Self::stamp_filescore_key(task, None);
 
         let result = match self.cache.lock().get(&key) {
@@ -909,11 +898,10 @@ impl Ingester {
         q.push(task.as_primitives())
     }
 
-
-    async fn submit(&self, scan_key: String, task: &IngestTask) -> Result<(), SubmitError> {
-        self.submit_client.submit(
-            submission_obj=task.submission,
-            completed_queue=COMPLETE_QUEUE_NAME,
+    async fn submit(&self, scan_key: String, task: IngestTask) -> Result<()> {
+        self.core.submit_prepared(
+            task.submission,
+            Some(COMPLETE_QUEUE_NAME.to_owned()),
         ).await?;
 
         self.timeout_queue.push(Utc::now().timestamp() + _max_time, &scan_key).await?;
@@ -941,7 +929,8 @@ impl Ingester {
 //             self.retry_queue.push(int(now(_retry_delay)), task.as_primitives())
 
     /// cache = False
-    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: Option<i64>, task: &IngestTask, cache: bool) -> Result<()> {
+    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: Option<i64>, task: &IngestTask, cache: IBool) -> Result<()> {
+        let cache = cache.unwrap_or(false);
         info!("[{} :: {}] Completed", task.ingest_id, task.sha256());
         if let Some(psid) = psid {
             task.submission.params.psid = Some(psid);

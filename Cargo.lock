@@ -210,7 +210,6 @@ dependencies = [
  "hyper-rustls 0.23.2",
  "itertools 0.12.1",
  "log",
- "method_retry",
  "native-tls",
  "nom",
  "openssl",
@@ -1222,14 +1221,6 @@ name = "memchr"
 version = "2.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c8640c5d730cb13ebd907d8d04b52f55ac9a2eec55b440c8892f40d56c76c1d"
-
-[[package]]
-name = "method_retry"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "mime"

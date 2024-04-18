@@ -12,10 +12,10 @@ use std::sync::Arc;
 
 use assemblyline_models::config::Config;
 use elastic::Elastic;
-use method_retry::retry;
-use redis_objects::RedisObjects;
+use redis_objects::{Queue, RedisObjects};
 
 mod ingester;
+mod submission_common;
 // mod dispatcher;
 // mod postprocessing;
 mod elastic;
@@ -24,12 +24,17 @@ mod tls;
 mod error;
 mod constants;
 
+const SUBMISSION_QUEUE: &str = "dispatch-submission-queue";
+
 struct Core {
     pub config: Config,
     pub datastore: Arc<Elastic>,
     pub redis_persistant: Arc<RedisObjects>,
     pub redis_volatile: Arc<RedisObjects>,
     pub redis_metrics: Arc<RedisObjects>,
+
+    // entrypoint to the dispatcher
+    pub dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>
 }
 
 #[tokio::main]
@@ -54,6 +59,7 @@ async fn main() {
 
     // Initialize connections to resources that everything uses
     let core = Core {
+        dispatch_submission_queue: redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
         config,
         datastore,
         redis_persistant,

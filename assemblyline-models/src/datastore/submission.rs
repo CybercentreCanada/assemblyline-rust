@@ -193,17 +193,24 @@ pub struct Times {
     pub submitted: DateTime<Utc>,
 }
 
+impl Default for Times {
+    fn default() -> Self {
+        Self { 
+            completed: None, 
+            submitted: Utc::now() 
+        }
+    }
+}
 
 /// Submission Verdict
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, Default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
+#[serde(default)]
 pub struct Verdict {
     /// List of user that thinks this submission is malicious
-    #[serde(default)]
     pub malicious: Vec<String>,
     /// List of user that thinks this submission is non-malicious
-    #[serde(default)]
     pub non_malicious: Vec<String>,
 }
 

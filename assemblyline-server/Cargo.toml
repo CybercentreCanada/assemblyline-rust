@@ -14,7 +14,6 @@ rand = "*"
 itertools = "*"
 anyhow = "*"
 bytes = "*"
-method_retry = { version = "*", path = "../method_retry" }
 parking_lot = "*"
 
 # Core framework
