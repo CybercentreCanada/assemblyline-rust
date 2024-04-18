@@ -2,11 +2,12 @@ use std::{marker::PhantomData, sync::Arc};
 
 use futures::StreamExt;
 use log::error;
-use redis::Msg;
+use redis::{AsyncCommands, Msg, RedisError};
+use serde::Serialize;
 use tokio::sync::mpsc;
 use serde::de::DeserializeOwned;
 
-use crate::{ErrorTypes, RedisObjects};
+use crate::{retry_call, ErrorTypes, RedisObjects};
 
 /// Struct to setup a stream reading from a pubsub
 /// The content of the pubsub is not processed
@@ -141,3 +142,21 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
 }
 
 
+pub struct Publisher {
+    store: Arc<RedisObjects>,
+    channel: String,
+}
+
+impl Publisher {
+    pub (crate) fn new(store: Arc<RedisObjects>, channel: String) -> Self {
+        Publisher { store, channel }
+    }
+
+    pub async fn publish<T: Serialize>(&self, data: &T) -> Result<(), ErrorTypes> {
+        self.publish_data(&serde_json::to_vec(data)?).await
+    }
+
+    pub async fn publish_data(&self, data: &[u8]) -> Result<(), ErrorTypes> {
+        retry_call!(self.store.pool, publish, &self.channel, data)
+    }
+}

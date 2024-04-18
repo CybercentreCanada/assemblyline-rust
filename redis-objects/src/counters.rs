@@ -8,16 +8,13 @@ use rand::Rng;
 use redis::AsyncCommands;
 use serde::Serialize;
 use parking_lot::Mutex;
+use serde_json::json;
 
 use crate::{retry_call, ErrorTypes, RedisObjects};
 
 /// Trait for metric messages being exported 
-pub trait MetricMessage: Serialize + Send + Sync + 'static {
-    /// Create a new empty message seeded with the context information
-    fn new(counter_type: &str, name: &str, host: &str) -> Self;
-    /// Test if any values have been set in this message
-    fn is_zero(&self) -> bool;
-}
+pub trait MetricMessage: Serialize + Default + Send + Sync + 'static {}
+impl<T: Serialize + Default + Send + Sync + 'static> MetricMessage for T {}
 
 /// A builder to help configure a metrics counter that exports regularly to redis
 /// 
@@ -74,7 +71,7 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
 
     /// Launch the auto exporting process and return a handle for incrementing metrics
     pub fn start(self) -> AutoExportingMetrics<Message> {
-        let current = Arc::new(Mutex::new(self.empty_message()));
+        let current = Arc::new(Mutex::new(Message::default()));
         let metrics = AutoExportingMetrics{
             config: Arc::new(self),
             current,
@@ -87,15 +84,15 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
         metrics
     }   
 
-    /// build an empty message with current exporter settings
-    fn empty_message(&self) -> Message {
-        let counter_name = match &self.counter_name {
-            Some(name) => name,
-            None => &self.counter_type,
-        };
+    // /// build an empty message with current exporter settings
+    // fn empty_message(&self) -> Message {
+    //     let counter_name = match &self.counter_name {
+    //         Some(name) => name,
+    //         None => &self.counter_type,
+    //     };
 
-        Message::new(&self.counter_type, counter_name, &self.host)
-    }
+    //     Message::new(&self.counter_type, counter_name, &self.host)
+    // }
 }
 
 /// Increase the field given, by default incrementing by 1
@@ -137,6 +134,39 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
         });
     }
 
+    fn is_zero(&self, obj: &serde_json::Value) -> bool {
+        if let Some(number) = obj.as_i64() {
+            if number == 0 {
+                return true
+            }
+        } 
+        if let Some(number) = obj.as_u64() {
+            if number == 0 {
+                return true
+            }
+        } 
+        if let Some(number) = obj.as_f64() {
+            if number != 0.0 {
+                return true
+            }
+        } 
+        return false 
+        
+    }
+
+    fn is_all_zero(&self, obj: &serde_json::Value) -> bool {
+        if let Some(obj) = obj.as_object() {
+            for value in obj.values() {
+                if !self.is_zero(value) {
+                    return false
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     async fn export_loop(&mut self) -> Result<(), ErrorTypes> {
         loop {
             // wait for the configured duration (or we get notified to do it now)
@@ -145,10 +175,22 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
             // Fetch the message that needs to be sent
             let outgoing = self.reset();
 
-            // check if it needs to be sent
-            if self.config.export_zero || !outgoing.is_zero() {
+            // create mapping
+            let mut outgoing = serde_json::to_value(&outgoing)?;
+
+            // check if we will export this message
+            if self.config.export_zero || !self.is_all_zero(&outgoing) {
+                // add extra fields
+                if let Some(obj) = outgoing.as_object_mut() {
+                    obj.insert("type".to_owned(), json!(self.config.counter_type));
+                    obj.insert("name".to_owned(), json!(self.config.counter_name));
+                    obj.insert("host".to_owned(), json!(self.config.host));
+                }
+
+                // send the message
                 let data = serde_json::to_string(&outgoing)?;
                 let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.channel_name.as_str(), data.as_str())?;
+                
             }
 
             // check if the public object has been dropped
@@ -167,7 +209,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
     /// Replace the current outgoing message with an empty one 
     /// returns the replaced message
     pub fn reset(&self) -> Message {
-        let mut message = self.config.empty_message();
+        let mut message: Message = Default::default();
         std::mem::swap(&mut message, self.current.lock().borrow_mut());
         message
     }
@@ -268,19 +310,10 @@ async fn auto_exporting_counter() {
     use crate::test::redis_connection;
     let connection = redis_connection().await;
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
     struct MetricKind {
         started: u64,
         finished: u64,
-    }
-
-    impl MetricMessage for MetricKind {
-        fn new(_counter_type: &str, _name: &str, _host: &str) -> Self {
-            Self {started: 0, finished: 0}
-        }
-        fn is_zero(&self) -> bool {
-            self.started == 0 && self.finished == 0
-        }
     }
 
     // Subscribe on the pubsub being used

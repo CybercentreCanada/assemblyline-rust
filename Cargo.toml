@@ -5,5 +5,6 @@ members = [
     "assemblyline-markings",
     "assemblyline-models",
     "assemblyline-server",
-    "redis-objects",
+    "redis-objects", 
+    "method_retry",
 ]

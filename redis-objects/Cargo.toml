@@ -25,8 +25,8 @@ rand = "0.8"
 # Redis libraries
 # The versions of these two packages are tied togeather, don't change one without 
 # making sure the pool is using the same redis version
-redis = { version = "0.23", features = ["tokio-comp", "connection-manager", "keep-alive", "native-tls"] }
-deadpool-redis = { version = "0.13.0", features = ["serde"] }
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager", "keep-alive", "native-tls"] }
+deadpool-redis = { version = "0.15.0", features = ["serde"] }
 
 [dev-dependencies]
 env_logger = "0.11"

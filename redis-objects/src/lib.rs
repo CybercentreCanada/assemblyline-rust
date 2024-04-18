@@ -11,6 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use queue::MultiQueue;
 use redis::AsyncCommands;
 pub use redis::Msg;
 use serde::Serialize;
@@ -23,7 +24,7 @@ pub use self::quota::QuotaGuard;
 pub use self::events::EventWatcher;
 pub use self::hashmap::Hashmap;
 pub use self::counters::{AutoExportingMetrics, AutoExportingMetricsBuilder, MetricMessage};
-pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder};
+pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder, Publisher};
 
 pub mod queue;
 pub mod quota;
@@ -39,6 +40,11 @@ pub struct RedisObjects {
 }
 
 impl RedisObjects {
+    /// Open given more limited connection info
+    pub fn open_host(host: &str, port: u16) -> Result<Arc<Self>, ErrorTypes> {
+        todo!()
+    }
+
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
         let cfg = deadpool_redis::Config::from_connection_info(config.clone());
@@ -60,9 +66,17 @@ impl RedisObjects {
         Queue::new(name, self.clone(), ttl)
     }
 
+    pub fn multiqueue<T: Serialize + DeserializeOwned>(self: &Arc<Self>, prefix: String) -> MultiQueue<T> {
+        MultiQueue::new(prefix, self.clone())
+    }
+
     /// Open a hash map under the given key
     pub fn hashmap<T: Serialize + DeserializeOwned>(self: &Arc<Self>, name: String, ttl: Option<Duration>) -> Hashmap<T> {
         Hashmap::new(name, self.clone(), ttl)
+    }
+
+    pub fn publisher(self: &Arc<Self>, channel: String) -> Publisher {
+        Publisher::new(self.clone(), channel)
     }
 
     pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
@@ -136,6 +150,8 @@ impl From<redis::RedisError> for ErrorTypes {
 impl From<serde_json::Error> for ErrorTypes {
     fn from(value: serde_json::Error) -> Self { Self::Serde(value) }
 }
+
+impl std::error::Error for ErrorTypes {}
 
 /// A convenience trait that lets you pass an i32 value or None for arguments
 pub trait Ii32: Into<Option<i32>> + Copy {}

@@ -532,35 +532,45 @@ pub struct TlsConfig {
 // }
 
 
-// @odm.model(index=False, store=False, description="Ingester Configuration")
-// class Ingester(odm.Model):
-//     default_user: str = odm.Keyword(description="Default user for bulk ingestion and unattended submissions")
-//     default_services: List[str] = odm.List(odm.Keyword(), description="Default service selection")
-//     default_resubmit_services: List[str] = odm.List(odm.Keyword(),
-//                                                     description="Default service selection for resubmits")
-//     description_prefix: str = odm.Keyword(
-//         description="A prefix for descriptions. When a description is automatically generated, it will be "
-//                     "the hash prefixed by this string")
-//     is_low_priority: str = odm.Keyword(
-//         description="Path to a callback function filtering ingestion tasks that should have their priority "
-//                     "forcefully reset to low")
-//     get_whitelist_verdict: str = odm.Keyword()
-//     whitelist: str = odm.Keyword()
-//     default_max_extracted: int = odm.Integer(
-//         description="How many extracted files may be added to a Submission. Overrideable via submission parameters.")
-//     default_max_supplementary: int = odm.Integer(
-//         description="How many supplementary files may be added to a Submission. Overrideable via submission parameters")
-//     expire_after: int = odm.Integer(description="Period, in seconds, in which a task should be expired")
-//     stale_after_seconds: int = odm.Integer(description="Drop a task altogether after this many seconds")
-//     incomplete_expire_after_seconds: int = odm.Integer(description="How long should scores be kept before expiry")
-//     incomplete_stale_after_seconds: int = odm.Integer(description="How long should scores be cached in the ingester")
-//     sampling_at: Dict[str, int] = odm.Mapping(odm.Integer(),
-//                                               description="Thresholds at certain buckets before sampling")
-//     max_inflight = odm.Integer(description="How long can a queue get before we start dropping files")
-//     cache_dtl: int = odm.Integer(description="How long are files results cached")
+/// Ingester Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ingester {
+    // /// Default user for bulk ingestion and unattended submissions
+    // pub default_user: str = odm.Keyword()
+    // /// Default service selection
+    // pub default_services: List[str] = odm.List(odm.Keyword(), )
+    // /// Default service selection for resubmits
+    // pub default_resubmit_services: List[str] = odm.List(odm.Keyword(), )
+    // /// A prefix for descriptions. When a description is automatically generated, it will be the hash prefixed by this string
+    // pub description_prefix: str = odm.Keyword()
+    // /// Path to a callback function filtering ingestion tasks that should have their priority forcefully reset to low
+    // pub is_low_priority: str = odm.Keyword()
+    // get_whitelist_verdict: str = odm.Keyword()
+    // whitelist: str = odm.Keyword()
+    // /// How many extracted files may be added to a Submission. Overrideable via submission parameters.
+    // pub default_max_extracted: int = odm.Integer()
+    // /// How many supplementary files may be added to a Submission. Overrideable via submission parameters
+    // pub default_max_supplementary: int = odm.Integer()
+    /// Period, in seconds, in which a task should be expired
+    pub expire_after: f64,
+    /// Drop a task altogether after this many seconds
+    pub stale_after_seconds: f64,
+    /// How long should scores be kept before expiry
+    pub incomplete_expire_after_seconds: f64,
+    /// How long should scores be cached in the ingester
+    pub incomplete_stale_after_seconds: f64,
+    /// Thresholds at certain buckets before sampling
+    pub sampling_at: HashMap<String, i64>,
+    /// How many files to send to dispatcher concurrently
+    pub max_inflight: u64,
+    // /// How long are files results cached
+    // pub cache_dtl: int = odm.Integer()
+}
 
-
-// DEFAULT_INGESTER = {
+impl Default for Ingester {
+    fn default() -> Self {
+        Self {
 //     'cache_dtl': 2,
 //     'default_user': 'internal',
 //     'default_services': [],
@@ -571,35 +581,44 @@ pub struct TlsConfig {
 //     'whitelist': 'assemblyline.common.null.whitelist',
 //     'default_max_extracted': 100,
 //     'default_max_supplementary': 100,
-//     'expire_after': 15 * 24 * 60 * 60,
-//     'stale_after_seconds': 1 * 24 * 60 * 60,
-//     'incomplete_expire_after_seconds': 3600,
-//     'incomplete_stale_after_seconds': 1800,
-//     'sampling_at': {
-//         'low':    10000000,
-//         'medium':  2000000,
-//         'high':    1000000,
-//         'critical': 500000,
-//     },
-//     'max_inflight': 500
-// }
+            expire_after: 15.0 * 24.0 * 60.0 * 60.0,
+            stale_after_seconds: 1.0 * 24.0 * 60.0 * 60.0,
+            incomplete_expire_after_seconds: 3600.0,
+            incomplete_stale_after_seconds: 1800.0,
+            sampling_at: [
+                ("low", 10000000),
+                ("medium", 2000000),
+                ("high", 1000000),
+                ("critical", 500000),
+            ].into_iter().map(|(name, value)|(name.to_owned(), value)).collect(),
+            max_inflight: 5000
+        }
+    }
+}
 
 
-// @odm.model(index=False, store=False, description="Redis Service configuration")
-// class RedisServer(odm.Model):
-//     host: str = odm.Keyword(description="Hostname of Redis instance")
-//     port: int = odm.Integer(description="Port of Redis instance")
+/// Redis Service configuration
+#[derive(Serialize, Deserialize)]
+pub struct RedisServer {
+    /// Hostname of Redis instance
+    pub host: String,
+    /// Port of Redis instance
+    pub port: u16,
+}
 
+fn default_redis_nonpersistant() -> RedisServer {
+    RedisServer {
+        host: "127.0.0.1".to_owned(),
+        port: 6379
+    }
+}
 
-// DEFAULT_REDIS_NP = {
-//     "host": "127.0.0.1",
-//     "port": 6379
-// }
-
-// DEFAULT_REDIS_P = {
-//     "host": "127.0.0.1",
-//     "port": 6380
-// }
+fn default_redis_persistant() -> RedisServer {
+    RedisServer {
+        host: "127.0.0.1".to_owned(),
+        port: 6380
+    }
+}
 
 
 // @odm.model(index=False, store=False)
@@ -634,21 +653,32 @@ pub struct TlsConfig {
 // }
 
 
-// @odm.model(index=False, store=False, description="Metrics Configuration")
-// class Metrics(odm.Model):
+/// Metrics Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Metrics {
 //     apm_server: APMServer = odm.Compound(APMServer, default=DEFAULT_APM_SERVER, description="APM server configuration")
-//     elasticsearch: ESMetrics = odm.Compound(ESMetrics, default=DEFAULT_ES_METRICS,
-//                                             description="Where to export metrics?")
-//     export_interval: int = odm.Integer(description="How often should we be exporting metrics?")
-//     redis: RedisServer = odm.Compound(RedisServer, default=DEFAULT_REDIS_NP, description="Redis for Dashboard metrics")
+//     elasticsearch: ESMetrics = odm.Compound(ESMetrics, default=DEFAULT_ES_METRICS, description="Where to export metrics?")
+    /// How often should we be exporting metrics?
+    pub export_interval: u32,
+    /// Redis for Dashboard metrics
+    pub redis: RedisServer,
+}
 
-
+impl Default for Metrics {
+    fn default() -> Self {
+        Self { 
+            export_interval: 5, 
+            redis: default_redis_nonpersistant()
+        }
+    }
 // DEFAULT_METRICS = {
 //     'apm_server': DEFAULT_APM_SERVER,
 //     'elasticsearch': DEFAULT_ES_METRICS,
 //     'export_interval': 5,
 //     'redis': DEFAULT_REDIS_NP,
 // }
+}
 
 
 // @odm.model(index=False, store=False, description="Malware Archive Configuration")
@@ -664,18 +694,23 @@ pub struct TlsConfig {
 // }
 
 
-// @odm.model(index=False, store=False, description="Redis Configuration")
-// class Redis(odm.Model):
-//     nonpersistent: RedisServer = odm.Compound(RedisServer, default=DEFAULT_REDIS_NP,
-//                                               description="A volatile Redis instance")
-//     persistent: RedisServer = odm.Compound(RedisServer, default=DEFAULT_REDIS_P,
-//                                            description="A persistent Redis instance")
+/// Redis Configuration
+#[derive(Serialize, Deserialize)]
+pub struct Redis {
+    /// A volatile Redis instance
+    pub nonpersistent: RedisServer,
+    /// A persistent Redis instance
+    pub persistent: RedisServer,
+}
 
-
-// DEFAULT_REDIS = {
-//     "nonpersistent": DEFAULT_REDIS_NP,
-//     "persistent": DEFAULT_REDIS_P
-// }
+impl Default for Redis {
+    fn default() -> Self {
+        Self { 
+            nonpersistent: default_redis_nonpersistant(), 
+            persistent: default_redis_persistant()
+        }
+    }
+}
 
 
 // @odm.model(index=False, store=False, description="A configuration for mounting existing volumes to a container")
@@ -854,6 +889,7 @@ pub struct TlsConfig {
 
 /// Core Component Configuration
 #[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
 // @odm.model(index=False, store=False, description="")
 pub struct Core {
     // /// Configuration for Alerter
@@ -863,20 +899,16 @@ pub struct Core {
     // #[serde(default)]
     // pub archiver: Archiver,
     /// Configuration for Dispatcher
-    #[serde(default)]
     pub dispatcher: Dispatcher,
     // /// Configuration for Expiry
     // #[serde(default)]
     // pub expiry: Expiry,
-    // /// Configuration for Ingester
-    // #[serde(default)]
-    // pub ingester: Ingester,
-    // /// Configuration for Metrics Collection
-    // #[serde(default)]
-    // pub metrics: Metrics,
-    // /// Configuration for Redis instances
-    // #[serde(default)]
-    // pub redis: Redis,
+    /// Configuration for Ingester
+    pub ingester: Ingester,
+    /// Configuration for Metrics Collection
+    pub metrics: Metrics,
+    /// Configuration for Redis instances
+    pub redis: Redis,
     // /// Configuration for Scaler
     // #[serde(default)]
     // pub scaler: Scaler,
@@ -901,33 +933,58 @@ pub struct Core {
 // }
 
 
-// @odm.model(index=False, store=False, description="Datastore Archive feature configuration")
-// class Archive(odm.Model):
-//     enabled = odm.Boolean(description="Are we enabling Achiving features across indices?")
-//     indices = odm.List(odm.Keyword(), description="List of indices the ILM Applies to")
+/// Datastore Archive feature configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+struct Archive {
+    /// Are we enabling Achiving features across indices?
+    pub enabled: bool,
+    /// List of indices the ILM Applies to
+    pub indices: Vec<String>,
+}
+
+impl Default for Archive {
+    fn default() -> Self {
+        Self { 
+            enabled: false, 
+            indices: vec!["file".to_owned(), "submission".to_owned(), "result".to_owned()], 
+        }
+    }
+}
 
 
-// DEFAULT_ARCHIVE = {
-//     "enabled": False,
-//     "indices": ['file', 'submission', 'result'],
-// }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all="lowercase")]
+enum DatastoreType {
+    Elasticsearch
+}
 
 
-// @odm.model(index=False, store=False, description="Datastore Configuration")
-// class Datastore(odm.Model):
-//     hosts: List[str] = odm.List(odm.Keyword(), description="List of hosts used for the datastore")
-//     archive = odm.Compound(Archive, default=DEFAULT_ARCHIVE, description="Datastore Archive feature configuration")
-//     cache_dtl = odm.Integer(
-//         default=5, description="Default cache lenght for computed indices (submission_tree, submission_summary...")
-//     type = odm.Enum({"elasticsearch"}, description="Type of application used for the datastore")
+/// Datastore Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Datastore {
+    /// List of hosts used for the datastore
+    pub hosts: Vec<String>,
+    /// Datastore Archive feature configuration
+    pub archive: Archive,
+    /// Default cache lenght for computed indices (submission_tree, submission_summary...
+    pub cache_dtl: u32,
+    /// Type of application used for the datastore
+    #[serde(rename="type")]
+    pub dtype: DatastoreType,
+}
 
-
-// DEFAULT_DATASTORE = {
-//     "hosts": ["http://elastic:devpass@localhost:9200"],
-//     "archive": DEFAULT_ARCHIVE,
-//     "cache_dtl": 5,
-//     "type": "elasticsearch",
-// }
+impl Default for Datastore {
+    fn default() -> Self {
+        Self {
+            hosts: vec!["http://elastic:devpass@localhost:9200".to_owned()],
+            archive: Default::default(),
+            cache_dtl: 5,
+            dtype: DatastoreType::Elasticsearch,
+        }
+    }
+}
 
 
 // @odm.model(index=False, store=False, description="Datasource Configuration")
@@ -1485,10 +1542,10 @@ pub struct Submission {
     // pub max_dtl: u32,
     // /// Maximum files extraction depth
     // pub max_extraction_depth: u32,
-    // /// Maximum size for files submitted in the system
-    // pub max_file_size: u64,
-    // /// Maximum length for each metadata values
-    // pub max_metadata_length: u32,
+    /// Maximum size for files submitted in the system
+    pub max_file_size: u64,
+    /// Maximum length for each metadata values
+    pub max_metadata_length: u32,
     /// Maximum length for each temporary data values
     pub max_temp_data_length: u32,
     // /// List of external source to fetch file via their SHA256 hashes
@@ -1510,8 +1567,8 @@ impl Default for Submission {
             // dtl: 30,
             // max_dtl: 0,
             // max_extraction_depth: 6,
-            // max_file_size: 104857600,
-            // max_metadata_length: 4096,
+            max_file_size: 104857600,
+            max_metadata_length: 4096,
             max_temp_data_length: 4096,
             // sha256_sources: Default::default(),
             // tag_types: Default::default(),
@@ -1544,8 +1601,8 @@ pub struct Config {
     // pub auth: Auth,
     /// Core component configuration
     pub core: Core,
-    // /// Datastore configuration
-    // pub datastore: Datastore,
+    /// Datastore configuration
+    pub datastore: Datastore,
     // /// Datasources configuration
     // #[serde(default = "default_datasources")]
     // pub datasources: HashMap<String, Datasource>,
