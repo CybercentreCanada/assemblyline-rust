@@ -124,7 +124,9 @@ pub struct SubmissionParams {
     /// Does the submission automatically goes into the archive when completed?
     pub auto_archive: bool,
     /// When the submission is archived, should we delete it from hot storage right away?
-    pub delete_after_archive: bool
+    pub delete_after_archive: bool,
+    /// Parent submission ID
+    pub psid: Option<Sid>,
 }
 
 impl Default for SubmissionParams {
@@ -154,6 +156,7 @@ impl Default for SubmissionParams {
             initial_data: None,
             auto_archive: false,
             delete_after_archive: false,
+            psid: None,
         }
     }
 }

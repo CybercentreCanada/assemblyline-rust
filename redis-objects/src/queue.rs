@@ -53,7 +53,7 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
                 // while we make the call to the redis server
                 *last_expire_time = Some(std::time::Instant::now());
                 drop(last_expire_time);
-                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as usize)?;
+                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
             }
         }
         Ok(())
@@ -125,7 +125,7 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
 
     /// Make a blocking pop call with a timeout
     pub async fn pop_timeout(&self, timeout: Duration) -> Result<Option<T>, ErrorTypes> {
-        let response: Option<(String, Vec<u8>)> = retry_call!(self.store.pool, blpop, &self.name, timeout.as_secs() as usize)?;
+        let response: Option<(String, Vec<u8>)> = retry_call!(self.store.pool, blpop, &self.name, timeout.as_secs_f64())?;
 
         Ok(match response {
             Some((_, data)) => serde_json::from_slice(&data)?,
@@ -150,7 +150,7 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
 
     /// Wait for up to the given timeout for any of the given queues to recieve a value
     pub async fn select(queues: &[&Queue<T>], timeout: Option<Duration>) -> Result<Option<(String, T)>, ErrorTypes> {
-        let timeout = timeout.unwrap_or_default().as_secs();
+        let timeout = timeout.unwrap_or_default().as_secs_f64();
         if queues.is_empty() {
             return Ok(None)
         }
@@ -160,7 +160,7 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
         for queue in queues {
             names.push(queue.name.as_str())
         }
-        let response: Option<(String, Vec<u8>)> = retry_call!(store.pool, blpop, &names, timeout as usize)?;
+        let response: Option<(String, Vec<u8>)> = retry_call!(store.pool, blpop, &names, timeout)?;
 
         Ok(match response {
             Some((name, data)) => Some((name, serde_json::from_slice(&data)?)),
@@ -177,19 +177,19 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
 ///   maximum score to pop
 ///   number of elements to skip before popping any
 ///   max element count to pop
-// const PQ_DEQUEUE_RANGE_SCRIPT: &str = r#"
-// local unpack = table.unpack or unpack
-// local min_score = tonumber(ARGV[1]);
-// if min_score == nil then min_score = -math.huge end
-// local max_score = tonumber(ARGV[2]);
-// if max_score == nil then max_score = math.huge end
-// local rem_offset = tonumber(ARGV[3]);
-// local rem_limit = tonumber(ARGV[4]);
+const PQ_DEQUEUE_RANGE_SCRIPT: &str = r#"
+local unpack = table.unpack or unpack
+local min_score = tonumber(ARGV[1]);
+if min_score == nil then min_score = -math.huge end
+local max_score = tonumber(ARGV[2]);
+if max_score == nil then max_score = math.huge end
+local rem_offset = tonumber(ARGV[3]);
+local rem_limit = tonumber(ARGV[4]);
 
-// local entries = redis.call("zrangebyscore", KEYS[1], -max_score, -min_score, "limit", rem_offset, rem_limit);
-// if #entries > 0 then redis.call("zrem", KEYS[1], unpack(entries)) end
-// return entries
-// "#;
+local entries = redis.call("zrangebyscore", KEYS[1], -max_score, -min_score, "limit", rem_offset, rem_limit);
+if #entries > 0 then redis.call("zrem", KEYS[1], unpack(entries)) end
+return entries
+"#;
 
 /// The length of prefixes added to the entries in the priority queue
 const SORTING_KEY_LEN: usize = 21;
@@ -198,7 +198,8 @@ const SORTING_KEY_LEN: usize = 21;
 pub struct PriorityQueue<T: Serialize + DeserializeOwned> {
     name: String,
     store: Arc<RedisObjects>,
-    _data: PhantomData<T>
+    dequeue_range: redis::Script,
+    _data: PhantomData<T>,
 }
 
 
@@ -207,6 +208,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         Self {
             name,
             store,
+            dequeue_range: redis::Script::new(PQ_DEQUEUE_RANGE_SCRIPT),
             _data: PhantomData,
         }
     }
@@ -232,7 +234,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     }
 
     /// Return the number of items within the two priority values (inclusive on both ends)
-    pub async fn count(&self, lowest: i32, highest: i32) -> Result<u64, ErrorTypes> {
+    pub async fn count(&self, lowest: i64, highest: i64) -> Result<u64, ErrorTypes> {
         Ok(retry_call!(self.store.pool, zcount, &self.name, -highest, -lowest)?)
     }
 
@@ -259,6 +261,19 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         Ok(out)
     }
 
+    /// When only one item is requested, blocking is is possible.
+    pub async fn blocking_pop(&self, timeout: Duration, low_priority: bool) -> Result<Option<T>, ErrorTypes> {
+        let result: Option<(String, Vec<u8>, i64)> = if low_priority {
+            retry_call!(self.store.pool, bzpopmax, &self.name, timeout.as_secs_f64())?
+        } else {
+            retry_call!(self.store.pool, bzpopmin, &self.name, timeout.as_secs_f64())?
+        };
+        match result {
+            Some(result) => Ok(Some(Self::decode(&result.1)?)),
+            None => Ok(None)
+        }
+    }
+
 //     def blocking_pop(self, timeout=0, low_priority=False):
 //         """When only one item is requested, blocking is is possible."""
 //         if low_priority:
@@ -276,11 +291,18 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     /// :param upper_limit: The score of all dequeued elements must be lower or equal to this.
     /// :param skip: In the range of available items to dequeue skip over this many.
     /// :param num: Maximum number of elements to dequeue.
-//     pub async fn dequeue_range(&self, lower_limit: Ii32, upper_limit: , skip=0, num=1) -> list[T]:
-//         todo!();
-// //         results = retry_call(self._deque_range, keys=[self.name], args=[lower_limit, upper_limit, skip, num])
-// //         return [decode(res[SORTING_KEY_LEN:]) for res in results]
-//     }
+    pub async fn dequeue_range(&self, lower_limit: Option<i64>, upper_limit: Option<i64>, skip: Option<u32>, num: Option<u32>) -> Result<Vec<T>, ErrorTypes> {
+        let skip = skip.unwrap_or(0);
+        let num = num.unwrap_or(1);
+        let mut call = self.dequeue_range.key(&self.name);
+        let call = call.arg(lower_limit).arg(upper_limit).arg(skip).arg(num);
+        let results: Vec<Vec<u8>> = retry_call!(method, self.store.pool, call, invoke_async)?;
+        return results.iter()
+            .map(|row| Self::decode(row))
+            .collect()
+        // results = retry_call(self._deque_range, keys=[self.name], args=[lower_limit, upper_limit, skip, num])
+        // return [decode(res[SORTING_KEY_LEN:]) for res in results]
+    }
 
     /// Place an item into the queue
     pub async fn push(&self, priority: i32, data: &T) -> Result<Vec<u8>, ErrorTypes> {
@@ -350,3 +372,44 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     
 }
 
+
+pub struct MultiQueue<Message: Serialize + DeserializeOwned> {
+    store: Arc<RedisObjects>,
+    prefix: String,
+    _data: PhantomData<Message>,
+}
+
+impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
+    pub(crate) fn new(prefix: String, store: Arc<RedisObjects>) -> Self {
+        Self {store, prefix, _data: Default::default()}
+    }
+
+    pub async fn delete(&self, name: &str) -> Result<(), ErrorTypes> {
+        retry_call!(self.store.pool, del, self.prefix.clone() + name)
+    }
+
+    pub async fn length(&self, name: &str) -> Result<u64, ErrorTypes> {
+        retry_call!(self.store.pool, llen, self.prefix.clone() + name)
+    }
+
+    pub async fn pop_nonblocking(&self, name: &str) -> Result<Option<Message>, ErrorTypes> {
+        let result: Option<String> = retry_call!(self.store.pool, lpop, self.prefix.clone() + name, None)?;
+        match result {
+            Some(result) => Ok(serde_json::from_str(&result)?),
+            None => Ok(None)
+        }
+    }
+
+    pub async fn pop(&self, name: &str, timeout: Duration) -> Result<Option<Message>, ErrorTypes> {
+        let result: Option<(String, String)> = retry_call!(self.store.pool, blpop, self.prefix.clone() + name, timeout.as_secs_f64())?;
+        match result {
+            Some((_, result)) => Ok(serde_json::from_str(&result)?),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn push(&self, name: &str, message: &Message) -> Result<(), ErrorTypes> {
+        retry_call!(self.store.pool, rpush, self.prefix.clone() + name, serde_json::to_string(message)?)?;
+        Ok(())
+    }
+}

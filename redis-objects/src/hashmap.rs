@@ -68,7 +68,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
             };
 
             if call {
-                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as usize)?;
+                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
             }
         }
         Ok(())

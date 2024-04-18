@@ -10,7 +10,7 @@ use crate::{MD5, Sha256, Sha1, Domain, IP, Uri, ElasticMeta};
 use super::workflow::{Statuses, Priorities};
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum ExtendedScanValues {

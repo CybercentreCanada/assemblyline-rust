@@ -3,18 +3,18 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::Sid;
+pub use crate::datastore::submission::{File, SubmissionParams};
 
-// from typing import List, Dict, Optional as Opt
-// from assemblyline import odm
-use crate::datastore::submission::{File, SubmissionParams};
-// from assemblyline.odm.models.submission import SubmissionParams, File, Submission as DatabaseSubmission
-
-// MSG_TYPES = {"SubmissionIngested", "SubmissionReceived", "SubmissionStarted", "SubmissionCompleted"}
-// LOADER_CLASS = "assemblyline.odm.messages.submission.SubmissionMessage"
-
+#[derive(Serialize, Deserialize)]
+pub enum MessageType {
+    SubmissionIngested, 
+    SubmissionReceived, 
+    SubmissionStarted, 
+    SubmissionCompleted
+}
 
 /// Notification Model
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(default)]
 pub struct Notification {
     /// Queue to publish the completion message
@@ -23,9 +23,8 @@ pub struct Notification {
     pub threshold: Option<i32>,
 }
 
-
 /// Submission Model
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(default)]
 pub struct Submission {
     /// Submission ID to use
@@ -72,10 +71,29 @@ impl Default for Submission {
 //     })
 
 
-// @odm.model(description="Model of Submission Message")
-// class SubmissionMessage(odm.Model):
-//     msg = odm.Compound(Submission, description="Body of the message")
-//     msg_loader = odm.Enum(values={LOADER_CLASS}, default=LOADER_CLASS,
-//                           description="Class to use to load the message as an object")   #
-//     msg_type = odm.Enum(values=MSG_TYPES, description="Type of message")
-//     sender = odm.Keyword(description="Sender of the message")
+/// Model of Submission Message
+#[derive(Serialize, Deserialize)]
+pub struct SubmissionMessage {
+    /// Body of the message
+    pub msg: Submission,
+    /// Class to use to load the message as an object
+    #[serde(default="default_message_loader")]
+    pub msg_loader: String,
+        /// Type of message
+    pub msg_type: MessageType,
+    /// Sender of the message
+    pub sender: String,
+}
+
+pub fn default_message_loader() -> String {"assemblyline.odm.messages.submission.SubmissionMessage".to_string()}
+
+impl SubmissionMessage {
+    pub fn ingested(sub: Submission) -> Self {
+        Self {
+            msg: sub,
+            msg_loader: default_message_loader(),
+            msg_type: MessageType::SubmissionIngested,
+            sender: "ingester".to_owned()
+        }
+    }
+}

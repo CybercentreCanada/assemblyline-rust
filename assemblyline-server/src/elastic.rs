@@ -4,6 +4,7 @@ use std::error::Error;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::JsonMap;
 use assemblyline_models::datastore::{File, Submission, Error as ErrorModel, Service};
 use chrono::{Duration, DateTime, Utc};
@@ -410,13 +411,14 @@ pub struct Elastic {
 
     /// Unmodified default service data classes
     pub service: Collection<Service>,
+    pub filescore: Collection<FileScore>,
 
     /// Modifications to service data for this system
     pub service_delta: Collection<JsonMap>,
 }
 
 impl Elastic {
-    async fn connect(url: &str, archive_access: bool) -> Result<Arc<Self>> {
+    pub async fn connect(url: &str, archive_access: bool) -> Result<Arc<Self>> {
         let helper = Arc::new(ElasticHelper::connect(url, archive_access).await?);
         Ok(Arc::new(Self {
             es: helper.clone(),

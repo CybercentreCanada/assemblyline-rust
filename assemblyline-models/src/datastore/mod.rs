@@ -9,6 +9,7 @@ pub mod file;
 pub mod service;
 pub mod retrohunt;
 pub mod user;
+pub mod filescore;
 
 pub use submission::Submission;
 pub use error::Error;
