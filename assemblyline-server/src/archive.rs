@@ -1,79 +1,85 @@
+//! 
 
-// import logging
+use std::{collections::HashSet, sync::Arc};
 
+use anyhow::Result;
+use assemblyline_models::{config::Config, messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage}};
+use log::warn;
+use rand::{thread_rng, Rng};
+use redis_objects::Queue;
 
-// from assemblyline.common import forge
-// from assemblyline.common.identify import Identify
-// from assemblyline.datastore.collection import ESCollection
-// from assemblyline.datastore.helper import AssemblylineDatastore
-// from assemblyline.filestore import FileStore
-// from assemblyline.odm.messages.submission import SubmissionMessage, Submission
-// from assemblyline.odm.models.config import Config
-// from assemblyline.remote.datatypes import get_client
-// from assemblyline.remote.datatypes.queues.comms import CommsQueue
-// from assemblyline.remote.datatypes.queues.named import NamedQueue
-
-// try:
-//     from assemblyline_core.dispatching.schedules import Scheduler
-//     from assemblyline_core.submission_client import SubmissionClient, SubmissionException
-// except ImportError:
-//     Scheduler = SubmissionClient = SubmissionException = None
-
-// ARCHIVE_QUEUE_NAME = 'm-archive'
+use crate::{constants::ARCHIVE_QUEUE_NAME, services::ServiceHelper, submit::SubmitManager, Core};
 
 
-// class ArchiveManager():
-//     def __init__(
-//             self, config: Config = None, datastore: AssemblylineDatastore = None, filestore: FileStore = None,
-//             identify: Identify = None):
-//         self.log = logging.getLogger('assemblyline.archive_manager')
-//         self.config = config or forge.get_config()
-//         if self.config.datastore.archive.enabled and Scheduler:
-//             self.datastore = datastore or forge.get_datastore(self.config)
-//             self.filestore = filestore or forge.get_filestore(self.config)
-//             self.identify = identify or forge.get_identify(config=self.config, datastore=self.datastore, use_cache=True)
+struct ArchiveManager {
+    config: Arc<Config>,
+    submit: SubmitManager,
+    services: ServiceHelper,
+    archive_queue: Queue<(String, String, bool)>,
+    //             self.datastore = datastore or forge.get_datastore(self.config)
 //             redis_persistent = get_client(self.config.core.redis.persistent.host,
 //                                           self.config.core.redis.persistent.port, False)
 //             redis = get_client(self.config.core.redis.nonpersistent.host,
 //                                self.config.core.redis.nonpersistent.port, False)
-//             self.archive_queue: NamedQueue[dict] = NamedQueue(ARCHIVE_QUEUE_NAME, redis_persistent)
-//             self.scheduler = Scheduler(self.datastore, self.config, redis)
 //             self.submission_traffic = CommsQueue('submissions', host=redis)
+}
 
-//     def archive_submission(self, submission, delete_after: bool = False):
-//         if self.config.datastore.archive.enabled and Scheduler:
-//             sub_selected = self.scheduler.expand_categories(submission['params']['services']['selected'])
-//             min_selected = self.scheduler.expand_categories(self.config.core.archiver.minimum_required_services)
 
-//             if set(min_selected).issubset(set(sub_selected)):
-//                 self.archive_queue.push(('submission', submission['sid'], delete_after))
-//                 return {"action": "archive"}
-//             else:
-//                 params = submission['params']
-//                 params['auto_archive'] = True
-//                 params['delete_after_archive'] = delete_after
-//                 params['services']['selected'] = list(set(sub_selected).union(set(min_selected)))
-//                 try:
-//                     submission_obj = Submission({
-//                         "files": submission["files"],
-//                         "metadata": submission['metadata'],
-//                         "params": params
-//                     })
+impl ArchiveManager {
+    fn new(core: &Core) -> Self {
+        Self {
+            config: core.config.clone(),
+            submit: SubmitManager::new(core),
+            services: core.services.clone(), 
+            archive_queue: core.redis_persistant.queue(ARCHIVE_QUEUE_NAME.to_owned(), None),
+        }
+    }
 
-//                     submit_result = SubmissionClient(datastore=self.datastore, filestore=self.filestore,
-//                                                      config=self.config, identify=self.identify).submit(submission_obj)
-//                 except (ValueError, KeyError) as e:
-//                     raise SubmissionException(f"Could not generate re-submission message: {str(e)}").with_traceback()
+    pub async fn archive_submission(&self, submission: Submission, delete_after: Option<bool>) -> Result<Option<ArchivedMessage>> {
+        if !self.config.datastore.archive.enabled {
+            warn!("Trying to archive a submission when archiving is disabled.");
+            return Ok(None)
+        }
+        let delete_after = delete_after.unwrap_or(false);
 
-//                 self.submission_traffic.publish(SubmissionMessage({
-//                     'msg': submission_obj,
-//                     'msg_type': 'SubmissionReceived',
-//                     'sender': 'ui',
-//                 }).as_primitives())
+        let sub_selected = self.services.expand_categories(submission.params.services.selected.clone());
+        let min_selected = self.services.expand_categories(self.config.core.archiver.minimum_required_services.clone());
 
-//                 # Update current record
-//                 self.datastore.submission.update(submission['sid'], [(ESCollection.UPDATE_SET, 'archived', True)])
+        if HashSet::from_iter(min_selected.iter()).is_subset(&HashSet::from_iter(sub_selected.iter())) {
+            self.archive_queue.push(&("submission".to_owned(), submission.sid.to_string(), delete_after)).await?;
+            return Ok(Some(ArchivedMessage::archive()))
+        } else {
+            sub_selected.extend(min_selected);
+            sub_selected.sort_unstable();
+            sub_selected.dedup();
 
-//                 return {"action": "resubmit", "sid": submit_result['sid']}
-//         else:
-//             self.log.warning("Trying to archive a submission when archiving is disabled.")
+            let mut params = submission.params.clone();
+            params.auto_archive = true;
+            params.delete_after_archive = delete_after;
+            params.services.selected = sub_selected;
+
+            let submission_obj = Submission{
+                files: submission.files,
+                metadata: submission.metadata,
+                params,
+                sid: thread_rng().gen(),
+                time: Default::default(),
+                notification: Default::default(),
+                scan_key: Default::default(),
+            };
+            let sid = submission_obj.sid;
+
+            self.submit.submit_prepared(submission_obj.clone(), None).await?;
+            // except (ValueError, KeyError) as e:
+            //     raise SubmissionException(f"Could not generate re-submission message: {str(e)}").with_traceback()
+
+            self.submission_traffic.publish(&SubmissionMessage::received(submission_obj, "archive".to_owned())).await?;
+
+            // Update current record
+            self.datastore.submission.update(submission['sid'], [(ESCollection.UPDATE_SET, 'archived', True)])
+
+            return Ok(Some(ArchivedMessage::resubmit(sid)))
+        }
+    }
+}
+

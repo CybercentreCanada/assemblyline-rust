@@ -1,17 +1,37 @@
-//! Extend the core with common code used by ingester and API servers to submit files for processing
+//! 
+
+use std::sync::Arc;
 
 use anyhow::Result;
+use assemblyline_models::config::Config;
 use assemblyline_models::ExpandingClassification;
 use chrono::{Utc, Duration};
 
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 use assemblyline_models::datastore::submission::{Submission as DatastoreSubmission, SubmissionState};
 use assemblyline_models::messages::SubmissionDispatchMessage;
+use redis_objects::{Queue, RedisObjects};
 
+use crate::constants::SUBMISSION_QUEUE;
+use crate::elastic::Elastic;
 use crate::Core;
 
 
-impl Core {
+pub struct SubmitManager {
+    datastore: Arc<Elastic>,
+    config: Arc<Config>,
+    dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>,
+}
+
+impl SubmitManager {
+
+    pub fn new(core: &Core) -> Self {
+        Self {
+            dispatch_submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
+            config: core.config.clone(),
+            datastore: core.datastore.clone()
+        }
+    }
 
     /// Start a submission that has already been prepared
     pub async fn submit_prepared(&self, mut submission_obj: MessageSubmission, completed_queue: Option<String>) -> Result<()> {

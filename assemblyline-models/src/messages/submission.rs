@@ -104,4 +104,12 @@ impl SubmissionMessage {
             sender
         }
     }
+    pub fn received(sub: Submission, sender: String) -> Self {
+        Self {
+            msg: sub,
+            msg_loader: default_message_loader(),
+            msg_type: MessageType::SubmissionReceived,
+            sender
+        }
+    }
 }

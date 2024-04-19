@@ -117,7 +117,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
     }
 
     /// Launch the task reading from the pubsub
-    pub fn listen(self) -> mpsc::Receiver<Result<Option<Message>, ErrorTypes>> {
+    pub fn listen(self) -> mpsc::Receiver<Option<Message>> {
 
         let (parsed_sender, parsed_receiver) = mpsc::channel(2);
 
@@ -132,7 +132,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
                 let message = match message {
                     Some(message) => message,
                     None => {
-                        if parsed_sender.send(Ok(None)).await.is_err() {
+                        if parsed_sender.send(None).await.is_err() {
                             break
                         }
                         continue
@@ -140,8 +140,11 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
                 };
 
                 let result = match serde_json::from_slice(message.get_payload_bytes()) {
-                    Ok(message) => parsed_sender.send(Ok(Some(message))).await,
-                    Err(err) => parsed_sender.send(Err(err.into())).await,
+                    Ok(message) => parsed_sender.send(Some(message)).await,
+                    Err(err) => {
+                        error!("Could not process pubsub message: {err}");
+                        parsed_sender.send(None).await
+                    }
                 };
 
                 if result.is_err() {

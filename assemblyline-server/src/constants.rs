@@ -9,6 +9,8 @@ pub(crate) const POST_PROCESS_CONFIG_KEY: &str = "post-process-actions";
 pub(crate) const METRICS_CHANNEL: &str = "assemblyline_metrics";
 pub(crate) const COMPLETE_QUEUE_NAME: &str = "m-complete";
 pub(crate) const INGEST_QUEUE_NAME: &str = "m-ingest";
+pub(crate) const SUBMISSION_QUEUE: &str = "dispatch-submission-queue";
+pub(crate) const ARCHIVE_QUEUE_NAME: &str = "m-archive";
 
 
 // # Queue priority values for each bucket in the ingester

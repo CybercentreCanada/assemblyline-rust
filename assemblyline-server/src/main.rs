@@ -15,8 +15,10 @@ use elastic::Elastic;
 use redis_objects::{Queue, RedisObjects};
 
 mod ingester;
-mod submission_common;
-mod dispatcher_common;
+mod submit;
+mod core_dispatcher;
+mod archive;
+mod services;
 // mod dispatcher;
 mod postprocessing;
 mod elastic;
@@ -25,7 +27,6 @@ mod tls;
 mod error;
 mod constants;
 
-const SUBMISSION_QUEUE: &str = "dispatch-submission-queue";
 
 struct Core {
     pub config: Config,
@@ -34,8 +35,8 @@ struct Core {
     pub redis_volatile: Arc<RedisObjects>,
     pub redis_metrics: Arc<RedisObjects>,
 
-    // entrypoint to the dispatcher
-    pub dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>
+    // interface to request service information
+    pub services: ServiceHelper,
 }
 
 #[tokio::main]
@@ -60,7 +61,7 @@ async fn main() {
 
     // Initialize connections to resources that everything uses
     let core = Core {
-        dispatch_submission_queue: redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
+        services: ServiceHelper::start(datastore.clone(), &redis_volatile).await?,
         config,
         datastore,
         redis_persistant,
@@ -88,6 +89,7 @@ macro_rules! spawn_retry_forever {
         $container.push(($name.to_owned(), spawn_retry_forever!($source, $name, $method_name)))
     }
 }
+use services::ServiceHelper;
 pub(crate) use spawn_retry_forever;
 
 

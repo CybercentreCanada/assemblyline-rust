@@ -91,7 +91,7 @@ impl RedisObjects {
         JsonListenerBuilder::new(self.clone())
     }
 
-    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Result<Option<T>, ErrorTypes>> {
+    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<T>> {
         self.pubsub_json_listener()
             .subscribe(channel)
             .listen()

@@ -707,18 +707,12 @@ impl Default for Metrics {
 }
 
 
-// @odm.model(index=False, store=False, description="Malware Archive Configuration")
-// class Archiver(odm.Model):
-//     minimum_required_services: List[str] = odm.List(
-//         odm.keyword(),
-//         default=[],
-//         description="List of minimum required service before archiving takes place")
-
-
-// DEFAULT_ARCHIVER = {
-//     'minimum_required_services': []
-// }
-
+#[derive(Serialize, Deserialize, Default)]
+/// Malware Archive Configuration
+pub struct Archiver {
+    /// List of minimum required service before archiving takes place
+    pub minimum_required_services: Vec<String>,
+}
 
 /// Redis Configuration
 #[derive(Serialize, Deserialize)]
@@ -921,9 +915,8 @@ pub struct Core {
     // /// Configuration for Alerter
     // #[serde(default)]
     // pub alerter: Alerter,
-    // /// Configuration for the permanent submission archive
-    // #[serde(default)]
-    // pub archiver: Archiver,
+    /// Configuration for the permanent submission archive
+    pub archiver: Archiver,
     /// Configuration for Dispatcher
     pub dispatcher: Dispatcher,
     // /// Configuration for Expiry
@@ -962,7 +955,7 @@ pub struct Core {
 /// Datastore Archive feature configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
-struct Archive {
+pub struct Archive {
     /// Are we enabling Achiving features across indices?
     pub enabled: bool,
     /// List of indices the ILM Applies to
@@ -981,7 +974,7 @@ impl Default for Archive {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all="lowercase")]
-enum DatastoreType {
+pub enum DatastoreType {
     Elasticsearch
 }
 
@@ -1354,7 +1347,7 @@ impl Default for ServiceSafelist {
 /// UI Configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
-struct UI {
+pub struct UI {
 //     alerting_meta: AlertingMeta = odm.Compound(AlertingMeta, default=DEFAULT_ALERTING_META,description="Alerting metadata fields")
     /// Allow user to tell in advance the system that a file is malicious?
     pub allow_malicious_hinting: bool,

@@ -191,7 +191,7 @@ impl SubmissionParams {
 
         let services = match services {
             Some(services) => services,
-            None => self.services.selected.clone().unwrap_or_default(),
+            None => self.services.selected.clone(),
         };
 
         let mut data = self.get_hashing_keys();
@@ -230,17 +230,17 @@ impl SubmissionParams {
 #[metadata(index=false, store=false)]
 pub struct ServiceSelection {
     /// List of selected services
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selected: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected: Vec<String>,
     /// List of excluded services
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub excluded: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub excluded: Vec<String>,
     /// List of services to rescan when moving between systems
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rescan: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rescan: Vec<String>,
     /// Add to service selection when resubmitting
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resubmit: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resubmit: Vec<String>,
 }
 
 /// Submission-Relevant Times

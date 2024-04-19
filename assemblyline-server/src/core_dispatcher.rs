@@ -1,3 +1,4 @@
+//! Extension to the core module for accessing information about dispatcher instances
 
 use std::str::FromStr;
 
