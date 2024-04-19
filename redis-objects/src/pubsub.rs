@@ -34,7 +34,7 @@ impl ListenerBuilder {
     }
 
     /// Launch the task reading from the pubsub
-    pub fn listen(self) -> mpsc::Receiver<Msg> {
+    pub fn listen(self) -> mpsc::Receiver<Option<Msg>> {
 
         let (message_sender, message_receiver) = mpsc::channel(64);
 
@@ -74,10 +74,13 @@ impl ListenerBuilder {
                 while let Some(message) = stream.next().await {
                     // if the send fails it means the other end of the channel has dropped 
                     // and we can stop listening 
-                    if message_sender.send(message).await.is_err() {
+                    if message_sender.send(Some(message)).await.is_err() {
                         break 'reconnect
                     }
                     exponent = STARTING_EXPONENT + 1.0;
+                }
+                if message_sender.send(None).await.is_err() {
+                    break 'reconnect
                 }
             }
         });
@@ -114,7 +117,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
     }
 
     /// Launch the task reading from the pubsub
-    pub fn listen(self) -> mpsc::Receiver<Result<Message, ErrorTypes>> {
+    pub fn listen(self) -> mpsc::Receiver<Result<Option<Message>, ErrorTypes>> {
 
         let (parsed_sender, parsed_receiver) = mpsc::channel(2);
 
@@ -126,8 +129,18 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
 
         tokio::spawn(async move {
             while let Some(message) = message_reciever.recv().await {
+                let message = match message {
+                    Some(message) => message,
+                    None => {
+                        if parsed_sender.send(Ok(None)).await.is_err() {
+                            break
+                        }
+                        continue
+                    }
+                };
+
                 let result = match serde_json::from_slice(message.get_payload_bytes()) {
-                    Ok(message) => parsed_sender.send(Ok(message)).await,
+                    Ok(message) => parsed_sender.send(Ok(Some(message))).await,
                     Err(err) => parsed_sender.send(Err(err.into())).await,
                 };
 
@@ -140,7 +153,6 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
         parsed_receiver
     }
 }
-
 
 pub struct Publisher {
     store: Arc<RedisObjects>,

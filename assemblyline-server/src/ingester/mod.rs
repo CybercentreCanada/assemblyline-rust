@@ -162,6 +162,9 @@ struct Ingester {
     queue_bypass: Mutex<VecDeque<oneshot::Sender<Box<IngestTask>>>>,
 
     cache: Mutex<HashMap<String, FileScore>>,
+
+    // Utility object to handle post-processing actions
+    postprocess_worker: Arc<ActionWorker>,
 }
 
 pub async fn main(core: Core) -> Result<()> {
@@ -179,6 +182,10 @@ pub async fn main(core: Core) -> Result<()> {
         traffic_queue: core.redis_volatile.publisher("submissions".to_owned()),
         duplicate_queue: core.redis_persistant.multiqueue(_DUP_PREFIX.to_owned()),
         scanning: core.redis_persistant.hashmap("m-scanning-table".to_owned(), None),
+//         # Utility object to handle post-processing actions
+//         self.postprocess_worker = ActionWorker(cache=True, config=self.config, datastore=self.datastore,
+//                                                redis_persist=self.redis_persist)
+
         core,
         cache: Mutex::new(Default::default()),
         user_groups: tokio::sync::Mutex::new(GroupCache{reset: current_hour(), cache: Default::default()}),
@@ -776,7 +783,12 @@ impl Ingester {
         let expiry = Utc::now() + chrono::Duration::seconds(86400);
         let sha256 = task.submission.files[0].sha256;
 
-        self.core.datastore.save_or_freshen_file(sha256, {'sha256': sha256}, expiry, c12n, redis=self.redis).await?;
+        self.core.datastore.save_or_freshen_file(
+            &sha256, 
+            [("sha256".to_owned(), sha256)].into_iter().collect(), 
+            expiry, 
+            c12n, 
+        ).await?;
         Ok(())
     }
 
@@ -1156,9 +1168,6 @@ fn drop_chance(length: u64, maximum: i64) -> f64 {
 
 //         # Utility object to help submit tasks to dispatching
 //         self.submit_client = SubmissionClient(datastore=self.datastore, redis=self.redis)
-//         # Utility object to handle post-processing actions
-//         self.postprocess_worker = ActionWorker(cache=True, config=self.config, datastore=self.datastore,
-//                                                redis_persist=self.redis_persist)
 
 
 fn current_hour() -> i64 {

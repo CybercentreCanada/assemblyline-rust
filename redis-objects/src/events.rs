@@ -6,3 +6,4 @@ pub struct EventWatcher<T> {
 
     _data: PhantomData<T>
 }
+

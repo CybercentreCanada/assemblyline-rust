@@ -281,7 +281,7 @@ impl ActionWorker {
                 resubmission.sid = Sid::random();
                 resubmission.scan_key = None;
                 resubmission.params.services.resubmit.clear();
-                resubmission.params.services.selected = submit_to;
+                resubmission.params.services.selected = Some(submit_to);
 
                 self.unique_queue.push(submission_msg.params.priority, &json!({
                     "score": score,
@@ -408,30 +408,30 @@ impl ActionWorker {
 }
 
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum PostprocessingError {
-    NetworkError{
-        cause: Box<redis_objects::ErrorTypes>,
-    },
-    Processing{
-        cause: Box<ParsingError>
-    }
-}
+// #[derive(Debug, PartialEq, Eq)]
+// pub enum PostprocessingError {
+//     NetworkError{
+//         cause: Box<redis_objects::ErrorTypes>,
+//     },
+//     Processing{
+//         cause: Box<ParsingError>
+//     }
+// }
 
-impl std::fmt::Display for PostprocessingError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PostprocessingError::NetworkError {  } => todo!(),
-            PostprocessingError::Processing { cause } => todo!(),
-        }
-    }
-}
+// impl std::fmt::Display for PostprocessingError {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             PostprocessingError::NetworkError {  } => todo!(),
+//             PostprocessingError::Processing { cause } => todo!(),
+//         }
+//     }
+// }
 
-impl From<redis_objects::ErrorTypes> for PostprocessingError {
-    fn from(value: redis_objects::ErrorTypes) -> Self {
-        Self::NetworkError { cause: Box::new(value) }
-    }
-}
+// impl From<redis_objects::ErrorTypes> for PostprocessingError {
+//     fn from(value: redis_objects::ErrorTypes) -> Self {
+//         Self::NetworkError { cause: Box::new(value) }
+//     }
+// }
 
 /// Errors related to parsing or interpreting a post processing rule
 #[derive(Debug, PartialEq, Eq)]
