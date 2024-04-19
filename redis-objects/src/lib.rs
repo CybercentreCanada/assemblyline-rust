@@ -91,7 +91,7 @@ impl RedisObjects {
         JsonListenerBuilder::new(self.clone())
     }
 
-    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Result<T, ErrorTypes>> {
+    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Result<Option<T>, ErrorTypes>> {
         self.pubsub_json_listener()
             .subscribe(channel)
             .listen()
@@ -101,7 +101,7 @@ impl RedisObjects {
         ListenerBuilder::new(self.clone())
     }
 
-    pub fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Msg> {
+    pub fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<Msg>> {
         self.pubsub_listener()
             .subscribe(channel)
             .listen()
@@ -364,18 +364,18 @@ pub (crate) mod test {
         pq.delete().await?;
 
         for x in 0..10 {
-            pq.push(100, &x.to_string()).await?;
+            pq.push(100.0, &x.to_string()).await?;
         }
 
-        let a_key = pq.push(101, &"a".to_string()).await?;
-        let z_key = pq.push(99, &"z".to_string()).await?;
+        let a_key = pq.push(101.0, &"a".to_string()).await?;
+        let z_key = pq.push(99.0, &"z".to_string()).await?;
         assert_eq!(pq.rank(&a_key).await?.unwrap(), 0);
         assert_eq!(pq.rank(&z_key).await?.unwrap(), pq.length().await? - 1);
         assert!(pq.rank(b"onethuosentuh").await?.is_none());
 
         assert_eq!(pq.pop(1).await?, ["a"]);
         assert_eq!(pq.unpush(1).await?, ["z"]);
-        assert_eq!(pq.count(100, 100).await?, 10);
+        assert_eq!(pq.count(100.0, 100.0).await?, 10);
         assert_eq!(pq.pop(1).await?, ["0"]);
         assert_eq!(pq.unpush(1).await?, ["9"]);
         assert_eq!(pq.length().await?, 8);
@@ -386,7 +386,7 @@ pub (crate) mod test {
 
         // for x in 0..5 {
         for x in 0..1 {
-            pq.push(100 + x, &x.to_string()).await?;
+            pq.push(100.0 + x as f64, &x.to_string()).await?;
         }
 
         // assert_eq!(pq.length().await?, 6);

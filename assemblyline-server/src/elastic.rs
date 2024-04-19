@@ -5,7 +5,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use assemblyline_models::datastore::filescore::FileScore;
-use assemblyline_models::JsonMap;
+use assemblyline_models::datastore::user::User;
+use assemblyline_models::{JsonMap, Sha256};
 use assemblyline_models::datastore::{File, Submission, Error as ErrorModel, Service};
 use chrono::{Duration, DateTime, Utc};
 use elasticsearch::{Elasticsearch, http};
@@ -406,7 +407,7 @@ pub struct Elastic {
     es: Arc<ElasticHelper>,
     pub file: Collection<File>,
     pub submission: Collection<Submission>,
-    // pub user: Collection<User>,
+    pub user: Collection<User>,
     pub error: Collection<ErrorModel>,
 
     /// Unmodified default service data classes
@@ -481,6 +482,73 @@ impl Elastic {
         let mut services = self.list_all_services().await?;
         services.retain(|service|service.enabled);
         Ok(services)
+    }
+
+        
+    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, classification: ParsedClassification, cl_engine: ClassificationParser, is_section_image: Option<bool>) -> Result<()> {
+        let is_section_image = is_section_image.unwrap_or(false);
+        // Remove control fields from new file info
+        for x in ["classification", "expiry_ts", "seen", "archive_ts", "labels", "label_categories", "comments"] {
+            fileinfo.pop(x, None)
+        }
+
+        loop {
+            let (current_fileinfo, version) = self.file.get_version(sha256).await?;
+
+            if current_fileinfo is None {
+                current_fileinfo = {}
+            } else {
+                // If the freshen we are doing won't change classification, we can do it via an update operation
+                classification = cl_engine.min_classification(
+                    str(current_fileinfo.get('classification', classification)),
+                    str(classification)
+                )
+                if classification == current_fileinfo.get('classification', None) {
+                    operations = [
+                        (self.file.UPDATE_SET, key, value)
+                        for key, value in fileinfo.items()
+                    ]
+                    operations.extend([
+                        (self.file.UPDATE_INC, 'seen.count', 1),
+                        (self.file.UPDATE_MAX, 'seen.last', now_as_iso()),
+                    ])
+                    if expiry:
+                        operations.append((self.file.UPDATE_MAX, 'expiry_ts', expiry))
+                    if self.file.update(sha256, operations):
+                        return
+                }
+            }
+
+            # Add new fileinfo to current from database
+            current_fileinfo.update(fileinfo)
+            current_fileinfo['archive_ts'] = None
+
+            # Update expiry time
+            current_expiry = current_fileinfo.get('expiry_ts', expiry)
+            if current_expiry and expiry:
+                current_fileinfo['expiry_ts'] = max(current_expiry, expiry)
+            else:
+                current_fileinfo['expiry_ts'] = None
+
+            # Update seen counters
+            now = now_as_iso()
+            current_fileinfo['seen'] = seen = current_fileinfo.get('seen', {})
+            seen['count'] = seen.get('count', 0) + 1
+            seen['last'] = now
+            seen['first'] = seen.get('first', now)
+
+            # Update Classification
+            current_fileinfo['classification'] = classification
+
+            # Update section image status
+            current_fileinfo['is_section_image'] = current_fileinfo.get('is_section_image', False) or is_section_image
+
+            try:
+                self.file.save(sha256, current_fileinfo, version=version)
+                return
+            except VersionConflictException as vce:
+                log.info(f"Retrying save or freshen due to version conflict: {str(vce)}")
+        }
     }
 }
 
@@ -688,8 +756,6 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
 
         Ok(ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await?)
     }
-
-
 }
 
 

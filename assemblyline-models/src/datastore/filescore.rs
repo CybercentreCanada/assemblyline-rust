@@ -16,9 +16,9 @@ pub struct FileScore {
     #[metadata(index=true)]
     pub expiry_ts: DateTime<Utc>,
     /// Maximum score for the associated submission
-    pub score: i64,
+    pub score: i32,
     /// Number of errors that occurred during the previous analysis
-    pub errors: u32,
+    pub errors: i32,
     /// ID of the associated submission
     pub sid: Sid,
     /// Epoch time at which the FileScore entry was created

@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use struct_metadata::Described;
 
-use crate::{JsonMap, Sha256, ExpandingClassification, ElasticMeta, Sid, ClassificationString};
+use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Sha256, Sid, UpperString};
 
 
 /// Model of Submission
@@ -81,7 +82,7 @@ pub struct SubmissionParams {
     pub generate_alert: bool,
     /// List of groups related to this scan
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub groups: Vec<String>,
+    pub groups: Vec<UpperString>,
     /// Ignore the cached service results?
     pub ignore_cache: bool,
     /// Should we ignore dynamic recursion prevention?
@@ -161,6 +162,67 @@ impl Default for SubmissionParams {
     }
 }
 
+impl SubmissionParams {
+
+    /// Get the sections of the submission parameters that should be used in result hashes.
+    fn get_hashing_keys(&self) -> Vec<(String, serde_json::Value)> {
+        [
+            ("classification", json!(self.classification)),
+            ("deep_scan", json!(self.deep_scan)),
+            ("ignore_cache", json!(self.ignore_cache)),
+            ("ignore_dynamic_recursion_prevention", json!(self.ignore_dynamic_recursion_prevention)),
+            ("ignore_filtering", json!(self.ignore_filtering)),
+            ("ignore_size", json!(self.ignore_size)),
+            ("max_extracted", json!(self.max_extracted)),
+            ("max_supplementary", json!(self.max_supplementary)),
+        ].into_iter().map(|(key, value)|(key.to_owned(), value)).collect()
+    }
+
+
+    /// This is the key used to store the final score of a submission for fast lookup.
+    /// 
+    /// This lookup is one of the methods used to check for duplication in ingestion process,
+    /// so this key is fairly sensitive.
+    pub fn create_filescore_key(&self, sha256: &Sha256, services: Option<Vec<String>>) -> String {
+        // TODO do we need this version thing still be here?
+        // One up this if the cache is ever messed up and we
+        // need to quickly invalidate all old cache entries.
+        let version = 0;
+
+        let services = match services {
+            Some(services) => services,
+            None => self.services.selected.clone().unwrap_or_default(),
+        };
+
+        let mut data = self.get_hashing_keys();
+        data.push(("service_spec".to_owned(), {
+            let mut spec = vec![];
+            for (key, values) in self.service_spec.clone() {
+                let mut values: Vec<(String, Value)> = values.into_iter().collect();
+                values.sort_by(|a, b|a.0.cmp(&b.0));
+                spec.push((key, values));
+            }
+            spec.sort_by(|a, b|a.0.cmp(&b.0));
+            json!(spec)
+        }));
+        data.push(("sha256".to_owned(), json!(sha256)));
+        data.push(("services".to_owned(), json!(services)));
+
+        let s = data.into_iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<String>>().join(", ");
+        // s = ', '.join([f"{k}: {data[k]}" for k in sorted(data.keys())])
+
+        use md5::{Md5, Digest};
+        let mut hasher = Md5::new();
+        hasher.update(s);
+        let hash = hasher.finalize();
+        let mut hex = String::new();
+        for byte in hash {
+            hex += &format!("{byte:x}");
+        }
+
+        format!("{hex}v{version}")
+    }
+}
 
 /// Service Selection Scheme
 #[derive(Serialize, Deserialize, Default, Debug, Described, Clone)]

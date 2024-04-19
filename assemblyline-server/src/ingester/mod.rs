@@ -4,39 +4,42 @@
 //! score received, possibly sending a message to indicate that an alert should
 //! be created.
 
-use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
+use std::borrow::BorrowMut;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 use anyhow::Result;
 
 use assemblyline_models::datastore::filescore::FileScore;
-use assemblyline_models::datastore::submission::SubmissionParams;
-use assemblyline_models::{Sha256, Sid};
+use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
+use assemblyline_models::datastore::user::User;
+use assemblyline_models::{Sha256, Sid, UpperString};
 use assemblyline_models::datastore::alert::ExtendedScanValues;
-use assemblyline_models::messages::submission::{default_message_loader, Submission as MessageSubmission, SubmissionMessage};
+use assemblyline_models::messages::submission::{Submission as MessageSubmission, SubmissionMessage};
 use assemblyline_models::datastore::submission::Submission as DatabaseSubmission;
 use chrono::{DateTime, Utc};
 use log::{debug, error, info, warn};
+use parking_lot::Mutex;
 use rand::Rng;
 use redis_objects::queue::MultiQueue;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
+use tokio::sync::oneshot;
 
-use crate::constants::{COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
-use crate::submission_common::SubmissionClient;
+use crate::constants::{Priority, COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
 use crate::{await_tasks, spawn_retry_forever, Core};
 
 mod http;
 
-const _dup_prefix: &str = "w-m-";
-// _notification_queue_prefix = 'nq-'
-const _min_priority: u16 = 1;
-// _max_retries = 10
-// _retry_delay = 60 * 4  # Wait 4 minutes to retry
-// _max_time = 2 * 24 * 60 * 60  # Wait 2 days for responses.
-// HOUR_IN_SECONDS = 60 * 60
-
+const _DUP_PREFIX: &str = "w-m-";
+const _NOTIFICATION_QUEUE_PREFIX: &str = "nq-";
+const _MIN_PRIORITY: u16 = 1;
+const _MAX_RETRIES: u32 = 10;
+const _RETRY_DELAY: chrono::Duration = chrono::Duration::minutes(4); // Wait 4 minutes to retry
+const _MAX_TIME: chrono::Duration = chrono::Duration::days(2); // Wait 2 days for responses.
+const HOUR_IN_SECONDS: i64 = 60 * 60;
 
 fn read_env_size(name: &str, default: usize) -> Result<usize> {
     match std::env::var(name) {
@@ -67,7 +70,7 @@ struct IngestTask {
     /// If the ingestion has failed for some reason, what is it?
     failure: String,
     // Score from previous processing of this file
-    score: Option<i64>,
+    score: Option<i32>,
     // Status of the extended scan
     extended_scan: ExtendedScanValues,
     // Ingestion Identifier
@@ -106,6 +109,10 @@ impl IngestTask {
     }
 }
 
+struct GroupCache {
+    reset: i64, 
+    cache: HashMap<String, Vec<UpperString>>
+}
 
 struct Ingester {
     core: Core,
@@ -144,15 +151,21 @@ struct Ingester {
     // Output. Duplicate our input traffic into this queue so it may be cloned by other systems
     traffic_queue: Publisher,
 
-    submit_client: SubmissionClient,
+    // priority_value: HashMap<String, u16>,
+    // priority_range: HashMap<String, (u16, u16)>,
+    // threshold_value: HashMap<String, u16>,
 
-    priority_value: HashMap<String, u16>,
-    priority_range: HashMap<String, (u16, u16)>,
-    threshold_value: HashMap<String, u16>,
+    user_groups: tokio::sync::Mutex<GroupCache>,
+    // self._user_groups_reset = time.time()//HOUR_IN_SECONDS
 
-    cache: parking_lot::Mutex<HashMap<String, FileScore>>,
+    // channel to pass data to the senders without going through redis
+    queue_bypass: Mutex<VecDeque<oneshot::Sender<Box<IngestTask>>>>,
+
+    cache: Mutex<HashMap<String, FileScore>>,
+
+    // Utility object to handle post-processing actions
+    postprocess_worker: Arc<ActionWorker>,
 }
-
 
 pub async fn main(core: Core) -> Result<()> {
     // Initialize ingester Internal state
@@ -167,9 +180,16 @@ pub async fn main(core: Core) -> Result<()> {
             .export_interval(Duration::from_secs(core.config.core.metrics.export_interval as u64))
             .start(),
         traffic_queue: core.redis_volatile.publisher("submissions".to_owned()),
-        duplicate_queue: core.redis_persistant.multiqueue(_dup_prefix.to_owned()),
+        duplicate_queue: core.redis_persistant.multiqueue(_DUP_PREFIX.to_owned()),
         scanning: core.redis_persistant.hashmap("m-scanning-table".to_owned(), None),
-        core
+//         # Utility object to handle post-processing actions
+//         self.postprocess_worker = ActionWorker(cache=True, config=self.config, datastore=self.datastore,
+//                                                redis_persist=self.redis_persist)
+
+        core,
+        cache: Mutex::new(Default::default()),
+        user_groups: tokio::sync::Mutex::new(GroupCache{reset: current_hour(), cache: Default::default()}),
+        queue_bypass: Mutex::new(Default::default()),
     });
 
     let mut components = vec![];
@@ -222,6 +242,10 @@ impl Ingester {
         todo!();
     }
 
+    pub async fn while_running(&self, duration: Duration) {
+        todo!()
+    }
+
     pub async fn sleep(&self, duration: Duration) {
         todo!();
     }
@@ -258,7 +282,7 @@ impl Ingester {
                 // else:
                 //     # A new submission
                 //     sub = MessageSubmission(message)
-            let mut task = IngestTask::new(message);
+            let mut task = Box::new(IngestTask::new(message));
             task.submission.sid = rand::thread_rng().gen(); // Reset to new random uuid
             
             // Write all input to the traffic queue
@@ -304,20 +328,21 @@ impl Ingester {
             }
 
             // try to get a new task
-            let task = if block_on_redis {
+            let mut task = if block_on_redis {
                 match self.unique_queue.blocking_pop(Duration::from_secs(3), false).await? {
-                    Some(task) => task,
+                    Some(task) => Box::new(task),
                     None => continue,
                 }
             } else {
                 match self.unique_queue.pop(1).await?.pop() {
-                    Some(task) => task,
-                    None => match self.pop_internal_unique_queue().await? {
+                    Some(task) => Box::new(task),
+                    None => match self.pop_internal_unique_queue().await {
                         Some(task) => task,
                         None => continue,
                     },
                 }
             };
+            let sha256 = task.sha256().clone();
 
             // Check if we need to drop a file for capacity reasons, but only if the
             // number of files in flight is alreay over 80%
@@ -326,14 +351,14 @@ impl Ingester {
                 continue
             }
 
-            if self.is_whitelisted(&task).await? {
-                // End of ingest message (whitelisted)
-                continue
-            }
+            // if self.is_whitelisted(&task).await? {
+            //     // End of ingest message (whitelisted)
+            //     continue
+            // }
 
             // Check if this file has been previously processed.
             let (pprevious, previous, score, scan_key) = if !task.submission.params.ignore_cache {
-                self.check(&mut task, true).await
+                self.check(&mut task, true).await?
             } else {
                 (None, None, None, Self::stamp_filescore_key(&mut task, None))
             };
@@ -342,11 +367,11 @@ impl Ingester {
             // finalize will decide what to do, and put the task back in the queue
             // rewritten properly if we are going to run it again
             if let Some(previous) = previous {
-                let resubmit_empty = task.submission.params.services.resubmit.map_or(true, |v|v.is_empty());
+                let resubmit_empty = task.submission.params.services.resubmit.as_ref().map_or(true, |v|v.is_empty());
                 if !resubmit_empty && pprevious.is_none() {
-                    warn!("No psid for what looks like a resubmission of {}: {scan_key}", task.submission.files[0].sha256);
+                    warn!("No psid for what looks like a resubmission of {sha256}: {scan_key}");
                 }
-                self.finalize(pprevious, previous, score, &task, true).await?;
+                self.finalize(pprevious, previous, score, &mut task, true).await?;
                 // End of ingest message (finalized)
                 continue
             }
@@ -357,7 +382,7 @@ impl Ingester {
             // workers, so if it fails, someone beat us to the punch, record the file
             // as a duplicate then.
             if !self.scanning.add(&scan_key, &task).await? {
-                debug!("Duplicate {}", task.submission.files[0].sha256);
+                debug!("Duplicate {sha256}");
                 increment!(self.counter, duplicates);
                 self.duplicate_queue.push(&scan_key, &task).await?;
                 // End of ingest message (duplicate)
@@ -366,7 +391,7 @@ impl Ingester {
 
             // We have managed to add the task to the scan table, so now we go
             // ahead with the submission process
-            let err = match self.submit(scan_key, task).await {
+            let err = match self.submit(scan_key.clone(), task).await {
                 Ok(()) => continue,
                 Err(err) => err,
             };
@@ -377,15 +402,15 @@ impl Ingester {
 
             error!("Submission for file '{sha256}' failed due to: {err}");
 
-            let task = match self.scanning.pop(&scan_key).await? {
+            let mut task = match self.scanning.pop(&scan_key).await? {
                 Some(task) => task,
                 None => {
-                    error!("No scanning entry for for %s", task.sha256);
+                    error!("No scanning entry for for {sha256}");
                     continue
                 }
             };
 
-            self.retry(task, scan_key, ex)
+            self.retry(&mut task, &scan_key, &err.to_string()).await?;
             // End of ingest message (retry)
         }
         Ok(())
@@ -393,12 +418,12 @@ impl Ingester {
 
     async fn handle_retries(self: &Arc<Ingester>) -> Result<()> {
         while self.is_running() {
-            let now = chrono::Utc::now().timestamp();
+            let now = chrono::Utc::now().timestamp() as f64;
             let tasks = self.retry_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let task_count = tasks.len();
 
             for task in tasks {
-                self.spawn_ingest(task);
+                self.spawn_ingest(Box::new(task));
             }
     
             if task_count == 0 {
@@ -410,7 +435,7 @@ impl Ingester {
 
     async fn handle_timeouts(self: Arc<Self>) -> Result<()> {
         while self.is_running() {
-            let now = chrono::Utc::now().timestamp();
+            let now = chrono::Utc::now().timestamp() as f64;
             let timeouts = self.timeout_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let timeouts_count = timeouts.len();
 
@@ -463,68 +488,72 @@ impl Ingester {
     /// they should be rare. With that in mind, a warning is raised whenever this worker processes something
     /// so that if a constant stream of items are falling through and getting processed here it might stand out.
     async fn handle_missing(self: &Arc<Self>) -> Result<()> {
-        let last_round: HashSet<String> = Default::default();
+        let mut last_round: HashSet<Sid> = Default::default();
 
         while self.is_running() {
             // Get the current set of outstanding tasks
-            let outstanding = self.scanning.items().await?;
+            let mut outstanding = self.scanning.items().await?;
 
             // Get jobs being processed by dispatcher or in dispatcher queue
-            let mut assignment: HashMap<String, String> = Default::default();
+            let mut assignment: HashMap<Sid, String> = Default::default();
             for data in self.core.dispatch_submission_queue.content().await? {
-                assignment[data['submission']['sid']] = ''
+                assignment.insert(data.submission.sid, "".to_owned());
             }
-            for dis in Dispatcher.all_instances(self.redis_persist) {
-                for key in Dispatcher.instance_assignment(self.redis_persist, dis) {
-                    assignment[key] = dis
+            for dis in self.core.dispatcher_instances().await? {
+                for key in self.core.dispatcher_assignment(&dis).await? {
+                    assignment.insert(key, dis.clone());
                 }
             }
 
             // Filter out outstanding tasks currently assigned or in queue
-            outstanding: = {
-                key: doc
-                for key, doc in outstanding.items()
-                if doc["submission"]["sid"] not in assignment
-            }
+            outstanding.retain(|_, doc| !assignment.contains_key(&doc.submission.sid));
 
-            unprocessed = []
-            for key, data in outstanding.items() {
-                task = IngestTask(data)
-                sid = task.submission.sid
+            let mut unprocessed = vec![];
+            for (scan_key, task) in outstanding {
+                let sid = task.submission.sid;
 
                 // Check if its already complete in the database
-                from_db = self.datastore.submission.get_if_exists(sid)
-                if from_db and from_db.state == "completed":
-                    self.log.warning(f"Completing a hanging finished submission [{sid}]")
-                    self.completed(from_db)
+                let from_db = self.core.datastore.submission.get(&sid.to_string()).await?;
+                if let Some(from_db) = from_db {
+                    if from_db.state == SubmissionState::Completed {
+                        warn!("Completing a hanging finished submission [{sid}]");
+                        self.completed(from_db).await?;
+                        continue
+                    }
+                }
 
                 // Check for items that have been in an unknown state since the last round
                 // and put it back in processing
-                elif sid in last_round:
-                    self.log.warning(f"Recovering a submission dispatcher hasn't processed [{sid}]")
-                    self.submit(task)
+                if last_round.contains(&sid) {
+                    warn!("Recovering a submission dispatcher hasn't processed [{sid}]");
+                    self.submit(scan_key, Box::new(task)).await?;
+                    continue
+                }
 
                 // Otherwise defer looking at this until next iteration
-                else:
-                    unprocessed.append(sid)
+                unprocessed.push(sid);
             }
 
             // store items for next round
-            last_round = set(unprocessed)
+            last_round = unprocessed.into_iter().collect();
 
             // wait a few minutes before checking again
-            self.sleep(300 if last_round else 900):
+            if last_round.is_empty() {
+                self.sleep(Duration::from_secs(900)).await;
+            } else {
+                self.sleep(Duration::from_secs(300)).await;
+            }
         }
         Ok(())
     }
 
-    async fn spawn_ingest(self: &Arc<Self>, task: IngestTask) {
+    async fn spawn_ingest(self: &Arc<Self>, task: Box<IngestTask>) {
         if let Err(err) = self.ingest(task).await {
             error!("Error while ingesting a file: {err}");
         }
     }
 
-    async fn ingest(self: &Arc<Self>, task: IngestTask) -> Result<()> {
+    async fn ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> Result<()> {
         info!("[{} :: {}] Task received for processing", task.ingest_id, task.sha256());
         // Load a snapshot of ingest parameters as of right now.
         let max_file_size = self.core.config.submission.max_file_size;
@@ -548,7 +577,7 @@ impl Ingester {
 
         if task.file_size() > max_file_size && !task.params().ignore_size && !task.params().never_drop {
             task.failure = format!("File too large ({} > {max_file_size})", task.file_size());
-            self._notify_drop(&task).await?;
+            self._notify_drop(&mut task).await?;
             increment!(self.counter, skipped);
             error!("[{} :: {}] {}", task.ingest_id, task.sha256(), task.failure);
             return Ok(())
@@ -556,9 +585,9 @@ impl Ingester {
 
         // Set the groups from the user, if they aren't already set
         if task.params().groups.is_empty() {
-            let classification_string = task.params().classification.to_string();
-            for g in self.get_groups_from_user(task.params().submitter) {
-                if classification_string.contains(g) {
+            let classification_string = task.params().classification.as_str().to_string();
+            for g in self.get_groups_from_user(&task.params().submitter).await? {
+                if classification_string.contains(g.deref()) {
                     task.submission.params.groups.push(g);
                 }
             }
@@ -567,15 +596,15 @@ impl Ingester {
         // Check if this file is already being processed
         Self::stamp_filescore_key(&mut task, None);
         let (pprevious, previous, score, _) = if !task.params().ignore_cache {
-            self.check(&mut task, false).await
+            self.check(&mut task, false).await?
         } else {
             (None, None, None, "".to_owned())
         };
 
         // Assign priority.
-        let low_priority = self.is_low_priority(&task);
+        // let low_priority = self.is_low_priority(&task);
 
-        let priority = task.params().priority;
+        let mut priority = task.params().priority;
         // if priority < 0:
         //     priority = self.priority_value['medium']
 
@@ -590,42 +619,42 @@ impl Ingester {
 
         // Reduce the priority by an order of magnitude for very old files.
         let current_time = Utc::now();
-        if priority > 0 && self.expired(current_time.timestamp() - task.submission.time.timestamp(), 0) {
+        if priority > 0 && self.expired((current_time - task.submission.time).num_seconds() as f64, 0) {
             priority = (priority / 10).max(1);
         }
         task.submission.params.priority = priority;
 
         // Do this after priority has been assigned.
         // (So we don't end up dropping the resubmission).
-        if previous {
+        if let Some(previous) = previous {
             increment!(self.counter, duplicates);
-            self.finalize(pprevious, previous, score, &task, true).await?;
+            self.finalize(pprevious, previous, score, &mut task, true).await?;
 
             // On cache hits of any kind we want to send out a completed message
-            self.traffic_queue.publish(SubmissionMessage::completed(task.submission.clone(), "ingester")).await?;
+            self.traffic_queue.publish(&SubmissionMessage::completed(task.submission.clone(), "ingester".to_owned())).await?;
             return Ok(())
         }
 
-        if self.drop_task(&mut task) {
-            info!("[{} :: {}] Dropped", task.ingest_id, task.sha256);
+        if self.drop_task(&mut task).await? {
+            info!("[{} :: {}] Dropped", task.ingest_id, task.sha256());
             return Ok(())
         }
 
-        if self.is_whitelisted(&task) {
-            info!("[{} :: {}] Whitelisted", task.ingest_id, task.sha256);
-            return Ok(())
-        }
+        // if self.is_whitelisted(&task).await? {
+        //     info!("[{} :: {}] Whitelisted", task.ingest_id, task.sha256());
+        //     return Ok(())
+        // }
 
-        if let Some(task) = self.push_internal_unique_queue(task) {
-            self.unique_queue.push(priority, task.as_primitives())
+        if let Some(task) = self.push_internal_unique_queue(task).await {
+            self.unique_queue.push(priority as f64, &task).await?;
         }
         Ok(())
     }
 
     /// Invoked when notified that a submission has completed.
-    async fn completed(self: &Arc<Self>, sub: DatabaseSubmission) -> Result<()> {
+    async fn completed(self: &Arc<Self>, sub: DatabaseSubmission) -> Result<String> {
         // There is only one file in the submissions we have made
-        let sha256 = sub.files[0].sha256;
+        let sha256 = sub.files[0].sha256.clone();
         let ingest_id = match sub.metadata.get("ingest_id") {
             Some(id) => id.to_owned(),
             None => "unknown".to_owned(),
@@ -634,16 +663,16 @@ impl Ingester {
             Some(key) => key,
             None => {
                 warn!("[{ingest_id} :: {sha256}] Submission missing scan key");
-                sub.params.create_filescore_key(sha256)
+                sub.params.create_filescore_key(&sha256, None)
             }
         };
 
-        let task = match self.scanning.pop(&scan_key).await? {
+        let mut task = match self.scanning.pop(&scan_key).await? {
             Some(task) => task,
             None => {
                 // Some other worker has already popped the scanning queue?
                 warn!("[{ingest_id} :: {sha256}] Submission completed twice");
-                return scan_key    
+                return Ok(scan_key)
             }
         };
 
@@ -659,41 +688,58 @@ impl Ingester {
         increment!(self.counter, bytes_completed, task.file_size());
 
         let fs = FileScore{
-            expiry_ts: now(self.config.core.ingester.cache_dtl * 24 * 60 * 60),
-            errors: errors,
-            psid: psid,
-            score: score,
-            sid: sid,
-            time: now(),
+            expiry_ts: Utc::now() + chrono::Duration::days(self.core.config.core.ingester.cache_dtl as i64),
+            errors,
+            psid,
+            score,
+            sid,
+            time: Utc::now().timestamp() as f64,
         };
-        self.cache.lock().insert(scan_key, fs.clone());
-        self.datastore.filescore.save(scan_key, fs).await?;
+        self.cache.lock().insert(scan_key.clone(), fs.clone());
+        self.core.datastore.filescore.save(&scan_key, &fs, None, None).await?;
 
-        self.finalize(psid, sid, score, &task, None).await?;
+        self.finalize(psid, sid, Some(score), &mut task, false).await?;
 
-        def exhaust() -> Iterable[IngestTask]:
-            while True:
-                res = self.duplicate_queue.pop(scan_key, blocking=False)
-                if res is None:
-                    break
-                res = IngestTask(res)
-                res.submission.sid = sid
-                yield res
 
         // You may be tempted to remove the assignment to dups and use the
         // value directly in the for loop below. That would be a mistake.
         // The function finalize may push on the duplicate queue which we
         // are pulling off and so condensing those two lines creates a
         // potential infinite loop.
-        dups = [dup for dup in exhaust()]
-        for dup in dups:
-            self.finalize(psid, sid, score, dup, cache=True)
+        let mut dups = vec![];
+        loop {
+            match self.duplicate_queue.pop_nonblocking(&scan_key).await? {
+                None => break,
+                Some(mut res) => {
+                    res.submission.sid = sid;
+                    dups.push(res);        
+                }
+            }
+        }
 
-        return scan_key
-    }
+        for mut dup in dups {
+            self.finalize(psid, sid, Some(score), &mut dup, true).await?;
+        }
 
-    async fn pop_internal_unique_queue(&self) -> Result<Option<IngestTask>> {
-        todo!()
+        // def exhaust() -> Iterable[IngestTask]:
+        //     while True:
+        //         res = self.duplicate_queue.pop(scan_key, blocking=False)
+        //         if res is None:
+        //             break
+        //         res = IngestTask(res)
+        //         res.submission.sid = sid
+        //         yield res
+
+        // // You may be tempted to remove the assignment to dups and use the
+        // // value directly in the for loop below. That would be a mistake.
+        // // The function finalize may push on the duplicate queue which we
+        // // are pulling off and so condensing those two lines creates a
+        // // potential infinite loop.
+        // dups = [dup for dup in exhaust()]
+        // for dup in dups:
+        //     self.finalize(psid, sid, score, dup, cache=True)
+
+        return Ok(scan_key)
     }
 
     async fn drop_task(&self, task: &mut IngestTask) -> Result<bool> {
@@ -701,13 +747,14 @@ impl Ingester {
         let sample_threshold = &self.core.config.core.ingester.sampling_at;
 
         let mut dropped = false;
-        if priority <= _min_priority {
+        if priority <= _MIN_PRIORITY {
             dropped = true;
         } else {
-            for (level, (low, high)) in &self.priority_range {
-                if *low <= priority && priority <= *high {
+            for level in Priority::iter() {
+                let (low, high) = level.range();
+                if low <= priority && priority <= high {
                     if let Some(threshold) = sample_threshold.get(level) {
-                        dropped = must_drop(self.unique_queue.count(*low as i64, *high as i64).await?, *threshold);
+                        dropped = must_drop(self.unique_queue.count(*low as f64, *high as f64).await?, *threshold);
                         break
                     }
                 }
@@ -729,59 +776,74 @@ impl Ingester {
         return Ok(true)
     }
 
-    async fn _notify_drop(&self, task: &IngestTask) -> Result<()> {
-        self.send_notification(task).await?;
+    async fn _notify_drop(&self, task: &mut IngestTask) -> Result<()> {
+        self.send_notification(&mut task, None, false).await?;
 
-        c12n = task.params.classification;
-        expiry = now_as_iso(86400);
-        sha256 = task.submission.files[0].sha256;
+        let c12n = task.params().classification;
+        let expiry = Utc::now() + chrono::Duration::seconds(86400);
+        let sha256 = task.submission.files[0].sha256;
 
-        self.core.datastore.save_or_freshen_file(sha256, {'sha256': sha256}, expiry, c12n, redis=self.redis).await?;
+        self.core.datastore.save_or_freshen_file(
+            &sha256, 
+            [("sha256".to_owned(), sha256)].into_iter().collect(), 
+            expiry, 
+            c12n, 
+        ).await?;
         Ok(())
     }
 
-    async fn is_whitelisted(&self, task: &IngestTask) -> Result<bool> {
-        reason, hit = self.get_whitelist_verdict(self.whitelist, task)
-        hit = {x: dotdump(safe_str(y)) for x, y in hit.items()}
-        sha256 = task.submission.files[0].sha256
+    // async fn is_whitelisted(&self, task: &IngestTask) -> Result<bool> {
+        // the hardcoded whitelist was empty
+        // reason, hit = self.get_whitelist_verdict(self.whitelist, task)
+        // hit = {x: dotdump(safe_str(y)) for x, y in hit.items()}
+        // sha256 = task.submission.files[0].sha256
 
-        if not reason:
-            with self.whitelisted_lock:
-                reason = self.whitelisted.get(sha256, None)
-                if reason:
-                    hit = 'cached'
+        // if not reason:
+        //     with self.whitelisted_lock:
+        //         reason = self.whitelisted.get(sha256, None)
+        //         if reason:
+        //             hit = 'cached'
 
-        if reason:
-            if hit != 'cached':
-                with self.whitelisted_lock:
-                    self.whitelisted[sha256] = reason
+        // if reason:
+        //     if hit != 'cached':
+        //         with self.whitelisted_lock:
+        //             self.whitelisted[sha256] = reason
 
-            task.failure = "Whitelisting due to reason %s (%s)" % (dotdump(safe_str(reason)), hit)
-            self._notify_drop(task)
+        //     task.failure = "Whitelisting due to reason %s (%s)" % (dotdump(safe_str(reason)), hit)
+        //     self._notify_drop(task)
 
-            self.counter.increment('whitelisted')
+        //     self.counter.increment('whitelisted')
 
-        return reason
+        // return reason
+    // }
+
+    async fn get_groups_from_user(&self, username: &str) -> Result<Vec<UpperString>> {
+        // Reset the group cache at the top of each hour
+        let mut cache = self.user_groups.lock().await;
+        let now = current_hour();
+
+        if now > cache.reset {
+            cache.cache.clear();
+            cache.reset = now;
+        }
+
+        // Get the groups for this user if not known
+        if let Some(groups) = cache.cache.get(username) {
+            return Ok(groups.clone())
+        }
+
+        let user_data: Option<User> = self.core.datastore.user.get(username).await?;
+        if let Some(user_data) = user_data {
+            cache.cache.insert(username.to_owned(), user_data.groups.clone());
+            Ok(user_data.groups)
+        } else {
+            cache.cache.insert(username.to_owned(), vec![]);
+            Ok(vec![])
+        }
     }
 
-    //     def get_groups_from_user(self, username: str) -> List[str]:
-//         # Reset the group cache at the top of each hour
-//         if time.time()//HOUR_IN_SECONDS > self._user_groups_reset:
-//             self._user_groups = {}
-//             self._user_groups_reset = time.time()//HOUR_IN_SECONDS
-
-//         # Get the groups for this user if not known
-//         if username not in self._user_groups:
-//             user_data: User = self.datastore.user.get(username)
-//             if user_data:
-//                 self._user_groups[username] = user_data.groups
-//             else:
-//                 self._user_groups[username] = []
-//         return self._user_groups[username]
-
-
 //     def check(self, task: IngestTask, count_miss=True) -> Tuple[Optional[str], Optional[str], Optional[float], str]:
-    async fn check(&self, task: &mut IngestTask, count_miss: bool) -> (Option<Sid>, Option<Sid>, Option<i64>, String) {
+    async fn check(&self, task: &mut IngestTask, count_miss: bool) -> Result<(Option<Sid>, Option<Sid>, Option<i32>, String)> {
         let key = Self::stamp_filescore_key(task, None);
 
         let result = match self.cache.lock().get(&key) {
@@ -801,7 +863,7 @@ impl Ingester {
                         if count_miss {
                             increment!(self.counter, cache_miss);
                         }
-                        return (None, None, None, key);
+                        return Ok((None, None, None, key));
                     }
                 };
 
@@ -819,14 +881,14 @@ impl Ingester {
             increment!(self.counter, cache_expired);
             self.cache.lock().remove(&key);
             self.core.datastore.filescore.delete(&key).await?;
-            return (None, None, None, key)
+            return Ok((None, None, None, key))
         } else if self.stale(age, errors) {
             info!("[{} :: {}] Cache hit dropped, cache is stale", task.ingest_id, task.sha256());
             increment!(self.counter, cache_stale);
-            return (None, None, Some(result.score), key)
+            return Ok((None, None, Some(result.score), key))
         }
 
-        return (result.psid, Some(result.sid), Some(result.score), key)
+        return Ok((result.psid, Some(result.sid), Some(result.score), key))
     }
 
 //     def stop(self):
@@ -836,7 +898,7 @@ impl Ingester {
 //         self.submit_client.stop()
 //         self.postprocess_worker.stop()
 
-    fn expired(&self, delta: f64, errors: u32) -> bool {
+    fn expired(&self, delta: f64, errors: i32) -> bool {
         if errors > 0 {
             delta >= self.core.config.core.ingester.incomplete_expire_after_seconds
         } else {
@@ -844,7 +906,7 @@ impl Ingester {
         }
     }
 
-    fn stale(&self, delta: f64, errors: u32) -> bool {
+    fn stale(&self, delta: f64, errors: i32) -> bool {
         if errors > 0 {
             delta >= self.core.config.core.ingester.incomplete_stale_after_seconds
         } else {
@@ -861,76 +923,89 @@ impl Ingester {
         match task.submission.scan_key {
             Some(key) => key,
             None => {
-                let key = task.submission.params.create_filescore_key(sha256);
+                let key = task.submission.params.create_filescore_key(&sha256, None);
                 task.submission.scan_key = Some(key);
                 key
             }
         }
     }
 
-    async fn send_notification(&self, task: &IngestTask, failure=None, logfunc=None) -> Result<()> {
-        if logfunc is None:
-            logfunc = self.log.info
+    async fn send_notification(&self, task: &mut IngestTask, failure: Option<String>, warning: bool) -> Result<()> {
+        if let Some(failure) = failure {
+            task.failure = failure;
+        }
 
-        if failure:
-            task.failure = failure
+        let failure = &task.failure;
+        if !failure.is_empty() {
+            if warning {
+                warn!("{failure}: {task:?}");
+            } else {
+                info!("{failure}: {task:?}");
+            }
+        }
 
-        failure = task.failure
-        if failure:
-            logfunc("%s: %s", failure, str(task.json()))
+        let queue_name = match &task.submission.notification.queue {
+            Some(queue) => queue,
+            None => return Ok(()),
+        };
 
-        if not task.submission.notification.queue:
-            return
+        let queue_name = _NOTIFICATION_QUEUE_PREFIX.to_owned() + queue_name;
+        let threshold = match task.submission.notification.threshold {
+            Some(value) => value,
+            None => return Ok(())
+        };
 
-        note_queue = _notification_queue_prefix + task.submission.notification.queue
-        threshold = task.submission.notification.threshold
+        if let Some(score) = task.score {
+            if score < threshold {
+                return Ok(())
+            }
+        } else {
+            return Ok(())
+        }
 
-        if threshold is not None and task.score is not None and task.score < threshold:
-            return
+        let queue = self.core.redis_persistant.queue::<IngestTask>(queue_name, None);
 
-        q = self.notification_queues.get(note_queue, None)
-        if not q:
-            self.notification_queues[note_queue] = q = NamedQueue(note_queue, self.redis_persist)
+        // Mark at which time an item was queued
+        task.notify_time = Some(Utc::now());
 
-        # Mark at which time an item was queued
-        task.notify_time = now_as_iso()
-
-        q.push(task.as_primitives())
+        queue.push(task).await?;
+        Ok(())
     }
 
-    async fn submit(&self, scan_key: String, task: IngestTask) -> Result<()> {
+    async fn submit(&self, scan_key: String, task: Box<IngestTask>) -> Result<()> {
+        let sha = task.submission.files[0].sha256.clone();
         self.core.submit_prepared(
             task.submission,
             Some(COMPLETE_QUEUE_NAME.to_owned()),
         ).await?;
 
-        self.timeout_queue.push(Utc::now().timestamp() + _max_time, &scan_key).await?;
-        info!("[{} :: {}] Submitted to dispatcher for analysis", task.ingest_id, task.sha256());
+        self.timeout_queue.push((Utc::now() + _MAX_TIME).timestamp() as f64, &scan_key).await?;
+        info!("[{} :: {}] Submitted to dispatcher for analysis", task.ingest_id, sha);
         Ok(())
     }
 
-//     def retry(self, task: IngestTask, scan_key: str, ex):
-//         current_time = now()
+    async fn retry(&self, task: &mut IngestTask, scan_key: &str, err: &str) -> Result<()> {
+        let current_time = Utc::now();
 
-//         retries = task.retries + 1
+        let retries = task.retries + 1;
 
-//         if retries > _max_retries:
-//             trace = ''
-//             if ex:
-//                 trace = ': ' + get_stacktrace_info(ex)
-//             self.log.error(f'[{task.ingest_id} :: {task.sha256}] Max retries exceeded {trace}')
-//             self.duplicate_queue.delete( scan_key)
-//         elif self.expired(current_time - task.ingest_time.timestamp(), 0):
-//             self.log.info(f'[{task.ingest_id} :: {task.sha256}] No point retrying expired submission')
-//             self.duplicate_queue.delete( scan_key)
-//         else:
-//             self.log.info(f'[{task.ingest_id} :: {task.sha256}] Requeuing ({ex or "unknown"})')
-//             task.retries = retries
-//             self.retry_queue.push(int(now(_retry_delay)), task.as_primitives())
+        if retries > _MAX_RETRIES {
+            error!("[{} :: {}] Max retries exceeded {err}", task.ingest_id, task.sha256());
+            self.duplicate_queue.delete( scan_key).await?;
+        } else if self.expired((current_time - task.ingest_time).num_seconds() as f64, 0) {
+            info!("[{} :: {}] No point retrying expired submission", task.ingest_id, task.sha256());
+            self.duplicate_queue.delete( scan_key).await?;
+        } else {
+            info!("[{} :: {}] Requeuing ({err})", task.ingest_id, task.sha256());
+            task.retries = retries;
+            self.retry_queue.push((current_time + _RETRY_DELAY).timestamp() as f64, &task).await?;
+        }
+        Ok(())
+    }
 
     /// cache = False
-    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: Option<i64>, task: &IngestTask, cache: IBool) -> Result<()> {
-        let cache = cache.unwrap_or(false);
+    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: Option<i32>, task: &mut IngestTask, cache: bool) -> Result<()> {
+        // let cache = cache.unwrap_or(false);
         info!("[{} :: {}] Completed", task.ingest_id, task.sha256());
         if let Some(psid) = psid {
             task.submission.params.psid = Some(psid);
@@ -942,13 +1017,58 @@ impl Ingester {
             did_resubmit = self.postprocess_worker.process_cachehit(task.submission, score)
 
             if did_resubmit {
-                task.extended_scan = 'submitted'
-                task.params.psid = None
+                task.extended_scan = ExtendedScanValues::Submitted;
+                task.submission.params.psid = None;
             }
         }
 
-        self.send_notification(task).await?;
+        self.send_notification(&mut task, None, false).await?;
         Ok(())
+    }
+
+    async fn pop_internal_unique_queue(&self) -> Option<Box<IngestTask>> {
+        // put our collector into the queue
+        let (send, mut recv) = oneshot::channel();
+        self.queue_bypass.lock().push_back(send);
+
+        // wait for our queue to return
+        tokio::select! {
+            task = &mut recv => {
+                if let Ok(task) = task {
+                    return Some(task)
+                }
+            }
+            _ = self.while_running(Duration::from_secs(120)) => {}
+        }
+        
+        // if its a timeout close the collector and check for a last minute value
+        recv.close();
+        if let Ok(task) = recv.try_recv() {
+            return Some(task)
+        }
+
+        // flush out extra items in the queue
+        let mut queue = self.queue_bypass.lock();
+        while let Some(front) = queue.front() {
+            if front.is_closed() {
+                queue.pop_front();
+            } else {
+                break
+            }
+        }
+        None
+    }
+
+    /// Push task into the internal queue, return it if it couldn't be pushed
+    async fn push_internal_unique_queue(&self, mut task: Box<IngestTask>) -> Option<Box<IngestTask>> {
+        let mut queue = self.queue_bypass.lock();
+        while let Some(front) = queue.pop_front() {
+            task = match front.send(task) {
+                Ok(()) => return None,
+                Err(value) => value,
+            }
+        }
+        Some(task)
     }
 
 }
@@ -1012,8 +1132,11 @@ fn must_drop(length: u64, maximum: i64) -> bool {
     rand::thread_rng().gen::<f64>() < drop_chance(length, maximum)
 }
 
-
-
+fn drop_chance(length: u64, maximum: i64) -> f64 {
+    let length = length as f64;
+    let maximum = maximum as f64;
+    f64::max(0.0, f64::tanh((length - maximum) / maximum * 2.0))
+}
 
 // class Ingester(ThreadedCoreBase):
 //     def __init__(self, datastore=None, logger: Optional[logging.Logger] = None,
@@ -1023,8 +1146,6 @@ fn must_drop(length: u64, maximum: i64) -> bool {
 //                          datastore=datastore, config=config)
 
 //         # Cache the user groups
-//         self._user_groups: dict[str, list[str]] = {}
-//         self._user_groups_reset = time.time()//HOUR_IN_SECONDS
 //         self.notification_queues: dict[str, NamedQueue] = {}
 //         self.whitelisted: dict[str, Any] = {}
 //         self.whitelisted_lock = threading.RLock()
@@ -1047,16 +1168,8 @@ fn must_drop(length: u64, maximum: i64) -> bool {
 
 //         # Utility object to help submit tasks to dispatching
 //         self.submit_client = SubmissionClient(datastore=self.datastore, redis=self.redis)
-//         # Utility object to handle post-processing actions
-//         self.postprocess_worker = ActionWorker(cache=True, config=self.config, datastore=self.datastore,
-//                                                redis_persist=self.redis_persist)
-
-//         if self.config.core.metrics.apm_server.server_url is not None:
-//             self.log.info(f"Exporting application metrics to: {self.config.core.metrics.apm_server.server_url}")
-//             elasticapm.instrument()
-//             self.apm_client = forge.get_apm_client("ingester")
-//         else:
-//             self.apm_client = None
 
 
-
+fn current_hour() -> i64 {
+    Utc::now().timestamp()/HOUR_IN_SECONDS
+}
