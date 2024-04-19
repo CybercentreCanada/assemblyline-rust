@@ -234,7 +234,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     }
 
     /// Return the number of items within the two priority values (inclusive on both ends)
-    pub async fn count(&self, lowest: i64, highest: i64) -> Result<u64, ErrorTypes> {
+    pub async fn count(&self, lowest: f64, highest: f64) -> Result<u64, ErrorTypes> {
         Ok(retry_call!(self.store.pool, zcount, &self.name, -highest, -lowest)?)
     }
 
@@ -253,7 +253,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         if num <= 0 {
             return Ok(Default::default())
         };
-        let items: Vec<(Vec<u8>, i32)> = retry_call!(self.store.pool, zpopmin, &self.name, num)?;
+        let items: Vec<(Vec<u8>, f64)> = retry_call!(self.store.pool, zpopmin, &self.name, num)?;
         let mut out = vec![];
         for (data, _priority) in items {
             out.push(Self::decode(&data)?);
@@ -263,7 +263,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
 
     /// When only one item is requested, blocking is is possible.
     pub async fn blocking_pop(&self, timeout: Duration, low_priority: bool) -> Result<Option<T>, ErrorTypes> {
-        let result: Option<(String, Vec<u8>, i64)> = if low_priority {
+        let result: Option<(String, Vec<u8>, f64)> = if low_priority {
             retry_call!(self.store.pool, bzpopmax, &self.name, timeout.as_secs_f64())?
         } else {
             retry_call!(self.store.pool, bzpopmin, &self.name, timeout.as_secs_f64())?
@@ -291,7 +291,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     /// :param upper_limit: The score of all dequeued elements must be lower or equal to this.
     /// :param skip: In the range of available items to dequeue skip over this many.
     /// :param num: Maximum number of elements to dequeue.
-    pub async fn dequeue_range(&self, lower_limit: Option<i64>, upper_limit: Option<i64>, skip: Option<u32>, num: Option<u32>) -> Result<Vec<T>, ErrorTypes> {
+    pub async fn dequeue_range(&self, lower_limit: Option<f64>, upper_limit: Option<f64>, skip: Option<u32>, num: Option<u32>) -> Result<Vec<T>, ErrorTypes> {
         let skip = skip.unwrap_or(0);
         let num = num.unwrap_or(1);
         let mut call = self.dequeue_range.key(&self.name);
@@ -305,7 +305,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     }
 
     /// Place an item into the queue
-    pub async fn push(&self, priority: i32, data: &T) -> Result<Vec<u8>, ErrorTypes> {
+    pub async fn push(&self, priority: f64, data: &T) -> Result<Vec<u8>, ErrorTypes> {
         let value = Self::encode(data)?;
         if retry_call!(self.store.pool, zadd, &self.name, &value, -priority)? {
             Ok(value)

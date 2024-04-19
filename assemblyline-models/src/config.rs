@@ -531,6 +531,32 @@ pub struct TlsConfig {
 //     'delete_batch_size': 2000,
 // }
 
+#[derive(strum::EnumIter, strum::Display, strum::EnumString, SerializeDisplay, DeserializeFromStr, PartialEq, Eq, Hash)]
+#[strum(serialize_all = "kebab-case")]
+pub enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical,
+    UserLow,
+    UserMedium,
+    UserHigh,
+}
+
+impl Priority {
+    pub fn range(&self) -> (u16, u16) {
+        match self {
+            Priority::Low => (0, 100),
+            Priority::Medium => (101, 200),
+            Priority::High => (201, 300),
+            Priority::Critical => (301, 400),
+            Priority::UserLow => (401, 500),
+            Priority::UserMedium => (501, 1000),
+            Priority::UserHigh => (1001, 1500),
+        }
+    }
+}
+
 
 /// Ingester Configuration
 #[derive(Serialize, Deserialize)]
@@ -561,17 +587,17 @@ pub struct Ingester {
     /// How long should scores be cached in the ingester
     pub incomplete_stale_after_seconds: f64,
     /// Thresholds at certain buckets before sampling
-    pub sampling_at: HashMap<String, i64>,
+    pub sampling_at: HashMap<Priority, i64>,
     /// How many files to send to dispatcher concurrently
     pub max_inflight: u64,
-    // /// How long are files results cached
-    // pub cache_dtl: int = odm.Integer()
+    /// How long are files results cached
+    pub cache_dtl: u32
 }
 
 impl Default for Ingester {
     fn default() -> Self {
         Self {
-//     'cache_dtl': 2,
+            cache_dtl: 2,
 //     'default_user': 'internal',
 //     'default_services': [],
 //     'default_resubmit_services': [],
@@ -586,11 +612,11 @@ impl Default for Ingester {
             incomplete_expire_after_seconds: 3600.0,
             incomplete_stale_after_seconds: 1800.0,
             sampling_at: [
-                ("low", 10000000),
-                ("medium", 2000000),
-                ("high", 1000000),
-                ("critical", 500000),
-            ].into_iter().map(|(name, value)|(name.to_owned(), value)).collect(),
+                (Priority::Low, 10000000),
+                (Priority::Medium, 2000000),
+                (Priority::High, 1000000),
+                (Priority::Critical, 500000),
+            ].into_iter().collect(),
             max_inflight: 5000
         }
     }

@@ -59,7 +59,7 @@ impl std::error::Error for ModelError {}
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// Uppercase String
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct UpperString {
     value: String

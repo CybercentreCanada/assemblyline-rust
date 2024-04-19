@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use assemblyline_models::datastore::filescore::FileScore;
+use assemblyline_models::datastore::user::User;
 use assemblyline_models::JsonMap;
 use assemblyline_models::datastore::{File, Submission, Error as ErrorModel, Service};
 use chrono::{Duration, DateTime, Utc};
@@ -406,7 +407,7 @@ pub struct Elastic {
     es: Arc<ElasticHelper>,
     pub file: Collection<File>,
     pub submission: Collection<Submission>,
-    // pub user: Collection<User>,
+    pub user: Collection<User>,
     pub error: Collection<ErrorModel>,
 
     /// Unmodified default service data classes
@@ -689,6 +690,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
         Ok(ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await?)
     }
 
+    
 
 }
 

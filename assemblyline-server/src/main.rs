@@ -16,6 +16,7 @@ use redis_objects::{Queue, RedisObjects};
 
 mod ingester;
 mod submission_common;
+mod dispatcher_common;
 // mod dispatcher;
 // mod postprocessing;
 mod elastic;
