@@ -1,0 +1,15 @@
+[package]
+name = "env_template"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
+description = """Tool for applying environment variables to configuration files."""
+
+
+[dependencies]
+regex = "1.10"
+
+[dev-dependencies]
+serde_json = "1.0.116"
