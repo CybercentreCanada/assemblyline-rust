@@ -4,9 +4,11 @@ use std::str::FromStr;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use assemblyline_models::messages::ArchiveAction;
 use assemblyline_models::{JsonMap, Sid};
 use bytes::Bytes;
-use rand::Rng;
+use anyhow::Result;
+use rand::{thread_rng, Rng};
 use tokio::sync::mpsc;
 // use anyhow::Result;
 use itertools::Itertools;
@@ -15,9 +17,11 @@ use redis_objects::{Hashmap, PriorityQueue, Queue, RedisObjects};
 use serde_json::json;
 use tokio::sync::RwLock;
 
-use assemblyline_models::config::{default_postprocess_actions, PostprocessAction, Webhook};
+use assemblyline_models::config::{default_postprocess_actions, Config, PostprocessAction, Webhook};
 
+use crate::archive::ArchiveManager;
 use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH_NAME, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
+use crate::Core;
 // use crate::datastore::Datastore;
 // use crate::models::JsonValue;
 // use crate::models::action::{PostProcessAction, Webhook};
@@ -30,7 +34,6 @@ mod search;
 #[cfg(test)]
 mod tests;
 
-use self::search::CacheAvailabilityStatus;
 pub use self::search::{Query, parse};
 
 
@@ -45,10 +48,10 @@ struct SubmissionFilter {
 impl SubmissionFilter {
     fn new(expression: &str) -> Result<Self, ParsingError> {
         let operation: Query = parse(expression)?;
-        Ok(Self { operation, cache_safe: operation.cache_safe().can_run() })
+        Ok(Self { cache_safe: operation.cache_safe().can_run(), operation })
     }
 
-    pub fn test(self, data: &serde_json::Value) -> Result<bool, ParsingError> {
+    pub fn test(&self, data: &serde_json::Value) -> Result<bool, ParsingError> {
         self.operation.test(data)
     }
 }
@@ -79,7 +82,7 @@ fn should_resubmit(score: f64, shift: f64) -> bool {
 
 pub struct ActionWorker {
     // Configuration
-    // config: Arc<Config>,
+    config: Arc<Config>,
     running_cache_tasks: bool,
     actions: RwLock<Arc<HashMap<String, (SubmissionFilter, PostprocessAction)>>>,
 
@@ -87,21 +90,24 @@ pub struct ActionWorker {
     config_data: Hashmap<serde_json::Value>,
     unique_queue: PriorityQueue<serde_json::Value>,
     alert_queue: Queue<serde_json::Value>,
+    archive_manager: ArchiveManager
 }
 
 impl ActionWorker {
-    pub async fn new(cache: bool, redis_volatile: Arc<RedisObjects>, redis_persist: Arc<RedisObjects>) -> Result<Arc<Self>, PostprocessingError> {
+    pub async fn new(cache: bool, core: &Core) -> Result<Arc<Self>> {
         // Setup the object
         let worker = Arc::new(Self {
+            config: core.config.clone(),
             running_cache_tasks: cache,
             actions: Default::default(),
-            unique_queue: redis_persist.priority_queue(INGEST_INTERNAL_QUEUE_NAME.to_owned()),
-            alert_queue: redis_persist.queue(ALERT_QUEUE_NAME.to_owned(), None),
-            config_data: redis_persist.hashmap(CONFIG_HASH_NAME.to_owned(), None),
+            unique_queue: core.redis_persistant.priority_queue(INGEST_INTERNAL_QUEUE_NAME.to_owned()),
+            alert_queue: core.redis_persistant.queue(ALERT_QUEUE_NAME.to_owned(), None),
+            config_data: core.redis_persistant.hashmap(CONFIG_HASH_NAME.to_owned(), None),
+            archive_manager: ArchiveManager::new(core),
         });
 
         // Make sure we load any changed actions
-        let reload_watcher = redis_volatile.subscribe("system.postprocess".to_owned());
+        let reload_watcher = core.redis_volatile.subscribe("system.postprocess".to_owned());
         tokio::spawn(Self::watch_actions_pubsub(reload_watcher, Arc::downgrade(&worker)));
 
         // Load the current actions
@@ -109,7 +115,7 @@ impl ActionWorker {
         return Ok(worker)
     }
 
-    async fn watch_actions_pubsub(mut reload_watcher: mpsc::Receiver<redis_objects::Msg>, worker: Weak<Self>) {
+    async fn watch_actions_pubsub(mut reload_watcher: mpsc::Receiver<Option<redis_objects::Msg>>, worker: Weak<Self>) {
         loop {
             if reload_watcher.recv().await.is_none() {
                 return
@@ -125,7 +131,7 @@ impl ActionWorker {
         }
     }
 
-    async fn load_actions(&self) -> Result<(), PostprocessingError> {
+    async fn load_actions(&self) -> Result<()> {
         // Load the action data from redis
         let data = self.config_data.get_raw(POST_PROCESS_CONFIG_KEY).await?;
 
@@ -187,30 +193,30 @@ impl ActionWorker {
         Ok(())
     }
 
-    pub async fn process_cachehit(self: &Arc<Self>, submission: &mut JsonMap, score: i32, force_archive: bool) -> Result<bool, PostprocessingError> {
+    pub async fn process_cachehit(self: &Arc<Self>, submission: JsonMap, score: i32, force_archive: bool) -> Result<bool> {
         self.process(submission, serde_json::Map::<String, serde_json::Value>::new().into(), score, force_archive).await
     }
 
-    pub async fn process(self: &Arc<Self>, submission: &mut JsonMap, tags: serde_json::Value, score: i32, force_archive: bool) -> Result<bool, PostprocessingError> {
+    /// Handle any postprocessing events for a submission.
+    /// Return bool indicating if a resubmission action has happened.
+    pub async fn process(self: &Arc<Self>, mut submission: JsonMap, tags: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
         // Add tags to submission
         submission.insert("tags".into(), tags);
 
         // run the post-processing, capture results for later
         let result = {
-            let mut submission = serde_json::Value::Object(*submission);
-            self._process(&mut submission, score, force_archive).await
+            let submission = serde_json::Value::Object(submission);
+            self._process(submission, score, force_archive).await
         };
 
-        // Clean up the tags from submission
-        submission.remove("tags");
+        // // Clean up the tags from submission
+        // submission.remove("tags");
 
         // return result captured
         return result;
     }
 
-    /// Handle any postprocessing events for a submission.
-    /// Return bool indicating if a resubmission action has happened.
-    pub async fn _process(self: &Arc<Self>, submission: &mut serde_json::Value, score: i32, force_archive: bool) -> Result<bool, PostprocessingError> {
+    async fn _process(self: &Arc<Self>, submission: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
         let mut archive_submission = force_archive;
         let mut create_alert = false;
         let mut resubmit: Option<HashSet<String>> = None;
@@ -276,14 +282,14 @@ impl ActionWorker {
                 extended_scan = "submitted";
 
                 info!("[{sid} :: {}] Resubmitted for extended analysis", submission_msg.files[0].sha256);
-                let resubmission = submission_msg.clone();
+                let mut resubmission = submission_msg.clone();
                 resubmission.params.psid = Some(sid);
-                resubmission.sid = Sid::random();
+                resubmission.sid = thread_rng().gen();
                 resubmission.scan_key = None;
                 resubmission.params.services.resubmit.clear();
-                resubmission.params.services.selected = Some(submit_to);
+                resubmission.params.services.selected = submit_to;
 
-                self.unique_queue.push(submission_msg.params.priority, &json!({
+                self.unique_queue.push(submission_msg.params.priority as f64, &json!({
                     "score": score,
                     "extended_scan": extended_scan,
                     "ingest_id": submission_msg.metadata.get("ingest_id"),
@@ -310,11 +316,13 @@ impl ActionWorker {
             if self.config.datastore.archive.enabled {
                 info!("[{sid} :: {}] Evaluating if the file can be moved to the malware archive", submission_msg.files[0].sha256);
 
-                let archive_result = self.archive_manager.archive_submission(submission_msg.as_primitives(), submission_msg.params.delete_after_archive);
-                if archive_result['action'] == "archive" {
-                    info!("[{sid} :: {}] Archiver was notified to copy the file in the malware archive", submission_msg.files[0].sha256);
-                } else {
-                    info!("[{sid} :: {}] The file was re-submitted for analysis because it does not meet the minimum service requirement", submission_msg.files[0].sha256);
+                let archive_result = self.archive_manager.archive_submission(&submission_msg, Some(submission_msg.params.delete_after_archive)).await?;
+                if let Some(archive_result) = archive_result {
+                    if archive_result.action == ArchiveAction::Archive {
+                        info!("[{sid} :: {}] Archiver was notified to copy the file in the malware archive", submission_msg.files[0].sha256);
+                    } else {
+                        info!("[{sid} :: {}] The file was re-submitted for analysis because it does not meet the minimum service requirement", submission_msg.files[0].sha256);
+                    }
                 }
             } else {
                 warn!("[{sid} :: {}] Trying to archive a submission on a system where archiving is disabled", submission_msg.files[0].sha256);
@@ -327,9 +335,9 @@ impl ActionWorker {
             "score": score,
             "submission": submission
         }))?);
-        let pool = tokio::task::JoinSet::new();
+        let mut pool = tokio::task::JoinSet::new();
         for hook in webhooks.into_iter() {
-            pool.spawn(self.process_hook(hook, sid.clone(), payload.clone()));
+            pool.spawn(self.clone().process_hook(hook, sid.clone(), payload.clone()));
         }
         while let Some(_) = pool.join_next().await { }
 
@@ -468,4 +476,4 @@ impl std::fmt::Display for ParsingError {
     }
 }
 
-// type Result<T, E=ParsingError> = std::result::Result<T, E>;
+impl std::error::Error for ParsingError {}

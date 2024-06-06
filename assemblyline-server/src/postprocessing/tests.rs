@@ -6,7 +6,7 @@ use chrono::{Utc, Duration};
 use poem::{listener::{Acceptor, Listener}, EndpointExt};
 use serde_json::json;
 
-use crate::postprocessing::{search::CacheAvailabilityStatus, ParsingError, PostprocessError};
+use crate::postprocessing::{search::CacheAvailabilityStatus, ParsingError};
 
 use super::parse;
 
@@ -137,8 +137,8 @@ fn test_date_boundaries() {
 
 #[test]
 fn test_bad_field_detection() {
-    assert_eq!(parse("max_score.pain:found").unwrap_err(), PostprocessError::SubmissionFilterUsesUnknownFields(vec!["max_score.pain".into()]));
-    assert_eq!(parse("max_score_pain:found").unwrap_err(), PostprocessError::SubmissionFilterUsesUnknownFields(vec!["max_score_pain".into()]));
+    assert_eq!(parse("max_score.pain:found").unwrap_err(), ParsingError::SubmissionFilterUsesUnknownFields(vec!["max_score.pain".into()]));
+    assert_eq!(parse("max_score_pain:found").unwrap_err(), ParsingError::SubmissionFilterUsesUnknownFields(vec!["max_score_pain".into()]));
 }
 
 #[test]
@@ -221,10 +221,10 @@ fn test_exists() {
     let fltr = parse("_exists_: metadata.other").unwrap();
     assert_eq!(fltr.cache_safe(), CacheAvailabilityStatus::Ok);
 
-    assert_eq!(parse("_exists_: nteohusotehuos").unwrap_err(), PostprocessError::SubmissionFilterUsesUnknownFields(vec!["nteohusotehuos".to_string()]));
+    assert_eq!(parse("_exists_: nteohusotehuos").unwrap_err(), ParsingError::SubmissionFilterUsesUnknownFields(vec!["nteohusotehuos".to_string()]));
     // assert_eq!(parse("_exists_: sid").unwrap_err(), PostprocessError::AlwaysTrue("_exists_: sid".to_string()));
 
-    assert_eq!(parse("cats OR _exists_: nteohusotehuos").unwrap_err(), PostprocessError::SubmissionFilterUsesUnknownFields(vec!["nteohusotehuos".to_string()]));
+    assert_eq!(parse("cats OR _exists_: nteohusotehuos").unwrap_err(), ParsingError::SubmissionFilterUsesUnknownFields(vec!["nteohusotehuos".to_string()]));
     // assert_eq!(parse("cats OR _exists_: sid").unwrap_err(), PostprocessError::AlwaysTrue("_exists_: sid".to_string()));
 
     let sub = json!({
@@ -302,6 +302,7 @@ async fn test_hook() {
             password: None,
             ca_cert: None,
             ssl_ignore_errors: false,
+            ssl_ignore_hostname: false,
             proxy: None,
             method: "POST".to_string(),
             username: None,
@@ -313,7 +314,7 @@ async fn test_hook() {
         archive_submission: false
     };
 
-    worker = ActionWorker(cache=False, config=config, datastore=datastore_connection, redis_persist=redis_connection)
+    // worker = ActionWorker(cache=False, config=config, datastore=datastore_connection, redis_persist=redis_connection);
 
     // worker.actions = {
     //     'action': (SubmissionFilter(action.filter), action)
