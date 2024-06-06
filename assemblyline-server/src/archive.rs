@@ -3,39 +3,36 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
-use assemblyline_models::{config::Config, messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage}};
+use assemblyline_models::config::Config;
+use assemblyline_models::messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage};
 use log::warn;
 use rand::{thread_rng, Rng};
-use redis_objects::Queue;
+use redis_objects::{Publisher, Queue};
 
 use crate::{constants::ARCHIVE_QUEUE_NAME, services::ServiceHelper, submit::SubmitManager, Core};
 
 
-struct ArchiveManager {
+pub struct ArchiveManager {
     config: Arc<Config>,
     submit: SubmitManager,
     services: ServiceHelper,
     archive_queue: Queue<(String, String, bool)>,
-    //             self.datastore = datastore or forge.get_datastore(self.config)
-//             redis_persistent = get_client(self.config.core.redis.persistent.host,
-//                                           self.config.core.redis.persistent.port, False)
-//             redis = get_client(self.config.core.redis.nonpersistent.host,
-//                                self.config.core.redis.nonpersistent.port, False)
-//             self.submission_traffic = CommsQueue('submissions', host=redis)
+    submission_traffic: Publisher,
 }
 
 
 impl ArchiveManager {
-    fn new(core: &Core) -> Self {
+    pub fn new(core: &Core) -> Self {
         Self {
             config: core.config.clone(),
             submit: SubmitManager::new(core),
             services: core.services.clone(), 
             archive_queue: core.redis_persistant.queue(ARCHIVE_QUEUE_NAME.to_owned(), None),
+            submission_traffic: core.redis_volatile.publisher("submissions".to_owned())
         }
     }
 
-    pub async fn archive_submission(&self, submission: Submission, delete_after: Option<bool>) -> Result<Option<ArchivedMessage>> {
+    pub async fn archive_submission(&self, submission: &Submission, delete_after: Option<bool>) -> Result<Option<ArchivedMessage>> {
         if !self.config.datastore.archive.enabled {
             warn!("Trying to archive a submission when archiving is disabled.");
             return Ok(None)
@@ -76,7 +73,7 @@ impl ArchiveManager {
             self.submission_traffic.publish(&SubmissionMessage::received(submission_obj, "archive".to_owned())).await?;
 
             // Update current record
-            self.datastore.submission.update(submission['sid'], [(ESCollection.UPDATE_SET, 'archived', True)])
+            self.datastore.submission.update(submission.sid, [(ESCollection.UPDATE_SET, 'archived', True)]).await?;
 
             return Ok(Some(ArchivedMessage::resubmit(sid)))
         }

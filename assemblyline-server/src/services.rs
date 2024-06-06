@@ -57,12 +57,11 @@ impl ServiceHelper {
         self.services.read().clone()
     }
 
+    /// get the list of services in each category
     pub fn categories(&self) -> HashMap<String, Vec<String>> {
-        let mut output = Default::default();
+        let mut output: HashMap<String, Vec<String>> = Default::default();
         for service in self.services.read().values() {
-            match output.entry(service.name.clone()) {
-
-            }
+            output.entry(service.category.clone()).or_default().push(service.name.clone());
         }
         output
     }
@@ -84,20 +83,22 @@ impl ServiceHelper {
         let mut found_services = vec![];
         let mut seen_categories = HashSet::<String>::new();
         while let Some(name) = services.pop() {
+
             // If we found a new category mix in it's content
             if let Some(category_services) = categories.get(&name) {
-                if !seen_categories.contains_key(&name) {
-                    // Add all of the items in this group to the list of
-                    // things that we need to evaluate, and mark this
-                    // group as having been seen.
-                    services.extend(category_services);
-                    seen_categories.insert(name)
-                }
+                // Check if we have already proceses this item
+                if seen_categories.contains(&name) { continue }
+
+                // Add all of the items in this group to the list of
+                // things that we need to evaluate, and mark this
+                // group as having been seen.
+                services.extend(category_services.iter().cloned());
+                seen_categories.insert(name);
                 continue
             }
 
             // If it isn't a category, its a service
-            found_services.append(name)
+            found_services.push(name)
         }
 
         // deduplicate the output

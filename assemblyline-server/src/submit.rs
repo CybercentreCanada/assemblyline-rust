@@ -20,7 +20,7 @@ use crate::Core;
 pub struct SubmitManager {
     datastore: Arc<Elastic>,
     config: Arc<Config>,
-    dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>,
+    pub dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>,
 }
 
 impl SubmitManager {

@@ -8,11 +8,19 @@
 #![allow(clippy::needless_return)]
 // #![allow(clippy::needless_return, clippy::while_let_on_iterator, clippy::collapsible_else_if)]
 
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
+use anyhow::Result;
 use assemblyline_models::config::Config;
+use clap::{Command, Parser, Subcommand};
 use elastic::Elastic;
-use redis_objects::{Queue, RedisObjects};
+use redis_objects::RedisObjects;
+use log::error;
+use services::ServiceHelper;
+use tokio::sync::Notify;
+
+use crate::logging::configure_logging;
 
 mod ingester;
 mod submit;
@@ -28,8 +36,91 @@ mod error;
 mod constants;
 
 
+#[derive(Debug, Parser)]
+#[command(name="assemblyline")]
+#[command(bin_name="assemblyline")]
+struct Args {
+    config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    pub command: Commands
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Ingester {
+        
+    }
+}
+
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    // Load CLI
+    let args = Args::parse();
+
+    // Load configuration
+    let config = load_configuration(args.config).await.expect("Could not load configuration");
+
+    // configure logging, the object returned here owns the log processing internals
+    // and needs to be held until the program ends
+    let log_manager = configure_logging(&config).expect("Could not configure logging");
+
+    // Connect to all the supporting components
+    let core = match Core::setup(config).await {
+        Ok(core) => core,
+        Err(err) => {
+            error!("Startup error: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // pick the module to launch
+    let result = match args.command {
+        Commands::Ingester {  } => {
+            crate::ingester::main(core).await
+        },
+    };
+
+    // log if the module failed
+    match result {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(err) => {
+            error!("{err}");
+            return ExitCode::FAILURE;
+        },
+    }
+}
+
+
+async fn load_configuration(path: Option<PathBuf>) -> Result<Arc<Config>> {
+    // figure out which file path to use
+    let path = match path {
+        Some(path) => path,
+        None => match std::env::var("ASSEMBLYLINE_CONFIG_PATH") {
+            Ok(path) => PathBuf::from(path),
+            Err(std::env::VarError::NotPresent) => PathBuf::from("/etc/assemblyline/config.yml"),
+            Err(err) => return Err(err.into())
+        }
+    };
+
+    // load environment variables into config
+    let body = tokio::fs::read_to_string(path).await?;
+    let body = environment_template::apply_env(&body)?;
+
+    // parse the configuration
+    Ok(Arc::new(serde_yaml::from_str(&body)?))
+}
+
+/// Common components, connections, and utilities that every core daemon is going to end up needing
+#[derive(Clone)]
 struct Core {
-    pub config: Config,
+    // flags
+    pub running: Arc<Flag>,
+    pub enabled: Arc<Flag>,
+
+    // universal configuration and connection objects
+    pub config: Arc<Config>,
     pub datastore: Arc<Elastic>,
     pub redis_persistant: Arc<RedisObjects>,
     pub redis_volatile: Arc<RedisObjects>,
@@ -39,60 +130,59 @@ struct Core {
     pub services: ServiceHelper,
 }
 
-#[tokio::main]
-async fn main() {
-    // Load configuration
-    todo!();
+impl Core {
+    /// Initialize connections to resources that everything uses
+    pub async fn setup(config: Arc<Config>) -> Result<Self> {
+        // connect to redis one
+        let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port)?;
 
-    // configure logging
-    todo!();
+        // connect to redis two
+        let redis_volatile = RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port)?;
 
-    // connect to redis one
-    let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port)?;
+        // connect to redis three
+        let redis_metrics = RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port)?;
 
-    // connect to redis two
-    let redis_volatile = RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port)?;
+        // connect to elastic
+        let datastore = Elastic::connect(&config.datastore.hosts[0], false).await?;
 
-    // connect to redis two
-    let redis_metrics = RedisObjects::open_host(&config.metrics.redis.host, config.metrics.redis.port)?;
-
-    // connect to elastic
-    let datastore = Elastic::connect(&config.datastore.hosts[0], false).await?;
-
-    // Initialize connections to resources that everything uses
-    let core = Core {
-        services: ServiceHelper::start(datastore.clone(), &redis_volatile).await?,
-        config,
-        datastore,
-        redis_persistant,
-        redis_volatile,
-        redis_metrics,
-    };
-
-    // pick the module to launch
-    todo!();
-}
-
-const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
-
-// spawn a task
-macro_rules! spawn_retry_forever {
-    ($source:ident, $name:expr, $method_name:ident) => {
-        tokio::spawn(async move {
-            while let Err(err) = $source.$method_name().await {
-                error!("Error in {}: {err}", $name);
-                $source.sleep(crate::ERROR_BACKOFF).await;
-            }
+        Ok(Core {
+            // start a daemon that keeps an up-to-date local cache of service info
+            services: ServiceHelper::start(datastore.clone(), &redis_volatile).await?,
+            config,
+            datastore,
+            redis_persistant,
+            redis_volatile,
+            redis_metrics,
+            running: Arc::new(Flag::new(true)),
+            enabled: Arc::new(Flag::new(true)),
         })
-    };
-    ($container:ident, $source:ident, $name:expr, $method_name:ident) => {
-        $container.push(($name.to_owned(), spawn_retry_forever!($source, $name, $method_name)))
     }
+    
 }
-use services::ServiceHelper;
-pub(crate) use spawn_retry_forever;
 
+struct Flag {
+    condition: tokio::sync::watch::Sender<bool>,
+}
 
-async fn await_tasks(tasks: Vec<(String, tokio::task::JoinHandle<()>)>) {
-    todo!()
+impl Flag {
+    pub fn new(value: bool) -> Self {
+        Flag { 
+            condition: tokio::sync::watch::channel(value).0,
+        }
+    }
+
+    pub fn read(&self) -> bool {
+        *self.condition.borrow()
+    }
+
+    pub fn set(&self, value: bool) {
+        self.condition.send_modify(|current| *current = value);
+    }
+
+    pub async fn wait_for(&self, value: bool) {
+        let mut watcher = self.condition.subscribe();
+        while *watcher.borrow_and_update() != value {
+            _ = watcher.changed().await;
+        }
+    }
 }

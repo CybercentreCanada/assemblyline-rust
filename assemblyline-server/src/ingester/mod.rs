@@ -4,13 +4,15 @@
 //! score received, possibly sending a message to indicate that an alert should
 //! be created.
 
-use std::borrow::BorrowMut;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use anyhow::Result;
 
+use anyhow::Result;
+use strum::IntoEnumIterator;
+
+use assemblyline_models::config::Priority;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
@@ -25,11 +27,12 @@ use rand::Rng;
 use redis_objects::queue::MultiQueue;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
 use tokio::sync::oneshot;
 
-use crate::constants::{Priority, COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
-use crate::{await_tasks, spawn_retry_forever, Core};
+use crate::constants::{COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
+use crate::postprocessing::ActionWorker;
+use crate::submit::SubmitManager;
+use crate::Core;
 
 mod http;
 
@@ -165,6 +168,26 @@ struct Ingester {
 
     // Utility object to handle post-processing actions
     postprocess_worker: Arc<ActionWorker>,
+    submit_manager: SubmitManager,
+}
+
+
+pub const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
+
+// This is a simple macro named `say_hello`.
+macro_rules! retry {
+    ($name: expr, $ingester: ident, $method: ident) => {
+        {
+            let name = $name;
+            let ingester: Arc<Ingester> = $ingester.clone();
+            async move {
+                while let Err(err) = ingester.clone().$method().await {
+                    error!("Error in {name}: {err}");
+                    ingester.sleep(ERROR_BACKOFF).await;
+                }        
+            }
+        }
+    };
 }
 
 pub async fn main(core: Core) -> Result<()> {
@@ -182,72 +205,73 @@ pub async fn main(core: Core) -> Result<()> {
         traffic_queue: core.redis_volatile.publisher("submissions".to_owned()),
         duplicate_queue: core.redis_persistant.multiqueue(_DUP_PREFIX.to_owned()),
         scanning: core.redis_persistant.hashmap("m-scanning-table".to_owned(), None),
-//         # Utility object to handle post-processing actions
-//         self.postprocess_worker = ActionWorker(cache=True, config=self.config, datastore=self.datastore,
-//                                                redis_persist=self.redis_persist)
-
-        core,
         cache: Mutex::new(Default::default()),
         user_groups: tokio::sync::Mutex::new(GroupCache{reset: current_hour(), cache: Default::default()}),
         queue_bypass: Mutex::new(Default::default()),
+        postprocess_worker: ActionWorker::new(true, &core).await?,
+        submit_manager: SubmitManager::new(&core),
+        core,
     });
 
-    let mut components = vec![];
+    let mut components = tokio::task::JoinSet::new();
 
     // Launch the http interface
-    components.push(("HTTP".to_owned(), http::start(ingester.clone())));
+    components.spawn(http::start(ingester.clone()));
 
     // Launch the redis interface to pull in new submissions
     for n in 0..ingest_threads()? {
-        spawn_retry_forever!(components, ingester, format!("Ingest {n}"), handle_ingest);
+        components.spawn(retry!(format!("Ingest {n}"), ingester, handle_ingest));
     }
 
     // Launch the redis interface to pull in complete submissions
     for n in 0..complete_threads()? {
-        spawn_retry_forever!(components, ingester, format!("Complete {n}"), handle_complete);
+        components.spawn(retry!(format!("Complete {n}"), ingester, handle_complete));
     }
 
     // Launch the submission agents
     let submitters = submit_threads()?;
     let redis_only = (submitters/4).max(1);
     for n in 0..redis_only {
-        spawn_retry_forever!(components, ingester, format!("Submit {n}"), handle_submit_redis);
+        components.spawn(retry!(format!("Submit {n}"), ingester, handle_submit_redis));
     }
     for n in redis_only..submitters {
-        spawn_retry_forever!(components, ingester, format!("Submit {n}"), handle_submit_internal);
+        components.spawn(retry!(format!("Submit {n}"), ingester, handle_submit_internal));
     }
 
     // Launch the retry handler
-    spawn_retry_forever!(components, ingester, "Retry Handler", handle_retries);
+    components.spawn(retry!(format!("Retry Handler"), ingester, handle_retries));
 
     // launch the timeout handler
-    spawn_retry_forever!(components, ingester, "Timeout Handler", handle_timeouts);
+    components.spawn(retry!(format!("Timeout Handler"), ingester, handle_timeouts));
 
     // Launch missing handler
-    spawn_retry_forever!(components, ingester, "Missing Handler", handle_missing);
+    components.spawn(retry!(format!("Missing Handler"), ingester, handle_missing));
 
     // Wait for all of these components to terminate
-    await_tasks(components).await; Ok(())
+    while components.join_next().await.is_some() {}
+    Ok(())
 }
+
+
 
 impl Ingester {
 
     #[must_use]
     pub fn is_running(&self) -> bool {
-        todo!();
+        self.core.running.read()
     }
 
     #[must_use]
     pub fn is_active(&self) -> bool {
-        todo!();
+        self.core.enabled.read()
     }
 
-    pub async fn while_running(&self, duration: Duration) {
-        todo!()
-    }
+    // pub async fn while_running(&self, duration: Duration) {
+        
+    // }
 
     pub async fn sleep(&self, duration: Duration) {
-        todo!();
+        _ = tokio::time::timeout(duration, self.core.running.wait_for(false)).await
     }
 
     async fn handle_ingest(self: Arc<Self>) -> Result<()> {
@@ -367,7 +391,7 @@ impl Ingester {
             // finalize will decide what to do, and put the task back in the queue
             // rewritten properly if we are going to run it again
             if let Some(previous) = previous {
-                let resubmit_empty = task.submission.params.services.resubmit.as_ref().map_or(true, |v|v.is_empty());
+                let resubmit_empty: bool = task.submission.params.services.resubmit.is_empty();
                 if !resubmit_empty && pprevious.is_none() {
                     warn!("No psid for what looks like a resubmission of {sha256}: {scan_key}");
                 }
@@ -496,7 +520,7 @@ impl Ingester {
 
             // Get jobs being processed by dispatcher or in dispatcher queue
             let mut assignment: HashMap<Sid, String> = Default::default();
-            for data in self.core.dispatch_submission_queue.content().await? {
+            for data in self.submit_manager.dispatch_submission_queue.content().await? {
                 assignment.insert(data.submission.sid, "".to_owned());
             }
             for dis in self.core.dispatcher_instances().await? {
@@ -753,8 +777,8 @@ impl Ingester {
             for level in Priority::iter() {
                 let (low, high) = level.range();
                 if low <= priority && priority <= high {
-                    if let Some(threshold) = sample_threshold.get(level) {
-                        dropped = must_drop(self.unique_queue.count(*low as f64, *high as f64).await?, *threshold);
+                    if let Some(threshold) = sample_threshold.get(&level) {
+                        dropped = must_drop(self.unique_queue.count(low as f64, high as f64).await?, *threshold);
                         break
                     }
                 }
@@ -786,7 +810,7 @@ impl Ingester {
         self.core.datastore.save_or_freshen_file(
             &sha256, 
             [("sha256".to_owned(), sha256)].into_iter().collect(), 
-            expiry, 
+            Some(expiry), 
             c12n, 
         ).await?;
         Ok(())
@@ -917,14 +941,14 @@ impl Ingester {
     fn stamp_filescore_key(task: &mut IngestTask, sha256: Option<Sha256>) -> String {
         let sha256 = match sha256 {
             Some(hash) => hash,
-            None => task.submission.files[0].sha256
+            None => task.submission.files[0].sha256.clone()
         };
 
-        match task.submission.scan_key {
-            Some(key) => key,
+        match &task.submission.scan_key {
+            Some(key) => key.clone(),
             None => {
                 let key = task.submission.params.create_filescore_key(&sha256, None);
-                task.submission.scan_key = Some(key);
+                task.submission.scan_key = Some(key.clone());
                 key
             }
         }
@@ -974,7 +998,7 @@ impl Ingester {
 
     async fn submit(&self, scan_key: String, task: Box<IngestTask>) -> Result<()> {
         let sha = task.submission.files[0].sha256.clone();
-        self.core.submit_prepared(
+        self.submit_manager.submit_prepared(
             task.submission,
             Some(COMPLETE_QUEUE_NAME.to_owned()),
         ).await?;
@@ -1014,7 +1038,7 @@ impl Ingester {
         task.submission.sid = sid;
 
         if cache {
-            did_resubmit = self.postprocess_worker.process_cachehit(task.submission, score)
+            let did_resubmit = self.postprocess_worker.process_cachehit(task.submission, score).await?;
 
             if did_resubmit {
                 task.extended_scan = ExtendedScanValues::Submitted;
@@ -1038,7 +1062,7 @@ impl Ingester {
                     return Some(task)
                 }
             }
-            _ = self.while_running(Duration::from_secs(120)) => {}
+            _ = self.sleep(Duration::from_secs(120)) => {}
         }
         
         // if its a timeout close the collector and check for a last minute value
@@ -1072,43 +1096,6 @@ impl Ingester {
     }
 
 }
-
-
-// import logging
-// import threading
-// import time
-// from os import environ
-// from random import random
-// from typing import Any, Iterable, List, Optional, Tuple
-
-// import elasticapm
-
-// from assemblyline.common.postprocess import ActionWorker
-// from assemblyline_core.server_base import ThreadedCoreBase
-// from assemblyline.common.metrics import MetricsFactory
-// from assemblyline.common.str_utils import dotdump, safe_str
-// from assemblyline.common.exceptions import get_stacktrace_info
-// from assemblyline.common.isotime import now, now_as_iso
-// from assemblyline.common.importing import load_module_by_path
-// from assemblyline.common import forge, exceptions, isotime
-// from assemblyline.datastore.exceptions import DataStoreException
-// from assemblyline.filestore import CorruptedFileStoreException, FileStoreException
-// from assemblyline.odm.models.filescore import FileScore
-// from assemblyline.odm.models.user import User
-// from 
-// from assemblyline.remote.datatypes.queues.named import NamedQueue
-// from assemblyline.remote.datatypes.queues.priority import PriorityQueue
-// from assemblyline.remote.datatypes.queues.comms import CommsQueue
-// from assemblyline.remote.datatypes.queues.multi import MultiQueue
-// from assemblyline.remote.datatypes.hash import Hash
-// from assemblyline import odm
-// from assemblyline.odm.models.submission import SubmissionParams, Submission as DatabaseSubmission
-// from assemblyline.odm.models.alert import EXTENDED_SCAN_VALUES
-// from assemblyline.odm.messages.submission import Submission as MessageSubmission, SubmissionMessage
-
-// from assemblyline_core.dispatching.dispatcher import Dispatcher
-// from assemblyline_core.submission_client import SubmissionClient
-
 
 
 /// To calculate the probability of dropping an incoming submission we compare
