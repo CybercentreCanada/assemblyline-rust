@@ -6,8 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# Utilities
+# Logging
 log = "*"
+flexi_logger = { version = "0.28", features=["syslog_writer"] }
+gethostname = "0.4"
+local-ip-address = "0.6"
+
+# Utilities
 chrono = "*"
 tempfile = "*"
 rand = "*"
@@ -15,8 +20,10 @@ itertools = "*"
 anyhow = "*"
 bytes = "*"
 parking_lot = "*"
-strum = "0.26"
+strum = { version = "0.26", features = ["derive"] }
 strum_macros = "0.26"
+environment_template = "0.1"
+clap = { version = "4.5", features = ["derive"] }
 
 # Core framework
 tokio = { version = "1", features = ["full"] }
@@ -39,7 +46,8 @@ elasticsearch = "8.5.0-alpha.1"
 redis-objects = { version = "*", path = "../redis-objects" }
 
 # Data managing
-assemblyline-models = { version = "0.1", path = "../assemblyline-models" }
+assemblyline-markings = { version = "0.1", path = "../assemblyline-markings" }
+assemblyline-models = { version = "0.1", path = "../assemblyline-models", features = ["rand"] }
 struct-metadata = "*"
 serde = { version = "*", features = ["derive", "rc"] }
 serde_json = "*"
