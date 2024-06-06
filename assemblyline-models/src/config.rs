@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
@@ -1037,37 +1037,67 @@ impl Default for Datastore {
 //     "storage": ["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False"]
 // }
 
+#[derive(Debug, strum::Display, SerializeDisplay, strum::EnumString, DeserializeFromStr)]
+#[strum(serialize_all="UPPERCASE", ascii_case_insensitive)]
+pub enum LogLevel {
+    Debug, 
+    Info,
+    Warning,
+    Error,
+    Critical,
+    Disabled,
+}
 
-// @odm.model(index=False, store=False, description="Model Definition for the Logging Configuration")
-// class Logging(odm.Model):
-//     log_level: str = odm.Enum(values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "DISABLED"],
-//                               description="What level of logging should we have?")
-//     log_to_console: bool = odm.Boolean(description="Should we log to console?")
-//     log_to_file: bool = odm.Boolean(description="Should we log to files on the server?")
-//     log_directory: str = odm.Keyword(description="If `log_to_file: true`, what is the directory to store logs?")
-//     log_to_syslog: bool = odm.Boolean(description="Should logs be sent to a syslog server?")
-//     syslog_host: str = odm.Keyword(description="If `log_to_syslog: true`, provide hostname/IP of the syslog server?")
-//     syslog_port: int = odm.Integer(description="If `log_to_syslog: true`, provide port of the syslog server?")
-//     export_interval: int = odm.Integer(description="How often, in seconds, should counters log their values?")
-//     log_as_json: bool = odm.Boolean(description="Log in JSON format?")
-//     heartbeat_file: str = odm.Optional(
-//         odm.Keyword(),
-//         description="Add a health check to core components.<br>"
-//         "If `true`, core components will touch this path regularly to tell the container environment it is healthy")
+#[derive(Debug, Serialize, Deserialize)]
+pub enum SyslogTransport {
+    Udp,
+    Tcp
+}
 
+/// Model Definition for the Logging Configuration
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Logging {
+    /// What level of logging should we have?
+    pub log_level: LogLevel,
+    /// Should we log to console?
+    pub log_to_console: bool,
+    /// Should we log to files on the server?
+    pub log_to_file: bool,
+    /// If `log_to_file: true`, what is the directory to store logs?
+    pub log_directory: PathBuf,
+    /// Should logs be sent to a syslog server?
+    pub log_to_syslog: bool,
+    /// If `log_to_syslog: true`, provide hostname/IP of the syslog server?
+    pub syslog_host: String,
+    /// If `log_to_syslog: true`, provide port of the syslog server?
+    pub syslog_port: u16,
+    /// If `log_to_syslog: true`, provide transport for syslog server?
+    pub syslog_transport: SyslogTransport,
+    // /// How often, in seconds, should counters log their values?
+    // pub export_interval: int = odm.Integer(")
+    /// Log in JSON format?
+    pub log_as_json: bool,
+    // /// Add a health check to core components.<br>If `true`, core components will touch this path regularly to tell the container environment it is healthy
+    // pub heartbeat_file: str = odm.Optional(odm.Keyword(),")
+}
 
-// DEFAULT_LOGGING = {
-//     "log_directory": "/var/log/assemblyline/",
-//     "log_as_json": True,
-//     "log_level": "INFO",
-//     "log_to_console": True,
-//     "log_to_file": False,
-//     "log_to_syslog": False,
-//     "syslog_host": "localhost",
-//     "syslog_port": 514,
-//     "export_interval": 5,
-//     "heartbeat_file": "/tmp/heartbeat"
-// }
+impl Default for Logging {
+    fn default() -> Self {
+        Self { 
+            log_directory: "/var/log/assemblyline/".into(),
+            log_as_json: true,
+            log_level: LogLevel::Info,
+            log_to_console: true,
+            log_to_file: false,
+            log_to_syslog: false,
+            syslog_host: "localhost".to_owned(),
+            syslog_port: 514,
+            syslog_transport: SyslogTransport::Tcp,
+            // export_interval: 5,
+            // heartbeat_file: "/tmp/heartbeat"
+        }
+    }
+}
 
 // SERVICE_CATEGORIES = [
 //     'Antivirus',
@@ -1620,8 +1650,8 @@ pub struct Config {
     // pub datasources: HashMap<String, Datasource>,
     // /// Filestore configuration
     // pub filestore: Filestore,
-    // /// Logging configuration
-    // pub logging: Logging,
+    /// Logging configuration
+    pub logging: Logging,
     // /// Service configuration
     // pub services: Services,
     // /// System configuration

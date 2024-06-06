@@ -14,7 +14,7 @@ pub struct SubmissionDispatchMessage {
     pub completed_queue: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all="lowercase")]
 pub enum ArchiveAction {
     Archive,
