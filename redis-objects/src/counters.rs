@@ -150,8 +150,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
                 return true
             }
         } 
-        return false 
-        
+        false 
     }
 
     fn is_all_zero(&self, obj: &serde_json::Value) -> bool {
@@ -328,7 +327,7 @@ async fn auto_exporting_counter() {
 
         // Send a non default quantity via timer
         increment!(counter, started, 5);
-        assert_eq!(subscribe.recv().await.unwrap().unwrap().unwrap(), MetricKind{started: 5, finished: 0});
+        assert_eq!(subscribe.recv().await.unwrap().unwrap(), MetricKind{started: 5, finished: 0});
     }
 
     {   
@@ -348,7 +347,7 @@ async fn auto_exporting_counter() {
         increment!(counter, started);
         increment!(counter, finished);
         counter.export();
-        assert_eq!(subscribe.recv().await.unwrap().unwrap().unwrap(), MetricKind{started: 2, finished: 1});
+        assert_eq!(subscribe.recv().await.unwrap().unwrap(), MetricKind{started: 2, finished: 1});
 
         // send a message and let the drop signal an export
         increment!(counter, finished, 5);
@@ -356,7 +355,7 @@ async fn auto_exporting_counter() {
     }
 
     let result = tokio::time::timeout(Duration::from_secs(10), subscribe.recv()).await.unwrap();
-    assert_eq!(result.unwrap().unwrap().unwrap(), MetricKind{started: 0, finished: 6});
+    assert_eq!(result.unwrap().unwrap(), MetricKind{started: 0, finished: 6});
 }
 
     

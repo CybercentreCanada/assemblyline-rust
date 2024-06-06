@@ -21,14 +21,12 @@ use tokio::sync::mpsc;
 pub use self::queue::PriorityQueue;
 pub use self::queue::Queue;
 pub use self::quota::QuotaGuard;
-pub use self::events::EventWatcher;
 pub use self::hashmap::Hashmap;
 pub use self::counters::{AutoExportingMetrics, AutoExportingMetricsBuilder, MetricMessage};
 pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder, Publisher};
 
 pub mod queue;
 pub mod quota;
-pub mod events;
 pub mod hashmap;
 pub mod counters;
 pub mod pubsub;

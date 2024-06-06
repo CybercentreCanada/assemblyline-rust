@@ -36,25 +36,23 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
     async fn conditional_expire(&self) -> Result<(), ErrorTypes> {
         // load the ttl of this object has one set
         if let Some(ttl) = self.ttl {
-            // the last expire time is behind a mutex so that the queue object is threadsafe
-            let mut last_expire_time = self.last_expire_time.lock().unwrap();
+            {
+                // the last expire time is behind a mutex so that the queue object is threadsafe
+                let mut last_expire_time = self.last_expire_time.lock().unwrap();
 
-            // figure out if its time to update the expiry, wait until we are half way through the
-            // ttl to avoid resetting something only milliseconds old
-            let call = match *last_expire_time {
-                Some(time) => {
-                    time.elapsed() > (ttl / 2)
-                },
-                None => true // always update the expiry if we haven't run it before on this object
-            };
+                // figure out if its time to update the expiry, wait until we are half way through the
+                // ttl to avoid resetting something only milliseconds old
+                if let Some(time) = *last_expire_time {
+                    if time.elapsed() < (ttl / 2) {
+                        return Ok(())
+                    }
+                };
 
-            if call {
                 // update the time in the mutex then drop it so we aren't holding the lock 
                 // while we make the call to the redis server
                 *last_expire_time = Some(std::time::Instant::now());
-                drop(last_expire_time);
-                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
             }
+            retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
         }
         Ok(())
     }
