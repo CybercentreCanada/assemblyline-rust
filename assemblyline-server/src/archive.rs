@@ -9,11 +9,14 @@ use log::warn;
 use rand::{thread_rng, Rng};
 use redis_objects::{Publisher, Queue};
 
+use crate::elastic::collection::OperationBatch;
+use crate::elastic::Elastic;
 use crate::{constants::ARCHIVE_QUEUE_NAME, services::ServiceHelper, submit::SubmitManager, Core};
 
 
 pub struct ArchiveManager {
     config: Arc<Config>,
+    datastore: Arc<Elastic>,
     submit: SubmitManager,
     services: ServiceHelper,
     archive_queue: Queue<(String, String, bool)>,
@@ -25,6 +28,7 @@ impl ArchiveManager {
     pub fn new(core: &Core) -> Self {
         Self {
             config: core.config.clone(),
+            datastore: core.datastore.clone(),
             submit: SubmitManager::new(core),
             services: core.services.clone(), 
             archive_queue: core.redis_persistant.queue(ARCHIVE_QUEUE_NAME.to_owned(), None),
@@ -73,7 +77,9 @@ impl ArchiveManager {
             self.submission_traffic.publish(&SubmissionMessage::received(submission_obj, "archive".to_owned())).await?;
 
             // Update current record
-            self.datastore.submission.update(submission.sid, [(ESCollection.UPDATE_SET, 'archived', True)]).await?;
+            let mut batch = OperationBatch::default();
+            batch.set("archived".to_owned(), serde_json::Value::Bool(true));
+            self.datastore.submission.update(&submission.sid.to_string(), batch, None).await?;
 
             return Ok(Some(ArchivedMessage::resubmit(sid)))
         }

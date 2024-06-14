@@ -177,7 +177,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.7.0",
- "struct-metadata",
+ "struct-metadata 0.2.0",
  "strum 0.26.2",
 ]
 
@@ -194,7 +194,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 3.7.0",
- "struct-metadata",
+ "struct-metadata 0.1.5",
  "strum 0.25.0",
 ]
 
@@ -213,6 +213,7 @@ dependencies = [
  "flexi_logger",
  "futures",
  "gethostname",
+ "http",
  "hyper-rustls 0.23.2",
  "itertools 0.12.1",
  "local-ip-address",
@@ -229,11 +230,13 @@ dependencies = [
  "rustls 0.20.9",
  "serde",
  "serde_json",
+ "serde_with 3.7.0",
  "serde_yaml",
- "struct-metadata",
+ "struct-metadata 0.2.0",
  "strum 0.26.2",
  "strum_macros 0.26.2",
  "tempfile",
+ "thiserror",
  "tokio",
  "tokio-tungstenite",
  "url",
@@ -2293,7 +2296,18 @@ checksum = "3d82a8c46bc4cea7a0972a7c740bdb0784a8c537896d2ba46fc36efb6bbf523b"
 dependencies = [
  "chrono",
  "serde_json",
- "struct-metadata-derive",
+ "struct-metadata-derive 0.1.1",
+]
+
+[[package]]
+name = "struct-metadata"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be33d975f93a66554a1a5d45deec983e1fba16bb2ab7b15842712f6e82e4702d"
+dependencies = [
+ "chrono",
+ "serde_json",
+ "struct-metadata-derive 0.2.0",
 ]
 
 [[package]]
@@ -2306,6 +2320,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "struct-metadata-derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c28f87444e767fbabc83ee69faf87de0f9ee904fe6463263f89a23f6753360"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.59",
 ]
 
 [[package]]

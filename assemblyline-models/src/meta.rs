@@ -2,10 +2,42 @@ use std::collections::{HashMap, BTreeMap};
 
 use serde::{Serialize, Deserialize};
 use serde_json::json;
-use struct_metadata::{Described, Entry, Kind, MetadataKind};
+use struct_metadata::{Described, Descriptor, Entry, Kind, MetadataKind};
 
 use crate::JsonMap;
 
+
+
+/// Retrieve all subfields recursively flattened into a single listing.    
+/// 
+/// This method loses information about whether a field is optional or part of a sequence.   
+pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, (&Descriptor<ElasticMeta>, bool)> {    
+    match &target.kind {
+        Kind::Struct { children , ..} => {
+            let mut fields = HashMap::<_, _>::new();
+            for child in children {
+                for (mut path, (subfield, multivalued)) in flatten_fields(&child.type_info) {
+                    let mut label = vec![child.label.to_owned()];
+                    if !path.is_empty() {
+                        label.append(&mut path);
+                    }
+                    fields.insert(label, (subfield, multivalued));
+                }
+            }
+            fields
+        },
+        Kind::Sequence(kind) => {
+            let mut fields = flatten_fields(kind);
+            for row in fields.iter_mut() {
+                row.1.1 = true
+            }
+            fields
+        }
+        Kind::Option(kind) |
+        Kind::Aliased { kind, .. } => flatten_fields(kind),
+        _ => [(vec![], (target, false))].into_iter().collect(),
+    }
+}
 
 /// Metadata fields required for converting the structs to elasticsearch mappings
 #[derive(Default, PartialEq, Eq, Debug)]
@@ -439,6 +471,7 @@ fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
         Kind::F32 => Some("float"),
         Kind::Bool => Some("boolean"),
         Kind::Any => Some("keyword"),
+        _ => todo!(),
     }
     // Text: 'text',
     // Classification: 'keyword',

@@ -1,14 +1,19 @@
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use assemblyline_models::JsonMap;
+use assemblyline_models::meta::flatten_fields;
+use assemblyline_models::{ElasticMeta, JsonMap};
+use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
+use struct_metadata::Described;
 
+use crate::elastic::{DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
 use crate::error::{Result, Error as ErrorKind};
 
-use super::{ElasticHelper, Index, with_retries_raise_confict};
+use super::{ElasticHelper, Index, with_retries_raise_confict, with_retries_on};
 
 const DEFAULT_SORT: &str = "_id: asc";
 
@@ -26,7 +31,7 @@ pub struct Collection<T: Serialize + DeserializeOwned> {
 
 impl<T: Serialize + DeserializeOwned> Collection<T> {
 
-    fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>) -> Self {
+    pub fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>) -> Self {
         Collection {
             database: es,
             name,
@@ -220,8 +225,370 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
 
         Ok(ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await?)
     }
+
+
+    pub async fn update(&self, id: &str, operations: OperationBatch, index_type: Option<Index>) -> Result<()> {
+        operations.validate_operations()?;
+        let operations = operations.to_script();
+        let es = self.database.es.read().await;
+
+        // for index in self.get_index_list(index_type)? {
+        //     let update = es.update(elasticsearch::UpdateParts::IndexId(&index, id)).body(operations).send().await;
+        //     let error = match update {
+        //         Ok(value)
+        //     }
+        // }
+
+        todo!()
+    }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum UpdateOperation {
+    Append,
+    AppendIfMissing,
+    Dec,
+    Inc,
+    Max,
+    Min,
+    Prepend,
+    PrependIfMissing,
+    Remove,
+    Set,
+    Delete,
+}
+
+
+enum InvalidOperationError {
+    // field not found
+    InvalidField { field: String, model: String },
+    // raise DataStoreException(f"Invalid operation for field {doc_key}: {op}")
+    InvalidOperation { field: String, operation: UpdateOperation },
+    // (f"Invalid value for field {doc_key}: {value}")
+    Value { field: String, value: String }
+}
+
+#[derive(Default)]
+pub struct OperationBatch {
+    operations: Vec<(UpdateOperation, String, serde_json::Value)>,
+}
+
+impl OperationBatch {
+
+    pub fn set(&mut self, field: String, value: serde_json::Value) {
+        self.operations.push((UpdateOperation::Set, field, value))
+    }
+
+    // Validate the different operations received for a partial update
+    //
+    // TODO: When the field is of type Mapping, the validation/check only works for depth 1. A full recursive
+    //       solution is needed to support multi-depth cases.
+    pub fn validate_operations<Model: Described<ElasticMeta>>(&mut self) -> Result<(), InvalidOperationError> {
+
+        // if self.model_class:
+        //     fields = self.model_class.flat_fields(show_compound=True)
+        //     if 'classification in fields':
+        //         fields.update({"__access_lvl__": Integer(),
+        //                        "__access_req__": List(Keyword()),
+        //                        "__access_grp1__": List(Keyword()),
+        //                        "__access_grp2__": List(Keyword())})
+        // else:
+        //     fields = None
+        let metadata = Model::metadata();
+        let model_name = metadata.kind.name().to_owned();
+        let fields = flatten_fields(&metadata);
+        let fields: HashMap<String, _> = fields.into_iter()
+            .map(|(key, value)|(key.join("."), value))
+            .collect();
+
+        for (op, doc_key, value) in &mut self.operations {
+
+            let (field, multivalued) = match fields.get(doc_key) {
+                Some(field) => *field,
+                None => {
+                    // let prev_key = None;
+                    if let Some((prev_key, _)) = doc_key.rsplit_once('.') {
+                        if let Some((field, multivalued)) = fields.get(prev_key) {
+                            if let struct_metadata::Kind::Mapping(kind, ..) = &field.kind {
+                                (kind.as_ref(), *multivalued)
+                            } else {
+                                return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
+                            }
+                        } else {
+                            return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
+                        }        
+                    } else {
+                        return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
+                    }    
+                }
+            };
+
+            match op {
+                UpdateOperation::Append | UpdateOperation::AppendIfMissing |
+                UpdateOperation::Prepend | UpdateOperation::PrependIfMissing |
+                UpdateOperation::Remove => {
+                    if !multivalued {
+                        return Err(InvalidOperationError::InvalidOperation{ field: doc_key.to_owned(), operation: *op });
+                    }
+
+                    if check_type(&field.kind, value).is_err() {
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                    }
+                }
+
+                UpdateOperation::Dec |
+                UpdateOperation::Inc => {
+                    if check_type(&field.kind, value).is_err() {
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                    }
+                }
+
+                UpdateOperation::Set => {
+                    if multivalued && value.is_array() {
+                        for value in value.as_array_mut().unwrap() {
+                            if check_type(&field.kind, value).is_err() {
+                                return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                            }        
+                        }
+                    } else if check_type(&field.kind, value).is_err() {
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                    }
+                }
+
+                UpdateOperation::Max => {},
+                UpdateOperation::Min => {},
+                UpdateOperation::Delete => {},
+            }
+
+            // if isinstance(value, Model):
+            //     value = value.as_primitives()
+            // elif isinstance(value, datetime):
+            //     value = value.isoformat()
+            // elif isinstance(value, ClassificationObject):
+            //     value = str(value)
+        }
+        Ok(())
+    }
+
+    pub fn to_script(&self) -> serde_json::Value {
+        let mut op_sources = vec![];
+        let mut op_params = HashMap::<String, serde_json::Value>::new();
+        let mut val_id = 0;
+        for (op, doc_key, value) in &self.operations {
+            match op {
+                UpdateOperation::Set => {
+                    op_sources.push(format!("ctx._source.{doc_key} = params.value{val_id}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Delete => {
+                    op_sources.push(format!("ctx._source.{doc_key}.remove(params.value{val_id})"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Append => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}} 
+                        ctx._source.{doc_key}.add(params.value{val_id})"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::AppendIfMissing => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}} 
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1) 
+                            {{ctx._source.{doc_key}.add(params.value{val_id})}}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Prepend => {
+                    op_sources.push(format!("ctx._source.{doc_key}.add(0, params.value{val_id})"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::PrependIfMissing => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1) 
+                            {{ctx._source.{doc_key}.add(0, params.value{val_id})}}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Remove => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) != -1) 
+                            {{ctx._source.{doc_key}.remove(ctx._source.{doc_key}.indexOf(params.value{val_id}))}}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Inc => {
+                    op_sources.push(format!("ctx._source.{doc_key} += params.value{val_id}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Dec => {
+                    op_sources.push(format!("ctx._source.{doc_key} -= params.value{val_id}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Max => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) < 0) 
+                            {{ctx._source.{doc_key} = params.value{val_id}}}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                },
+                UpdateOperation::Min => {
+                    op_sources.push(format!("
+                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) > 0) 
+                            {{ctx._source.{doc_key} = params.value{val_id}}}"));
+                    op_params.insert(format!("value{val_id}"), value.clone());
+                }
+            }
+
+            val_id += 1;
+        }
+
+        let joined_sources = op_sources.into_iter().join(";\n");
+
+        json!({
+            "lang": "painless",
+            "source": joined_sources.replace("};\n", "}\n"),
+            "params": op_params
+        })
+    }
+
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum CheckError {
+    #[error("{type_name} expected an {expected_type} but got {received_type}")]
+    Type { type_name: &'static str, expected_type: &'static str, received_type: &'static str },
+
+    #[error("{type_name} requires field {field}")]
+    MissingField{ type_name: &'static str, field: &'static str },
+
+    #[error("JSON object keys must be strings, {key_type} provided instead")]
+    JsonKeys{ key_type: &'static str },
+
+    #[error("{type_name} is unknown and unhandled")]
+    Unhandled{ type_name: &'static str },
+}
+
+impl CheckError {
+    fn expected_object(name: &'static str, received: &'static str) -> Self {
+        Self::Type { type_name: name, expected_type: "Object", received_type: received }
+    }
+    fn expected_array(name: &'static str, received: &'static str) -> Self {
+        Self::Type { type_name: name, expected_type: "Array", received_type: received }
+    }
+    fn rename(self, name: &'static str) -> Self {
+        match self {
+            CheckError::Type { type_name: _, expected_type, received_type } => CheckError::Type { type_name: name, expected_type, received_type },
+            CheckError::MissingField { type_name: _, field } => CheckError::MissingField { type_name: name, field },
+            CheckError::JsonKeys { key_type } => CheckError::JsonKeys { key_type },
+            CheckError::Unhandled { type_name: _ } => CheckError::Unhandled { type_name: name },
+        }
+    }
+}
+
+fn describe_value(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "Null",
+        serde_json::Value::Bool(_) => "Bool",
+        serde_json::Value::Number(_) => "Number",
+        serde_json::Value::String(_) => "String",
+        serde_json::Value::Array(_) => "Array",
+        serde_json::Value::Object(_) => "Object",
+    }
+}
+
+pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_json::Value) -> Result<(), CheckError> {
+    match kind {
+        struct_metadata::Kind::Struct { name, children } => {
+            // check that the value being read is an object
+            let map = match value.as_object_mut() {
+                Some(value) => value,
+                None => return Err(CheckError::expected_object(name, describe_value(value)))
+            };
+
+            let viewed = HashSet::new();
+
+            // ensure require fields are found
+            'fields: for field in children {
+                // try to find the field under each possible name for it
+                for alias in field.aliases() {
+                    if viewed.contains(alias) { continue }
+                    if let Some(entry) = map.get_mut(alias) {
+                        check_type(&field.type_info.kind, entry)?;
+                        viewed.insert(alias);
+                        continue 'fields
+                    }
+                }
+
+                // field not found, thats ok if the field has a default value
+                if field.has_default() {
+                    continue
+                }
+
+                // neither value nor default value can be found
+                return Err(CheckError::MissingField { type_name: name, field: field.label })
+            }
+
+            // remove extra fields
+            map.retain(|key, _| viewed.contains(key));
+            Ok(())
+        },
+        struct_metadata::Kind::Aliased { kind, name } => check_type(&kind.kind, value).map_err(|err|err.rename(name)),
+        struct_metadata::Kind::Enum { name, variants } => todo!(),
+        struct_metadata::Kind::Sequence(child) => {
+            // try the case where value is directly a sequence of type `child` items
+            let result = (|| {
+                let array = match value.as_array_mut() {
+                    Some(array) => array,
+                    None => return Err(CheckError::expected_array(kind.name(), describe_value(value)))
+                };
+
+                for item in array {
+                    check_type(&child.kind, item)?;
+                }
+                Ok(())
+            })();
+            
+            // if that failed, test if value is an instance of `child` directly and if so wrap it in an array
+            #[allow(clippy::collapsible_if)]
+            if result.is_err() {
+                if check_type(&child.kind, value).is_ok() {
+                    *value = serde_json::Value::Array(vec![*value]);
+                    return Ok(())
+                }
+            }
+            result
+        },
+        struct_metadata::Kind::Option(inner) => todo!(),
+        struct_metadata::Kind::Mapping(key_type, value_type) => {
+            // check that the value being read is an object
+            let map = match value.as_object_mut() {
+                Some(value) => value,
+                None => return Err(CheckError::expected_object(kind.name(), describe_value(value)))
+            };
+
+            if !key_type.is_string() {
+
+            }
+
+            for value in map.values_mut() {
+                check_type(value_type, value)?;
+            }
+        },
+        struct_metadata::Kind::DateTime => todo!(),
+        struct_metadata::Kind::String => todo!(),
+        struct_metadata::Kind::U128 => todo!(),
+        struct_metadata::Kind::I128 => todo!(),
+        struct_metadata::Kind::U64 => todo!(),
+        struct_metadata::Kind::I64 => todo!(),
+        struct_metadata::Kind::U32 => todo!(),
+        struct_metadata::Kind::I32 => todo!(),
+        struct_metadata::Kind::U16 => todo!(),
+        struct_metadata::Kind::I16 => todo!(),
+        struct_metadata::Kind::U8 => todo!(),
+        struct_metadata::Kind::I8 => todo!(),
+        struct_metadata::Kind::F64 => todo!(),
+        struct_metadata::Kind::F32 => todo!(),
+        struct_metadata::Kind::Bool => todo!(),
+        struct_metadata::Kind::Any => Ok(()),
+        _ => Err(CheckError::Unhandled { type_name: kind.name() }),
+    }
+}
 
 struct ScrollCursor<T: DeserializeOwned> {
     helper: Arc<ElasticHelper>,

@@ -4,7 +4,7 @@ use std::error::Error;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-mod collection;
+pub mod collection;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
@@ -12,6 +12,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::{JsonMap, Sha256};
 use assemblyline_models::datastore::{File, Submission, Error as ErrorModel, Service};
 use chrono::{Duration, DateTime, Utc};
+use collection::Collection;
 use elasticsearch::{Elasticsearch, http};
 use itertools::Itertools;
 use log::{info, warn};
@@ -73,13 +74,14 @@ fn parse_sort(sort: &str) -> Result<Vec<String>> {
 
 macro_rules! with_retries_on {
     ($helper:expr, $index_name:expr, $expression:expr) => {{
-        with_retries_detail!($helper, Some($index_name), false, $expression)
+        crate::elastic::with_retries_detail!($helper, Some($index_name), false, $expression)
     }}
 }
+use with_retries_on;
 
 macro_rules! with_retries_raise_confict {
     ($helper:expr, $index_name:expr, $expression:expr) => {{
-        with_retries_detail!($helper, Some($index_name), true, $expression)
+        crate::elastic::with_retries_detail!($helper, Some($index_name), true, $expression)
     }}
 }
 use with_retries_raise_confict;
@@ -87,13 +89,17 @@ use with_retries_raise_confict;
 /// This function evaluates the passed expression and reconnect if it fails
 macro_rules! with_retries_detail {
     ($helper:expr, $index_name:expr, $raise_conflicts:expr, $expression:expr) => {{
+        use log::{info, warn};
+        use std::error::Error;
+        use elasticsearch::http;
+
         let mut retries = 0;
         // let updated = 0;
         // let deleted = 0;
         loop {
             // If this isn't the first time we have tried, wait and reset the connection
             if retries > 0 {
-                let sleep_seconds = MAX_RETRY_BACKOFF.min(retries);
+                let sleep_seconds = crate::elastic::MAX_RETRY_BACKOFF.min(retries);
                 tokio::time::sleep(tokio::time::Duration::from_secs(sleep_seconds)).await;
                 $helper.connection_reset().await?;
             }
@@ -217,7 +223,7 @@ macro_rules! with_retries_detail {
         }
     }}
 }
-
+use with_retries_detail;
 
 
 /// Wrapper around the elasticsearch client for helper methods used across contexts
@@ -335,7 +341,6 @@ impl Elastic {
         Ok(services)
     }
 
-        
     pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, classification: String, cl_engine: ClassificationParser, is_section_image: Option<bool>) -> Result<()> {
         let is_section_image = is_section_image.unwrap_or(false);
         // Remove control fields from new file info
