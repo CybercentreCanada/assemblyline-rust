@@ -1,7 +1,7 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use assemblyline_markings::classification::NormalizeOptions;
+use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
@@ -13,6 +13,7 @@ pub mod serialize;
 pub mod meta;
 
 pub use meta::ElasticMeta;
+use validation_boilerplate::ValidatedDeserialize;
 
 pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
@@ -279,9 +280,7 @@ pub struct ExpandingClassification<const USER: bool=false> {
 }
 
 impl<const USER: bool> ExpandingClassification<USER> {
-    pub fn new(classification: String) -> Result<Self, ModelError> {
-        let parser = assemblyline_markings::get_default().ok_or(ModelError::ClassificationNotInitialized)?;
-
+    pub fn new(classification: String, parser: &ClassificationParser) -> Result<Self, ModelError> {
         if parser.original_definition.enforce {
             let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
             let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
@@ -309,18 +308,22 @@ impl<const USER: bool> ExpandingClassification<USER> {
     }
 }
 
-impl<'de, const USER: bool> Deserialize<'de> for ExpandingClassification<USER> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> 
-    {
-        #[derive(Deserialize)]
-        struct UncheckedClassification {
-            classification: String,
-        }
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UncheckedClassification {
+    classification: String,
+}
 
-        let unchecked = UncheckedClassification::deserialize(deserializer)?;
-        Self::new(unchecked.classification).map_err(serde::de::Error::custom)
+impl<const USER: bool> From<ExpandingClassification<USER>> for UncheckedClassification {
+    fn from(value: ExpandingClassification<USER>) -> Self {
+        UncheckedClassification { classification: value.classification }
+    }
+}
+
+impl<'de, const USER: bool> ValidatedDeserialize<'de, ClassificationParser> for ExpandingClassification<USER> {
+    type ProxyType = UncheckedClassification;
+
+    fn validate(input: Self::ProxyType, validator: &ClassificationParser) -> Result<Self, String> {
+        Self::new(input.classification, validator).map_err(|err| err.to_string())
     }
 }
 
@@ -342,10 +345,14 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
 #[metadata_type(ElasticMeta)]
 pub struct ClassificationString(String);
 
-impl ClassificationString {
-    pub fn new(classification: String) -> Result<Self, ModelError> {
-        let parser = assemblyline_markings::get_default().ok_or(ModelError::ClassificationNotInitialized)?;
+impl From<ClassificationString> for String {
+    fn from(value: ClassificationString) -> Self {
+        value.0
+    }
+}
 
+impl ClassificationString {
+    pub fn new(classification: String, parser: &ClassificationParser) -> Result<Self, ModelError> {
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
     }
 
@@ -354,11 +361,11 @@ impl ClassificationString {
     }
 }
 
-impl<'de> Deserialize<'de> for ClassificationString {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> {
-        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+impl<'de> ValidatedDeserialize<'de, ClassificationParser> for ClassificationString {
+    type ProxyType = String;
+
+    fn validate(input: Self::ProxyType, validator: &ClassificationParser) -> Result<Self, String> {
+        Self::new(input, validator).map_err(|err| err.to_string())
     }
 }
 

@@ -2,16 +2,19 @@
 
 use std::collections::HashMap;
 
+use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use struct_metadata::Described;
+use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Sha256, Sid, UpperString};
 
 
 /// Model of Submission
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone)]
+#[validated_deserialize(ClassificationParser, derive=(Serialize))]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Submission {
@@ -20,6 +23,7 @@ pub struct Submission {
     pub archived: bool,
     /// Classification of the submission
     #[serde(flatten)]
+    #[validate]
     pub classification: ExpandingClassification,
     /// Total number of errors in the submission
     pub error_count: i32,
@@ -40,6 +44,7 @@ pub struct Submission {
     #[metadata(store=false)]
     pub metadata: HashMap<String, String>,
     /// Submission parameter details
+    #[validate]
     pub params: SubmissionParams,
     /// List of result keys
     #[metadata(store=false)]
@@ -66,11 +71,13 @@ pub struct Submission {
 }
 
 /// Submission Parameters
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone)]
+#[validated_deserialize(ClassificationParser, derive=(Serialize, Debug, Clone))]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct SubmissionParams {
     /// classification of the submission
+    #[validate]
     pub classification: ClassificationString,
     /// Should a deep scan be performed?
     pub deep_scan: bool,
@@ -130,10 +137,11 @@ pub struct SubmissionParams {
     pub psid: Option<Sid>,
 }
 
-impl Default for SubmissionParams {
-    fn default() -> Self {
+
+impl SubmissionParams {
+    pub fn new(classification: ClassificationString) -> Self {
         Self {
-            classification: ClassificationString::new("".to_owned()).unwrap(),
+            classification,
             deep_scan: false,
             description: None,
             generate_alert: false,
@@ -160,9 +168,6 @@ impl Default for SubmissionParams {
             psid: None,
         }
     }
-}
-
-impl SubmissionParams {
 
     /// Get the sections of the submission parameters that should be used in result hashes.
     fn get_hashing_keys(&self) -> Vec<(String, serde_json::Value)> {

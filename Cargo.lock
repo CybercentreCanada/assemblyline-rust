@@ -121,7 +121,7 @@ name = "assemblyline-client"
 version = "0.1.12"
 dependencies = [
  "assemblyline-markings 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "assemblyline-models 0.1.21 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assemblyline-models 0.1.21",
  "async-recursion",
  "base64 0.21.7",
  "chrono",
@@ -167,23 +167,6 @@ dependencies = [
 [[package]]
 name = "assemblyline-models"
 version = "0.1.21"
-dependencies = [
- "assemblyline-markings 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "base62",
- "chrono",
- "md-5",
- "pretty_assertions",
- "rand",
- "serde",
- "serde_json",
- "serde_with 3.7.0",
- "struct-metadata 0.2.0",
- "strum 0.26.2",
-]
-
-[[package]]
-name = "assemblyline-models"
-version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caedd35358716531b517fa53ffaf8e23b21976de06c07b03f0d90f319aed088e"
 dependencies = [
@@ -199,12 +182,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemblyline-models"
+version = "1.0.0"
+dependencies = [
+ "assemblyline-markings 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "base62",
+ "chrono",
+ "md-5",
+ "pretty_assertions",
+ "rand",
+ "serde",
+ "serde_json",
+ "serde_with 3.7.0",
+ "struct-metadata 0.2.0",
+ "strum 0.26.2",
+ "validation-boilerplate",
+]
+
+[[package]]
 name = "assemblyline-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "assemblyline-markings 0.1.8",
- "assemblyline-models 0.1.21",
+ "assemblyline-models 1.0.0",
  "bytes",
  "chrono",
  "clap",
@@ -1818,6 +1819,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "validation-boilerplate",
 ]
 
 [[package]]
@@ -2794,6 +2796,23 @@ name = "utf8parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
+name = "validation-boilerplate"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "validation-boilerplate-derive",
+]
+
+[[package]]
+name = "validation-boilerplate-derive"
+version = "1.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.59",
+]
 
 [[package]]
 name = "vcpkg"

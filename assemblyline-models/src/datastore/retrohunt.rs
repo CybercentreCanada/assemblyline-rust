@@ -1,7 +1,9 @@
+use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
+use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{Sha256, ElasticMeta, ClassificationString, Text, ExpandingClassification};
 
@@ -15,16 +17,19 @@ pub enum IndexCatagory {
 }
 
 /// A search run on stored files.
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Retrohunt {
     /// Which archive catagories do we run on
     pub indices: IndexCatagory,
     /// Classification for the retrohunt job
+    #[validate]
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Maximum classification of results in the search
+    #[validate]
     pub search_classification: ClassificationString,
     /// User who created this retrohunt job
     #[metadata(copyto="__text__")]
@@ -73,13 +78,15 @@ pub struct Retrohunt {
 }
 
 /// A hit encountered during a retrohunt search.
-#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone, PartialEq, Eq)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct RetrohuntHit {
     /// Unique id identifying this retrohunt result
     pub key: String,
     /// Classification string for the retrohunt job and results list
+    #[validate]
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     pub sha256: Sha256,
@@ -94,14 +101,15 @@ mod test {
     use chrono::Utc;
 
     use super::RetrohuntHit;
+    use crate::serialize::from_json;
     use crate::{serialize::test::setup_classification, ExpandingClassification};
 
     #[test]
     fn hit_roundtrip(){
-        setup_classification();
+        let parser = setup_classification();
         let data = RetrohuntHit {
             key: "abc123".to_owned(),
-            classification: ExpandingClassification::new("L0".to_owned()).unwrap(),
+            classification: ExpandingClassification::new("L0".to_owned(), &parser).unwrap(),
             sha256: "cb3f7b194d220004ffa6eef1305849bcef38033c49cb1b16c5ab3c3d60bd9d20".parse().unwrap(),
             expiry_ts: Utc::now().into(),
             search: "search".to_owned(),
@@ -109,7 +117,7 @@ mod test {
 
         let json = serde_json::to_string_pretty(&data).unwrap();
         println!("{json}");
-        let data_copy = serde_json::from_str(&json).unwrap();
+        let data_copy = from_json(&json, &parser).unwrap();
         assert_eq!(data, data_copy);
     }
 }

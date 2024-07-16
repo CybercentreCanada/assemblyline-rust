@@ -3,10 +3,12 @@
 
 // Classification = forge.get_classification()
 
+use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
+use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{Uuid, ElasticMeta, ExpandingClassification};
 
@@ -32,13 +34,15 @@ pub enum Statuses {
 }
 
 /// Model of Workflow
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, ValidatedDeserialize, Described)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Workflow {
     /// Classification of the workflow
     #[metadata(copyto="__text__")]
     #[serde(flatten)]
+    #[validate]
     pub classification: ExpandingClassification,
     /// Creation date of the workflow
     pub creation_date: DateTime<Utc>,

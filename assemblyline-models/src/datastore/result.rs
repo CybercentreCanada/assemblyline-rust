@@ -10,10 +10,12 @@
 
 use std::collections::HashMap;
 
+use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
+use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{Sha256, ElasticMeta, ClassificationString, ExpandingClassification};
 
@@ -93,7 +95,8 @@ pub struct Heuristic {
 }
 
 /// Result Section
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Section {
@@ -104,6 +107,7 @@ pub struct Section {
     #[metadata(copyto="__text__")]
     pub body: Option<String>,
     /// Classification of the section
+    #[validate]
     pub classification: ClassificationString,
     /// Type of body in this section
     #[metadata(index=false)]
@@ -129,7 +133,8 @@ pub struct Section {
 }
 
 /// Result Body
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Default, Described)]
+#[validated_deserialize(ClassificationParser, derive=(Default))]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct ResultBody {
@@ -138,6 +143,7 @@ pub struct ResultBody {
     pub score: i64,
     /// List of sections
     #[serde(default)]
+    #[validate_iterator]
     pub sections: Vec<Section>,
 }
 
@@ -153,7 +159,8 @@ pub struct Milestone {
 }
 
 /// File related to the Response
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {
@@ -167,6 +174,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub description: String,
     /// Classification of the file
+    #[validate]
     pub classification: ClassificationString,
     /// Is this an image used in an Image Result Section?
     #[serde(default)]
@@ -182,7 +190,8 @@ pub struct File {
 fn default_file_parent_relation() -> String { "EXTRACTED".to_owned() }
 
 /// Response Body of Result
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct ResponseBody {
@@ -200,9 +209,11 @@ pub struct ResponseBody {
     pub service_tool_version: Option<String>,
     /// List of supplementary files
     #[serde(default)]
+    #[validate_iterator]
     pub supplementary: Vec<File>,
     /// List of extracted files
     #[serde(default)]
+    #[validate_iterator]
     pub extracted: Vec<File>,
     /// Context about the service
     #[metadata(index=false, store=false)]
@@ -213,11 +224,13 @@ pub struct ResponseBody {
 }
 
 /// Result Model
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, ValidatedDeserialize, Debug, Described)]
+#[validated_deserialize(ClassificationParser)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Result {
     /// Aggregate classification for the result
+    #[validate]
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Date at which the result object got created
@@ -226,8 +239,10 @@ pub struct Result {
     #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
     /// The body of the response from the service
+    #[validate]
     pub response: ResponseBody,
     /// The result body
+    #[validate]
     #[serde(default)]
     pub result: ResultBody,
     /// SHA256 of the file the result object relates to
