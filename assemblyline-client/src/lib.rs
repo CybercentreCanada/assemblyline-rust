@@ -123,7 +123,7 @@ mod tests {
         let mut prng = thread_rng();
         let length = 128 + prng.gen_range(0..256);
         while out.len() < length {
-            out.push(prng.gen());
+            out.push(prng.r#gen());
         }
         out
     }
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn search_single_page() {
         let client = prepare_client().await;
-        let batch: u64 = thread_rng().gen();
+        let batch: u64 = thread_rng().r#gen();
         let batch: String = batch.to_string();
 
         let _result = client.ingest.single()
