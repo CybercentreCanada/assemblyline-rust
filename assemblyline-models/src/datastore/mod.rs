@@ -7,6 +7,7 @@ pub mod result;
 pub mod tagging;
 pub mod file;
 pub mod service;
+pub mod service_delta;
 pub mod retrohunt;
 pub mod user;
 pub mod filescore;
@@ -19,6 +20,7 @@ pub use result::Result;
 pub use tagging::Tagging;
 pub use file::File;
 pub use service::Service;
+pub use service_delta::ServiceDelta;
 pub use retrohunt::{Retrohunt, RetrohuntHit};
 
 

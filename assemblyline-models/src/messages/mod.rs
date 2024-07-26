@@ -1,6 +1,4 @@
-use assemblyline_markings::classification::ClassificationParser;
 use serde::{Deserialize, Serialize};
-use validation_boilerplate::ValidatedDeserialize;
 
 use crate::Sid;
 
@@ -10,10 +8,8 @@ pub mod submission;
 pub mod ingest_heartbeat;
 
 
-#[derive(Serialize, ValidatedDeserialize)]
-#[validated_deserialize(ClassificationParser, derive=(Serialize))]
+#[derive(Serialize, Deserialize)]
 pub struct SubmissionDispatchMessage {
-    #[validate]
     pub submission: crate::datastore::Submission,
     pub completed_queue: Option<String>,
 }

@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use assemblyline_markings::classification::ClassificationParser;
 use serde::{Deserialize, Serialize};
-use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{ClassificationString, Sid};
 pub use crate::datastore::submission::{File, SubmissionParams};
@@ -26,8 +24,7 @@ pub struct Notification {
 }
 
 /// Submission Model
-#[derive(Serialize, ValidatedDeserialize, Debug, Clone)]
-#[validated_deserialize(ClassificationParser, derive=(Debug, Clone, Serialize))]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Submission {
     /// Submission ID to use
     pub sid: Sid,
@@ -40,7 +37,6 @@ pub struct Submission {
     /// Notification queue parameters
     pub notification: Notification,
     /// Parameters of the submission
-    #[validate]
     pub params: SubmissionParams,
     /// Key used to track groups of submissions ingester will see as duplicates
     pub scan_key: Option<String>,
@@ -75,11 +71,9 @@ impl Submission {
 
 
 /// Model of Submission Message
-#[derive(Serialize, ValidatedDeserialize)]
-#[validated_deserialize(ClassificationParser)]
+#[derive(Serialize, Deserialize)]
 pub struct SubmissionMessage {
     /// Body of the message
-    #[validate]
     pub msg: Submission,
     /// Class to use to load the message as an object
     #[serde(default="default_message_loader")]

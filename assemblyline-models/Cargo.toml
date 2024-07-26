@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-models"
-version = "1.0.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -18,10 +18,8 @@ md-5 = "0.10"
 
 strum = { version = "0.26", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
-struct-metadata = { version = "0.2", features = ["serde_json"] }
-validation-boilerplate = { version = "1.0", path = "../../struct-metadata/validation-boilerplate" }
-
-assemblyline-markings = { version = "0.1.5" }
+struct-metadata = { version = "1.0", features = ["serde_json"] }
+assemblyline-markings = { version = "0.1.8", path = "../assemblyline-markings" }
 
 rand = { version = "0.8", optional = true }
 

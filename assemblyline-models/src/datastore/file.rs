@@ -1,15 +1,13 @@
-use assemblyline_markings::classification::ClassificationParser;
+
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
-use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{ElasticMeta, ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
 
 /// Model of File
-#[derive(Debug, Serialize, ValidatedDeserialize, Described, Clone)]
-#[validated_deserialize(ClassificationParser)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct File {
@@ -18,7 +16,6 @@ pub struct File {
     pub ascii: String,
     /// Classification of the file
     #[serde(flatten)]
-    #[validate]
     pub classification: ExpandingClassification,
     /// Entropy of the file
     pub entropy: f32,
@@ -76,7 +73,6 @@ pub struct File {
     #[serde(default)]
     #[metadata(index=false, store=false)]
     pub from_archive: bool,
-
     /// URI structure to speed up specialty file searching
     pub uri_info: Option<URIInfo>,
     /// List of comments made on a file

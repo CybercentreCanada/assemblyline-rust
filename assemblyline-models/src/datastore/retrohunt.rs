@@ -1,9 +1,7 @@
-use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
-use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{Sha256, ElasticMeta, ClassificationString, Text, ExpandingClassification};
 
@@ -17,19 +15,16 @@ pub enum IndexCatagory {
 }
 
 /// A search run on stored files.
-#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone)]
-#[validated_deserialize(ClassificationParser)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Retrohunt {
     /// Which archive catagories do we run on
     pub indices: IndexCatagory,
     /// Classification for the retrohunt job
-    #[validate]
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Maximum classification of results in the search
-    #[validate]
     pub search_classification: ClassificationString,
     /// User who created this retrohunt job
     #[metadata(copyto="__text__")]
@@ -78,15 +73,13 @@ pub struct Retrohunt {
 }
 
 /// A hit encountered during a retrohunt search.
-#[derive(Serialize, ValidatedDeserialize, Debug, Described, Clone, PartialEq, Eq)]
-#[validated_deserialize(ClassificationParser)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct RetrohuntHit {
     /// Unique id identifying this retrohunt result
     pub key: String,
     /// Classification string for the retrohunt job and results list
-    #[validate]
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     pub sha256: Sha256,
@@ -101,7 +94,6 @@ mod test {
     use chrono::Utc;
 
     use super::RetrohuntHit;
-    use crate::serialize::from_json;
     use crate::{serialize::test::setup_classification, ExpandingClassification};
 
     #[test]
@@ -117,7 +109,7 @@ mod test {
 
         let json = serde_json::to_string_pretty(&data).unwrap();
         println!("{json}");
-        let data_copy = from_json(&json, &parser).unwrap();
+        let data_copy = serde_json::from_str(&json).unwrap();
         assert_eq!(data, data_copy);
     }
 }

@@ -1,21 +1,19 @@
-use assemblyline_markings::classification::ClassificationParser;
-use validation_boilerplate::ValidatedDeserialize;
 
-pub fn from_json<'de, T: ValidatedDeserialize<'de, ClassificationParser>>(data: &'de str, parser: &ClassificationParser) -> Result<T, serde_json::Error> {
-    let mut deserializer = serde_json::Deserializer::from_str(data);
-    T::deserialize_and_validate(&mut deserializer, parser)
-}
+// pub fn from_json<'de, T: ValidatedDeserialize<'de, Arc<ClassificationParser>>>(data: &'de str, parser: &Arc<ClassificationParser>) -> Result<T, serde_json::Error> {
+//     let mut deserializer = serde_json::Deserializer::from_str(data);
+//     T::deserialize_and_validate(&mut deserializer, parser)
+// }
 
 
 #[cfg(test)]
 pub mod test {
+
     use assemblyline_markings::classification::ClassificationParser;
     use chrono::{DateTime, Utc};
-    use serde::Serialize;
+    use serde::{Deserialize, Serialize};
     use serde_json::json;
     use struct_metadata::Described;
     use pretty_assertions::assert_eq;
-    use validation_boilerplate::ValidatedDeserialize;
 
     use crate::{ElasticMeta, ClassificationString, ExpandingClassification};
 
@@ -23,25 +21,19 @@ pub mod test {
         std::sync::Arc::new(ClassificationParser::new(serde_json::from_str(r#"{"enforce":true,"dynamic_groups":false,"dynamic_groups_type":"all","levels":[{"aliases":["OPEN"],"css":{"color":"default"},"description":"N/A","lvl":1,"name":"LEVEL 0","short_name":"L0"},{"aliases":[],"css":{"color":"default"},"description":"N/A","lvl":5,"name":"LEVEL 1","short_name":"L1"},{"aliases":[],"css":{"color":"default"},"description":"N/A","lvl":15,"name":"LEVEL 2","short_name":"L2"}],"required":[{"aliases":["LEGAL"],"description":"N/A","name":"LEGAL DEPARTMENT","short_name":"LE","require_lvl":null,"is_required_group":false},{"aliases":["ACC"],"description":"N/A","name":"ACCOUNTING","short_name":"AC","require_lvl":null,"is_required_group":false},{"aliases":[],"description":"N/A","name":"ORIGINATOR CONTROLLED","short_name":"ORCON","require_lvl":null,"is_required_group":true},{"aliases":[],"description":"N/A","name":"NO CONTRACTOR ACCESS","short_name":"NOCON","require_lvl":null,"is_required_group":true}],"groups":[{"aliases":[],"auto_select":false,"description":"N/A","name":"GROUP A","short_name":"A","solitary_display_name":null},{"aliases":[],"auto_select":false,"description":"N/A","name":"GROUP B","short_name":"B","solitary_display_name":null},{"aliases":[],"auto_select":false,"description":"N/A","name":"GROUP X","short_name":"X","solitary_display_name":"XX"}],"subgroups":[{"aliases":["R0"],"auto_select":false,"description":"N/A","name":"RESERVE ONE","short_name":"R1","require_group":null,"limited_to_group":null},{"aliases":[],"auto_select":false,"description":"N/A","name":"RESERVE TWO","short_name":"R2","require_group":"X","limited_to_group":null},{"aliases":[],"auto_select":false,"description":"N/A","name":"RESERVE THREE","short_name":"R3","require_group":null,"limited_to_group":"X"}],"restricted":"L2","unrestricted":"L0"}"#).unwrap()).unwrap())
     }
 
-    #[derive(Described, Serialize, ValidatedDeserialize)]
-    #[validated_deserialize(ClassificationParser)]
+    #[derive(Described, Serialize, Deserialize)]
     #[metadata_type(ElasticMeta)]
     struct SubObject {
-        #[validate]
         classification: ClassificationString,
     }
 
-    #[derive(Described, Serialize, ValidatedDeserialize)]
-    #[validated_deserialize(ClassificationParser)]
+    #[derive(Described, Serialize, Deserialize)]
     #[metadata_type(ElasticMeta)]
     struct TestObject {
         #[serde(flatten)]
-        #[validate]
         classification: ExpandingClassification,
-        #[validate]
         other_data: ClassificationString,
         expiry_ts: DateTime<Utc>,
-        #[validate]
         data: SubObject,
     }
 

@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+use struct_metadata::Described;
+
+use crate::{ClassificationString, ElasticMeta, JsonMap, Text};
+
+use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, ParamKinds, RegistryType, SignatureDelimiter};
 
 // from assemblyline import odm
 // from assemblyline.odm.models.service import SIGNATURE_DELIMITERS
@@ -13,116 +21,208 @@
 // REF_UPDATE_SOURCE = "Refer to:<br>[Service - UpdateSource](../service/#updatesource)"
 
 
-// @odm.model(index=False, store=False)
-// class EnvironmentVariable(odm.Model):
-//     name: str = odm.keyword(description=REF_ENVVAR)
-//     value: str = odm.keyword(description=REF_ENVVAR)
+/// Docker Configuration Delta
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct DockerConfigDelta {
+    /// REF_DOCKER_CONFIG
+    pub allow_internet_access: Option<bool>,
+    /// REF_DOCKER_CONFIG
+    pub command: Option<Vec<String>>,
+    /// REF_DOCKER_CONFIG
+    pub cpu_cores: Option<f32>,
+    /// REF_DOCKER_CONFIG
+    pub environment: Option<Vec<EnvironmentVariable>>,
+    /// REF_DOCKER_CONFIG
+    pub image: Option<String>,
+    /// REF_DOCKER_CONFIG
+    pub registry_username: Option<String>,
+    /// REF_DOCKER_CONFIG
+    pub registry_password: Option<String>,
+    /// REF_DOCKER_CONFIG
+    pub registry_type: Option<RegistryType>,
+    /// REF_DOCKER_CONFIG
+    pub ports: Option<Vec<String>>,
+    /// REF_DOCKER_CONFIG
+    pub ram_mb: Option<i32>,
+    /// REF_DOCKER_CONFIG
+    pub ram_mb_min: Option<i32>,
+    /// REF_DOCKER_CONFIG
+    pub service_account: Option<String>,
+}
 
 
-// @odm.model(index=False, store=False, description="Docker Configuration Delta")
-// class DockerConfigDelta(odm.Model):
-//     allow_internet_access = odm.Optional(odm.Boolean(), description=REF_DOCKER_CONFIG)
-//     command = odm.Optional(odm.List(odm.Keyword()), description=REF_DOCKER_CONFIG)
-//     cpu_cores = odm.Optional(odm.Float(), description=REF_DOCKER_CONFIG)
-//     environment = odm.Optional(odm.List(odm.Compound(EnvironmentVariable)), description=REF_DOCKER_CONFIG)
-//     image = odm.Optional(odm.Keyword(), description=REF_DOCKER_CONFIG)
-//     registry_username = odm.Optional(odm.Keyword(default=""), description=REF_DOCKER_CONFIG)
-//     registry_password = odm.Optional(odm.Keyword(default=""), description=REF_DOCKER_CONFIG)
-//     registry_type = odm.Optional(odm.Enum(values=["docker", "harbor"]), description=REF_DOCKER_CONFIG)
-//     ports = odm.Optional(odm.List(odm.Keyword()), description=REF_DOCKER_CONFIG)
-//     ram_mb = odm.Optional(odm.Integer(), description=REF_DOCKER_CONFIG)
-//     ram_mb_min = odm.Optional(odm.Integer(), description=REF_DOCKER_CONFIG)
-//     service_account = odm.optional(odm.keyword(description=REF_DOCKER_CONFIG))
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct UpdateSourceDelta {
+    /// REF_UPDATE_SOURCE
+    pub name: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub password: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub pattern: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub private_key: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub ca_cert: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub ssl_ignore_errors: Option<bool>,
+    /// REF_UPDATE_SOURCE
+    pub proxy: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub uri: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub username: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub headers: Option<Vec<EnvironmentVariable>>,
+    /// REF_UPDATE_SOURCE
+    pub default_classification: Option<ClassificationString>,
+    /// REF_UPDATE_SOURCE
+    pub git_branch: Option<String>,
+    /// REF_UPDATE_SOURCE
+    pub sync: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct PersistentVolumeDelta {
+    /// REF_PV
+    pub mount_path: Option<String>,
+    /// REF_PV
+    pub capacity: Option<String>,
+    /// REF_PV
+    pub storage_class: Option<String>,
+    /// REF_PV
+    pub access_mode: Option<AccessMode>,
+}
+
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct DependencyConfigDelta {
+    /// REF_DEPENDENCY_CONFIG
+    pub container: Option<DockerConfigDelta>,
+    /// REF_DEPENDENCY_CONFIG
+    pub volumes: Option<HashMap<String, PersistentVolumeDelta>>,
+    /// REF_DEPENDENCY_CONFIG
+    pub run_as_core: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct UpdateConfigDelta {
+    /// REF_UPDATE_CONFIG
+    #[metadata[index=true]]
+    pub generates_signatures: Option<bool>,
+    /// REF_UPDATE_CONFIG
+    pub sources: Option<Vec<UpdateSourceDelta>>,
+    /// REF_UPDATE_CONFIG
+    pub update_interval_seconds: Option<i32>,
+    /// REF_UPDATE_CONFIG
+    pub wait_for_update: Option<bool>,
+    /// REF_UPDATE_CONFIG
+    pub signature_delimiter: Option<SignatureDelimiter>,
+    /// REF_UPDATE_CONFIG
+    pub custom_delimiter: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+struct SubmissionParamsDelta {
+    /// REF_SUBMISSION_PARAMS
+    pub default: Option<serde_json::Value>,
+    /// REF_SUBMISSION_PARAMS
+    pub name: Option<String>,
+    /// REF_SUBMISSION_PARAMS
+    #[serde(rename="type")]
+    pub _type: Option<ParamKinds>,
+    /// REF_SUBMISSION_PARAMS
+    pub value: Option<serde_json::Value>,
+    /// REF_SUBMISSION_PARAMS
+    pub list: Option<serde_json::Value>,
+    /// REF_SUBMISSION_PARAMS
+    pub hide: Option<bool>,
+}
 
 
-// @odm.model(index=False, store=False)
-// class UpdateSourceDelta(odm.Model):
-//     name = odm.Optional(odm.Keyword(), description=REF_UPDATE_SOURCE)
-//     password = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     pattern = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     private_key = odm.Keyword(default="", description=REF_UPDATE_SOURCE)
-//     ca_cert = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     ssl_ignore_errors = odm.Boolean(default=False, description=REF_UPDATE_SOURCE)
-//     proxy = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     uri = odm.Optional(odm.Keyword(), description=REF_UPDATE_SOURCE)
-//     username = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     headers = odm.Optional(odm.List(odm.Compound(EnvironmentVariable)), description=REF_UPDATE_SOURCE)
-//     default_classification = odm.Optional(odm.Classification(), description=REF_UPDATE_SOURCE)
-//     git_branch = odm.Optional(odm.Keyword(default=""), description=REF_UPDATE_SOURCE)
-//     sync = odm.Optional(odm.Boolean(default=False), description=REF_UPDATE_SOURCE)
+/// Service Delta relative to Initial Service Configuration
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=false)]
+pub struct ServiceDelta {
+    /// REF_SERVICE
+    #[metadata(store=true)]
+    pub accepts: Option<String>,
+    /// REF_SERVICE
+    #[metadata(store=true)]
+    pub rejects: Option<String>,
+    /// REF_SERVICE
+    #[metadata(store=true, copyto="__text__")]
+    pub category: Option<String>,
+    /// REF_SERVICE
+    pub classification: Option<ClassificationString>,
+    /// REF_SERVICE
+    #[metadata(index=false)]
+    pub config: Option<JsonMap>,
+    /// REF_SERVICE
+    #[metadata(store=true, copyto="__text__")]
+    pub description: Option<Text>,
+    /// REF_SERVICE
+    pub default_result_classification: Option<ClassificationString>,
+    /// REF_SERVICE
+    #[metadata(store=true)]
+    pub enabled: Option<bool>,
+    /// REF_SERVICE
+    pub is_external: Option<bool>,
+    /// REF_SERVICE
+    pub licence_count: Option<i32>,
+    /// REF_SERVICE
+    pub max_queue_length: Option<i32>,
+    /// REF_SERVICE
+    pub min_instances: Option<i32>,
 
+    /// REF_SERVICE
+    pub uses_tags: Option<bool>,
+    /// REF_SERVICE
+    pub uses_tag_scores: Option<bool>,
+    /// REF_SERVICE
+    pub uses_temp_submission_data: Option<bool>,
+    /// REF_SERVICE
+    pub uses_metadata: Option<bool>,
 
-// @ odm.model(index=False, store=False)
-// class PersistentVolumeDelta(odm.Model):
-//     mount_path = odm.Optional(odm.Keyword(), description=REF_PV)
-//     capacity = odm.Optional(odm.Keyword(), description=REF_PV)
-//     storage_class = odm.Optional(odm.Keyword(), description=REF_PV)
-//     access_mode = odm.Optional(odm.Enum(values=['ReadWriteOnce', 'ReadWriteMany']), description=REF_PV)
+    /// REF_SERVICE
+    #[metadata(store=true, copyto="__text__")]
+    pub name: Option<String>, 
+    /// REF_SERVICE
+    #[metadata(store=true)]
+    pub version: String,
 
+    /// REF_SERVICE
+    pub privileged: Option<bool>,
+    /// REF_SERVICE
+    pub disable_cache: Option<bool>,
 
-// @ odm.model(index=False, store=False)
-// class DependencyConfigDelta(odm.Model):
-//     container = odm.Optional(odm.Compound(DockerConfigDelta), description=REF_DEPENDENCY_CONFIG)
-//     volumes = odm.Mapping(odm.Compound(PersistentVolumeDelta), default={}, description=REF_DEPENDENCY_CONFIG)
-//     run_as_core: bool = odm.Optional(odm.Boolean(), description=REF_DEPENDENCY_CONFIG)
+    /// REF_SERVICE
+    #[metadata(store=true, copyto="__text__")]
+    pub stage: Option<String>, 
+    /// REF_SERVICE
+    #[metadata(index=false)]
+    pub submission_params: Option<Vec<SubmissionParamsDelta>>,
+    /// REF_SERVICE
+    pub timeout: Option<i32>,
 
+    /// REF_SERVICE
+    pub docker_config: Option<DockerConfigDelta>,
+    /// REF_SERVICE
+    pub dependencies: Option<HashMap<String, DependencyConfigDelta>>,
 
-// @ odm.model(index=False, store=False)
-// class UpdateConfigDelta(odm.Model):
-//     generates_signatures = odm.Optional(odm.Boolean(), index=True, description=REF_UPDATE_CONFIG)
-//     sources = odm.Optional(odm.List(odm.Compound(UpdateSourceDelta)), description=REF_UPDATE_CONFIG)
-//     update_interval_seconds = odm.Optional(odm.Integer(), description=REF_UPDATE_CONFIG)
-//     wait_for_update = odm.Optional(odm.Boolean(), description=REF_UPDATE_CONFIG)
-//     signature_delimiter = odm.Optional(odm.Enum(values=SIGNATURE_DELIMITERS.keys()), description=REF_UPDATE_CONFIG)
-//     custom_delimiter = odm.Optional(odm.Keyword(), description=REF_UPDATE_CONFIG)
-
-
-// @ odm.model(index=False, store=False)
-// class SubmissionParamsDelta(odm.Model):
-//     default = odm.Optional(odm.Any(), description=REF_SUBMISSION_PARAMS)
-//     name = odm.Optional(odm.Keyword(), description=REF_SUBMISSION_PARAMS)
-//     type = odm.Optional(odm.Enum(values=['str', 'int', 'list', 'bool']), description=REF_SUBMISSION_PARAMS)
-//     value = odm.Optional(odm.Any(), description=REF_SUBMISSION_PARAMS)
-//     list = odm.Optional(odm.Any(), description=REF_SUBMISSION_PARAMS)
-//     hide = odm.Optional(odm.Boolean(), description=REF_SUBMISSION_PARAMS)
-
-
-// /// Service Delta relative to Initial Service Configuration
-// #[derive(Serialize, Deserialize, Described)]
-// #[metadata_type(ElasticMeta)]
-// #[metadata(index=true, store=false)]
-// struct ServiceDelta {
-//     accepts = odm.Optional(odm.Keyword(), store=True, description=REF_SERVICE)
-//     rejects = odm.Optional(odm.Keyword(), store=True, description=REF_SERVICE)
-//     category = odm.Optional(odm.Keyword(), store=True, copyto="__text__", description=REF_SERVICE)
-//     classification = odm.Optional(odm.ClassificationString(), description=REF_SERVICE)
-//     config = odm.Optional(odm.Mapping(odm.Any()), index=False, description=REF_SERVICE)
-//     description = odm.Optional(odm.Text(), store=True, copyto="__text__", description=REF_SERVICE)
-//     default_result_classification = odm.Optional(odm.ClassificationString(), description=REF_SERVICE)
-//     enabled = odm.Optional(odm.Boolean(), store=True, description=REF_SERVICE)
-//     is_external = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-//     licence_count = odm.Optional(odm.Integer(), description=REF_SERVICE)
-//     max_queue_length = odm.Optional(odm.Integer(), description=REF_SERVICE)
-//     min_instances = odm.Optional(odm.Integer(), description=REF_SERVICE)
-
-//     uses_tags: bool = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-//     uses_tag_scores: bool = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-//     uses_temp_submission_data: bool = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-//     uses_metadata: bool = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-
-//     name = odm.Optional(odm.Keyword(), store=True, copyto="__text__", description=REF_SERVICE)
-//     version = odm.Keyword(store=True, description=REF_SERVICE)
-
-//     privileged = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-//     disable_cache = odm.Optional(odm.Boolean(), description=REF_SERVICE)
-
-//     stage = odm.Optional(odm.Keyword(), store=True, copyto="__text__", description=REF_SERVICE)
-//     submission_params = odm.Optional(odm.List(odm.Compound(SubmissionParamsDelta)), index=False, description=REF_SERVICE)
-//     timeout = odm.Optional(odm.Integer(), description=REF_SERVICE)
-
-//     docker_config: DockerConfigDelta = odm.Optional(odm.Compound(DockerConfigDelta), description=REF_SERVICE)
-//     dependencies: DependencyConfigDelta = odm.Mapping(odm.Compound(DependencyConfigDelta), default={}, description=REF_SERVICE)
-
-//     update_channel = odm.Optional(odm.Enum(values=["stable", "rc", "beta", "dev"]), description=REF_SERVICE)
-//     update_config: UpdateConfigDelta = odm.Optional(odm.Compound(UpdateConfigDelta), description=REF_SERVICE)
-// }
+    /// REF_SERVICE
+    pub update_channel: Option<ChannelKinds>,
+    /// REF_SERVICE
+    pub update_config: Option<UpdateConfigDelta>,
+}

@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use assemblyline_markings::classification::ClassificationParser;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 use strum::IntoEnumIterator;
-use validation_boilerplate::ValidatedDeserialize;
 
 use crate::{ElasticMeta, Email, ExpandingClassification, UpperString};
 
@@ -321,8 +319,7 @@ pub struct Apps {
 }
 
 /// Model of User
-#[derive(Serialize, ValidatedDeserialize, Described)]
-#[validated_deserialize(ClassificationParser)]
+#[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct User {
@@ -347,7 +344,6 @@ pub struct User {
     pub can_impersonate: bool,
     /// Maximum classification for the user
     #[serde(flatten)]
-    #[validate]
     pub classification: ExpandingClassification<true>,  // default=Classification.UNRESTRICTED, )
     /// User's LDAP DN
     #[metadata(store=false, copyto="__text__")]
