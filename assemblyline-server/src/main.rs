@@ -12,6 +12,7 @@ use std::sync::atomic::AtomicBool;
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::Result;
+use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use clap::{Command, Parser, Subcommand};
 use elastic::Elastic;
@@ -22,7 +23,7 @@ use tokio::sync::Notify;
 
 use crate::logging::configure_logging;
 
-mod ingester;
+// mod ingester;
 mod submit;
 mod core_dispatcher;
 mod archive;
@@ -78,7 +79,9 @@ async fn main() -> ExitCode {
     // pick the module to launch
     let result = match args.command {
         Commands::Ingester {  } => {
-            crate::ingester::main(core).await
+            todo!();
+            anyhow::Ok(())
+            // crate::ingester::main(core).await
         },
     };
 
@@ -121,6 +124,7 @@ struct Core {
 
     // universal configuration and connection objects
     pub config: Arc<Config>,
+    pub classification_parser: Arc<ClassificationParser>,
     pub datastore: Arc<Elastic>,
     pub redis_persistant: Arc<RedisObjects>,
     pub redis_volatile: Arc<RedisObjects>,
@@ -155,6 +159,7 @@ impl Core {
             redis_metrics,
             running: Arc::new(Flag::new(true)),
             enabled: Arc::new(Flag::new(true)),
+            classification_parser: todo!(),
         })
     }
     

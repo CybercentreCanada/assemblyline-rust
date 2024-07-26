@@ -44,24 +44,24 @@ impl ArchiveManager {
         let delete_after = delete_after.unwrap_or(false);
 
         let sub_selected = self.services.expand_categories(submission.params.services.selected.clone());
+        let mut sub_selected = HashSet::<String>::from_iter(sub_selected);
         let min_selected = self.services.expand_categories(self.config.core.archiver.minimum_required_services.clone());
+        let min_selected = HashSet::from_iter(min_selected);
 
-        if HashSet::from_iter(min_selected.iter()).is_subset(&HashSet::from_iter(sub_selected.iter())) {
+        if min_selected.is_subset(&sub_selected) {
             self.archive_queue.push(&("submission".to_owned(), submission.sid.to_string(), delete_after)).await?;
             return Ok(Some(ArchivedMessage::archive()))
         } else {
             sub_selected.extend(min_selected);
-            sub_selected.sort_unstable();
-            sub_selected.dedup();
 
             let mut params = submission.params.clone();
             params.auto_archive = true;
             params.delete_after_archive = delete_after;
-            params.services.selected = sub_selected;
+            params.services.selected = sub_selected.into_iter().collect();
 
             let submission_obj = Submission{
-                files: submission.files,
-                metadata: submission.metadata,
+                files: submission.files.clone(),
+                metadata: submission.metadata.clone(),
                 params,
                 sid: thread_rng().gen(),
                 time: Default::default(),
@@ -79,7 +79,7 @@ impl ArchiveManager {
             // Update current record
             let mut batch = OperationBatch::default();
             batch.set("archived".to_owned(), serde_json::Value::Bool(true));
-            self.datastore.submission.update(&submission.sid.to_string(), batch, None).await?;
+            self.datastore.submission.update(&submission.sid.to_string(), batch, None, None).await?;
 
             return Ok(Some(ArchivedMessage::resubmit(sid)))
         }

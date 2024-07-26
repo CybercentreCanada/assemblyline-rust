@@ -5,22 +5,18 @@ use std::sync::Arc;
 use assemblyline_models::meta::flatten_fields;
 use assemblyline_models::{ElasticMeta, JsonMap};
 use itertools::Itertools;
+use log::error;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use struct_metadata::Described;
+use thiserror::Error;
 
-use crate::elastic::{DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
-use crate::error::{Result, Error as ErrorKind};
+use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
 
-use super::{ElasticHelper, Index, with_retries_raise_confict, with_retries_on};
+use super::{with_retries_on, with_retries_raise_confict, ElasticError, ElasticHelper, Index, Result, Version};
 
-const DEFAULT_SORT: &str = "_id: asc";
-
-enum Version {
-    Create,
-    Expected(i64, i64),
-}
+const DEFAULT_SORT: &str = "_id:asc";
 
 pub struct Collection<T: Serialize + DeserializeOwned> {
     database: Arc<ElasticHelper>,
@@ -29,7 +25,7 @@ pub struct Collection<T: Serialize + DeserializeOwned> {
     _data: PhantomData<T>,
 }
 
-impl<T: Serialize + DeserializeOwned> Collection<T> {
+impl<T: Serialize + DeserializeOwned + Described<ElasticMeta>> Collection<T> {
 
     pub fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>) -> Self {
         Collection {
@@ -64,13 +60,13 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
                 // Crash if index has no archive
                 match &self.archive_name {
                     None => {
-                        return Err(ErrorKind::ArchiveDisabled(format!("Index {} does not have an archive", self.name.to_uppercase())))
+                        return Err(ElasticError::ArchiveNotFound(Box::new(self.name.to_uppercase())))
                     }
 
                     Some(archive_name) => {
                         // Crash if no archive access
                         if !self.database.archive_access {
-                            return Err(ErrorKind::ArchiveDisabled("Trying to get access to the archive on a datastore where archive_access is disabled".to_owned()))
+                            return Err(ElasticError::ArchiveDisabled)
                         }
 
                         // Return only archive index
@@ -82,7 +78,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
             Some(Index::HotAndArchive) => {
                 // Crash if no archive access
                 if !self.database.archive_access {
-                    return Err(ErrorKind::ArchiveDisabled("Trying to get access to the archive on a datastore where archive_access is disabled".to_owned()))
+                    return Err(ElasticError::ArchiveDisabled)
                 }
 
                 // Return HOT if asked for both but only has HOT
@@ -98,24 +94,152 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
         Ok(self.get_index_list(index_type)?.join(","))
     }
 
-    pub async fn get(&self, key: &str) -> Result<Option<T>> {
-        todo!();
+    fn is_archive_index(&self, index: &str) -> bool {
+        if let Some(archive_name) = &self.archive_name {
+            index.starts_with(archive_name)
+        } else {
+            false
+        }
+    }
+
+    /// Get a list of documents from the datastore and make sure they are normalized using the model class
+    ///
+    /// :param index_type: Type of indices to target
+    /// :param error_on_missing: Should it raise a key error when keys are missing
+    /// :param as_dictionary: Return a disctionary of items or a list
+    /// :param as_obj: Return objects or not
+    /// :param key_list: list of keys of documents to get
+    /// :return: list of instances of the model class
+    pub async fn multiget<RT: for<'de> serde::Deserialize<'de>>(&self, mut key_list: Vec<&str>, error_on_missing: Option<bool>, index_type: Option<Index>) -> Result<HashMap<String, RT>> {
+        let error_on_missing = error_on_missing.unwrap_or(true);
+        let index_list = self.get_index_list(index_type)?;
+
+        let mut out: HashMap<String, RT> = Default::default();
+
+        for index in index_list {
+            let index: &str = &index;
+            if key_list.is_empty() {
+                break
+            }
+
+            // let data = self.with_retries(self.datastore.client.mget, ids=key_list, index=index)
+            let result: responses::Multiget = with_retries_on!(self.database, index, {
+                let es = self.database.es.read().await;
+                let parts = elasticsearch::MgetParts::Index(index);
+                es.mget(parts).body(json!({
+                    "ids": key_list
+                })).send().await    
+            })?;
+
+            for mut row in result.docs {
+                if !row.found {
+                    continue
+                }
+
+                // If this index has an archive, check is the document was found in it.
+                if self.archive_name.is_some() {
+                    if let Some(source) = &mut row._source {
+                        source.insert("from_archive".to_owned(), json!(self.is_archive_index(&index)));
+                    }
+                }
+
+                if let Some(source) = row._source {
+                    let value = serde_json::Value::Object(source);
+                    if out.insert(row._id.clone(), serde_json::from_value(value)?).is_some() {
+                        error!("MGet returned multiple documents for id: {}", row._id);
+                    }
+                } else {
+                    error!("MGet returned a document without any data {}", row._id);
+                }
+            }
+
+            // only keep keys that are not in the output already
+            key_list.retain(|key| !out.contains_key(*key));
+        }
+
+        if !key_list.is_empty() && error_on_missing {
+            return Err(ElasticError::multi_key_error(&key_list))
+        }
+
+        return Ok(out)
+    }
+
+    /// fetch an object from elastic, retrying on missing
+    pub async fn get(&self, key: &str, index_type: Option<Index>) -> Result<Option<T>> {
+        Ok(self._get_version(key, index_type).await?.map(|(doc, _)| doc))
+    }
+
+    pub async fn get_json(&self, key: &str, index_type: Option<Index>) -> Result<Option<JsonMap>> {
+        Ok(self._get_version(key, index_type).await?.map(|(doc, _)| doc))
+    }
+
+    /// fetch an object from elastic, retrying on missing, returning document version info
+    pub async fn get_version(&self, key: &str, index_type: Option<Index>) -> Result<Option<(T, Version)>> {
+        self._get_version(key, index_type).await
+    }
+
+    pub async fn _get_version<RT: for <'de> serde::Deserialize<'de>>(&self, key: &str, index_type: Option<Index>) -> Result<Option<(RT, Version)>> {
+        const RETRY_NORMAL: usize = 1;
+        for _attempt in 0..=RETRY_NORMAL {
+            match self._get_if_exists(key, index_type).await? {
+                Some(data) => return Ok(Some(data)),
+                None => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                },
+            }
+        }
+        Ok(None)
+    }
+
+    /// fetch an object from elastic, no retry on missing, returning document version info
+    /// 
+    /// Versioned get-save for atomic update has three paths:
+    ///   1. Document doesn't exist at all. Create token will be returned for version.
+    /// This way only the first query to try and create the document will succeed.
+    ///   2. Document exists. A version string with the info needed to do a versioned save is returned.
+    ///
+    /// The create token is needed to differentiate between "I'm saving a new
+    /// document non-atomic (version=None)" and "I'm saving a new document
+    /// atomically (version=CREATE_TOKEN)".
+    pub async fn get_if_exists(&self, key: &str, index_type: Option<Index>) -> Result<Option<(T, Version)>> {
+        self._get_if_exists(key, index_type).await
     }
     
-    pub async fn get_version(&self, key: &str) -> Result<Option<(T, Version)>> {
-        todo!();
+    async fn _get_if_exists<RT: for <'de> serde::Deserialize<'de>>(&self, key: &str, index_type: Option<Index>) -> Result<Option<(RT, Version)>> {
+        let index_list = self.get_index_list(index_type)?;
+
+        for index in index_list {
+            let mut doc: responses::Get = with_retries_on!(self.database, index.as_str(), {
+                let es = self.database.es.read().await;
+                let parts = elasticsearch::GetParts::IndexId(&index, key);
+                es.get(parts)._source(&["true"]).send().await
+            })?;
+            
+            // If this index has an archive, check is the document was found in it.
+            if self.archive_name.is_some() {
+                if let Some(source) = &mut doc._source {
+                    source.insert("from_archive".to_owned(), json!(self.is_archive_index(&index)));
+                }
+            }
+
+            if let Some(source) = doc._source {
+                let object = serde_json::from_value(json!(source))?;
+                return Ok(Some((object, Version::Expected(doc._primary_term, doc._seq_no))))
+            }
+        }
+        Ok(None)
     }
 
     pub async fn save(&self, key: &str, value: &T, version: Option<Version>, index_type: Option<Index>) -> Result<()> {
         if key.contains(' ') {
-            return Err(ErrorKind::DataStoreException("You are not allowed to use spaces in datastore keys."))
+            return Err(ElasticError::json("You are not allowed to use spaces in datastore keys."))
         }
 
         let mut saved_data = serde_json::to_value(value)?;
         let data = if let Some(data) = saved_data.as_object_mut() {
             data
         } else {
-            return Err(ErrorKind::DataStoreException("Types saved in elastic must serialize to a json document."))
+            return Err(ElasticError::json("Types saved in elastic must serialize to a json document."))
         };
         data.insert("id".to_owned(), json!(key));
 
@@ -139,7 +263,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
 
         let index_list = self.get_index_list(index_type)?;
         for index in index_list {
-            with_retries_raise_confict!(self.database, index.clone(), {
+            let _response: responses::Index = with_retries_raise_confict!(self.database, index.clone(), {
                 let es = self.database.es.read().await;
                 let mut request = es.index(elasticsearch::IndexParts::IndexId(&index, key))
                     .body(&value)
@@ -174,7 +298,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
     /// :param as_obj: Return objects instead of dictionaries
     /// :param index_type: Type of indices to target
     /// :return: a generator of dictionary of field list results
-    async fn stream_search<RT: DeserializeOwned>(&self,
+    pub async fn stream_search<RT: DeserializeOwned>(&self,
         query: String,
         fl: String,
         mut filters: Vec<String>,
@@ -186,7 +310,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
         let index_type = index_type.unwrap_or(Index::Hot);
 
         if item_buffer_size > 2000 || item_buffer_size < 50 {
-            return Err(ErrorKind::SearchException("Variable item_buffer_size must be between 50 and 2000.".to_string()))
+            return Err(ElasticError::fatal("Variable item_buffer_size must be between 50 and 2000."))
         }
 
         let index = self.get_joined_index(Some(index_type))?;
@@ -214,7 +338,7 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
 
         let sort = vec![DEFAULT_SORT.to_owned()]; //parse_sort(DEFAULT_SORT)?;
         let source = if fl.is_empty() || fl == "*" {
-            "_source".to_owned()
+            "true".to_owned()
         } else {
             fl
         };
@@ -223,23 +347,39 @@ impl<T: Serialize + DeserializeOwned> Collection<T> {
         //     None => list(self.stored_fields.keys())
         // };
 
-        Ok(ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await?)
+        ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await
     }
 
 
-    pub async fn update(&self, id: &str, operations: OperationBatch, index_type: Option<Index>) -> Result<()> {
-        operations.validate_operations()?;
+    pub async fn update(&self, id: &str, mut operations: OperationBatch, index_type: Option<Index>, retry_on_conflict: Option<i64>) -> Result<bool> {
+        let index_type = index_type.unwrap_or(Index::Hot);
+        operations.validate_operations::<T>()?;
         let operations = operations.to_script();
-        let es = self.database.es.read().await;
 
-        // for index in self.get_index_list(index_type)? {
-        //     let update = es.update(elasticsearch::UpdateParts::IndexId(&index, id)).body(operations).send().await;
-        //     let error = match update {
-        //         Ok(value)
-        //     }
-        // }
+        for index in self.get_index_list(Some(index_type))? {
+            let result: Result<responses::Index> = with_retries_on!(self.database, index.as_str(), {
+                let es = self.database.es.read().await;
+                let parts = elasticsearch::UpdateParts::IndexId(&index, id);
+                let mut request = es.update(parts)
+                    .body(&operations);
+                if let Some(retry_on_conflict) = retry_on_conflict {
+                    request = request.retry_on_conflict(retry_on_conflict);
+                }
+                request.send().await
+            });
 
-        todo!()
+            match result {
+                Ok(result) => return Ok(matches!(result.result, responses::IndexResult::Updated)),
+                Err(err) => {
+                    if err.is_not_found() {
+                        continue
+                    }
+                    return Err(err)
+                }
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -258,13 +398,13 @@ pub enum UpdateOperation {
     Delete,
 }
 
-
-enum InvalidOperationError {
-    // field not found
+#[derive(Error, Debug)]
+pub enum InvalidOperationError {
+    #[error("field {field} not found in {model}")]
     InvalidField { field: String, model: String },
-    // raise DataStoreException(f"Invalid operation for field {doc_key}: {op}")
+    #[error("Invalid operation for field {field}: {operation:?}")]
     InvalidOperation { field: String, operation: UpdateOperation },
-    // (f"Invalid value for field {doc_key}: {value}")
+    #[error("Invalid value for field {field}: {value}")]
     Value { field: String, value: String }
 }
 
@@ -277,6 +417,14 @@ impl OperationBatch {
 
     pub fn set(&mut self, field: String, value: serde_json::Value) {
         self.operations.push((UpdateOperation::Set, field, value))
+    }
+
+    pub fn increment(&mut self, field: String, value: serde_json::Value) {
+        self.operations.push((UpdateOperation::Inc, field, value))
+    }
+
+    pub fn max(&mut self, field: String, value: serde_json::Value) {
+        self.operations.push((UpdateOperation::Max, field, value))
     }
 
     // Validate the different operations received for a partial update
@@ -460,6 +608,9 @@ pub enum CheckError {
     #[error("JSON object keys must be strings, {key_type} provided instead")]
     JsonKeys{ key_type: &'static str },
 
+    #[error("{value} is not a known varient of enum {type_name}")]
+    NonEnumVarient{ type_name: &'static str, value: &'static str },
+
     #[error("{type_name} is unknown and unhandled")]
     Unhandled{ type_name: &'static str },
 }
@@ -473,10 +624,11 @@ impl CheckError {
     }
     fn rename(self, name: &'static str) -> Self {
         match self {
-            CheckError::Type { type_name: _, expected_type, received_type } => CheckError::Type { type_name: name, expected_type, received_type },
-            CheckError::MissingField { type_name: _, field } => CheckError::MissingField { type_name: name, field },
-            CheckError::JsonKeys { key_type } => CheckError::JsonKeys { key_type },
-            CheckError::Unhandled { type_name: _ } => CheckError::Unhandled { type_name: name },
+            Self::Type { type_name: _, expected_type, received_type } => Self::Type { type_name: name, expected_type, received_type },
+            Self::MissingField { type_name: _, field } => Self::MissingField { type_name: name, field },
+            Self::JsonKeys { key_type } => Self::JsonKeys { key_type },
+            Self::Unhandled { type_name: _ } => Self::Unhandled { type_name: name },
+            Self::NonEnumVarient { type_name: _, value } => Self::NonEnumVarient { type_name: name, value },
         }
     }
 }
@@ -501,22 +653,22 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
                 None => return Err(CheckError::expected_object(name, describe_value(value)))
             };
 
-            let viewed = HashSet::new();
+            let mut viewed = HashSet::new();
 
             // ensure require fields are found
             'fields: for field in children {
                 // try to find the field under each possible name for it
-                for alias in field.aliases() {
+                for alias in field.aliases.iter() {
                     if viewed.contains(alias) { continue }
-                    if let Some(entry) = map.get_mut(alias) {
+                    if let Some(entry) = map.get_mut(*alias) {
                         check_type(&field.type_info.kind, entry)?;
-                        viewed.insert(alias);
+                        viewed.insert(*alias);
                         continue 'fields
                     }
                 }
 
                 // field not found, thats ok if the field has a default value
-                if field.has_default() {
+                if field.has_default {
                     continue
                 }
 
@@ -525,11 +677,22 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
             }
 
             // remove extra fields
-            map.retain(|key, _| viewed.contains(key));
+            map.retain(|key, _| viewed.contains(key.as_str()));
             Ok(())
         },
         struct_metadata::Kind::Aliased { kind, name } => check_type(&kind.kind, value).map_err(|err|err.rename(name)),
-        struct_metadata::Kind::Enum { name, variants } => todo!(),
+        struct_metadata::Kind::Enum { name, variants } => {
+            if let Some(value) = value.as_str() {
+                for var in variants {
+                    for name in var.aliases.iter() {
+                        if value == *name {
+                            return Ok(())
+                        }
+                    }
+                }
+            }
+            Err(CheckError::NonEnumVarient{ type_name: name, value: describe_value(value)})
+        },
         struct_metadata::Kind::Sequence(child) => {
             // try the case where value is directly a sequence of type `child` items
             let result = (|| {
@@ -548,13 +711,19 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
             #[allow(clippy::collapsible_if)]
             if result.is_err() {
                 if check_type(&child.kind, value).is_ok() {
-                    *value = serde_json::Value::Array(vec![*value]);
+                    *value = serde_json::Value::Array(vec![value.clone()]);
                     return Ok(())
                 }
             }
             result
         },
-        struct_metadata::Kind::Option(inner) => todo!(),
+        struct_metadata::Kind::Option(inner) => {
+            if value.is_null() {
+                return Ok(())
+            } 
+            
+            check_type(&inner.kind, value)
+        },
         struct_metadata::Kind::Mapping(key_type, value_type) => {
             // check that the value being read is an object
             let map = match value.as_object_mut() {
@@ -562,37 +731,46 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
                 None => return Err(CheckError::expected_object(kind.name(), describe_value(value)))
             };
 
-            if !key_type.is_string() {
-
+            if !matches!(key_type.kind, struct_metadata::Kind::String) {
+                return Err(CheckError::JsonKeys { key_type: key_type.kind.name() })
             }
 
             for value in map.values_mut() {
-                check_type(value_type, value)?;
+                check_type(&value_type.kind, value)?;
             }
+            Ok(())
         },
-        struct_metadata::Kind::DateTime => todo!(),
-        struct_metadata::Kind::String => todo!(),
-        struct_metadata::Kind::U128 => todo!(),
-        struct_metadata::Kind::I128 => todo!(),
-        struct_metadata::Kind::U64 => todo!(),
-        struct_metadata::Kind::I64 => todo!(),
-        struct_metadata::Kind::U32 => todo!(),
-        struct_metadata::Kind::I32 => todo!(),
-        struct_metadata::Kind::U16 => todo!(),
-        struct_metadata::Kind::I16 => todo!(),
-        struct_metadata::Kind::U8 => todo!(),
-        struct_metadata::Kind::I8 => todo!(),
-        struct_metadata::Kind::F64 => todo!(),
-        struct_metadata::Kind::F32 => todo!(),
-        struct_metadata::Kind::Bool => todo!(),
+        struct_metadata::Kind::DateTime => try_cast::<chrono::DateTime<chrono::Utc>>("DateTime", "String", value),
+        struct_metadata::Kind::String => try_cast::<String>("String", "String", value),
+        struct_metadata::Kind::U128 => try_cast::<u128>("U128", "Number", value),
+        struct_metadata::Kind::I128 => try_cast::<i128>("I128", "Number", value),
+        struct_metadata::Kind::U64 => try_cast::<u64>("U64", "Number", value),
+        struct_metadata::Kind::I64 => try_cast::<i64>("I64", "Number", value),
+        struct_metadata::Kind::U32 => try_cast::<u32>("U32", "Number", value),
+        struct_metadata::Kind::I32 => try_cast::<i32>("I32", "Number", value),
+        struct_metadata::Kind::U16 => try_cast::<u16>("U16", "Number", value),
+        struct_metadata::Kind::I16 => try_cast::<i16>("I16", "Number", value),
+        struct_metadata::Kind::U8 => try_cast::<u8>("U8", "Number", value),
+        struct_metadata::Kind::I8 => try_cast::<i8>("I8", "Number", value),
+        struct_metadata::Kind::F64 => try_cast::<f64>("F64", "Number", value),
+        struct_metadata::Kind::F32 => try_cast::<f32>("F32", "Number", value),
+        struct_metadata::Kind::Bool => try_cast::<bool>("bool", "Boolean", value),
         struct_metadata::Kind::Any => Ok(()),
         _ => Err(CheckError::Unhandled { type_name: kind.name() }),
     }
 }
 
-struct ScrollCursor<T: DeserializeOwned> {
+fn try_cast<Type: serde::de::DeserializeOwned>(name: &'static str, expected: &'static str, value: &serde_json::Value) -> Result<(), CheckError> {
+    if serde_json::from_value::<Type>(value.clone()).is_ok() {
+        Ok(())
+    } else {
+        Err(CheckError::Type { type_name: name, expected_type: expected, received_type: describe_value(value) })
+    }
+}
+
+pub struct ScrollCursor<T: DeserializeOwned> {
     helper: Arc<ElasticHelper>,
-    pit_id: serde_json::Value,
+    pit_id: String,
     batch_size: i64,
     keep_alive: String,
     batch: Vec<(serde_json::Value, T)>,
@@ -619,24 +797,13 @@ impl<T: DeserializeOwned> ScrollCursor<T> {
         let batch_size = size.unwrap_or(1000);
 
         // Generate the point in time
-        let mut pit: JsonMap = with_retries_on!(helper, index.clone(), {
+        let pit: responses::OpenPit = with_retries_on!(helper, index.clone(), {
             let es = helper.es.read().await;
             es.open_point_in_time(elasticsearch::OpenPointInTimeParts::Index(&[&index])).keep_alive(&keep_alive).send().await
         })?;
 
-        println!("{pit:?}");
-
-        let pit = match pit.remove("id") {
-            Some(value) => value,
-            None => return Err(ErrorKind::SearchException(format!("Could not establish search point in time.")))
-        };
-
         // Add tie_breaker sort using _shard_doc ID
-        sort.push("_shard_doc desc".to_owned());
-
-    //     pit = {'id': self.with_retries(self.datastore.client.open_point_in_time,
-    //                                    index=index, keep_alive=keep_alive)['id'],
-    //            'keep_alive': keep_alive}
+        sort.push("_shard_doc:desc".to_owned());
 
         //     # initial search
     //     resp = self.with_retries(self.datastore.client.search, query=query, pit=pit,
@@ -645,7 +812,7 @@ impl<T: DeserializeOwned> ScrollCursor<T> {
 
         Ok(ScrollCursor {
             helper,
-            pit_id: pit,
+            pit_id: pit.id,
             batch_size,
             keep_alive,
             batch: Default::default(),
@@ -677,16 +844,17 @@ impl<T: DeserializeOwned> ScrollCursor<T> {
                     .sort(&sort)
                     .source(&self.source);
                 if let Some(timeout) = &self.timeout {
-                    request = request.timeout(&timeout);
+                    request = request.timeout(timeout);
                 }
                 request.send().await
             })?;
 
-            for mut item in extract_results_backwards(response).ok_or(ErrorKind::SearchException(format!("Incomplete search result")))? {
-                let sort = item.remove("sort").ok_or(ErrorKind::SearchException(format!("Incomplete search result")))?;
-                let body: T = serde_json::from_value(item.remove("_source").ok_or(ErrorKind::SearchException(format!("Incomplete search result")))?)?;
-                self.batch.push((sort, body))
-            }
+            todo!()
+            // for mut item in extract_results_backwards(response).ok_or(ErrorKind::SearchException(format!("Incomplete search result")))? {
+            //     let sort = item.remove("sort").ok_or(ErrorKind::SearchException(format!("Incomplete search result")))?;
+            //     let body: T = serde_json::from_value(item.remove("_source").ok_or(ErrorKind::SearchException(format!("Incomplete search result")))?)?;
+            //     self.batch.push((sort, body))
+            // }
         }
 
         match self.batch.pop() {
@@ -719,8 +887,12 @@ impl<T: DeserializeOwned> ScrollCursor<T> {
         // yield self._format_output(value, fl, as_obj=as_obj)
     }
 
-    async fn collect(&mut self) -> Result<Vec<T>> {
-        todo!()
+    pub async fn collect(mut self) -> Result<Vec<T>> {
+        let mut output = vec![];
+        while let Some(value) = self.next().await? {
+            output.push(value);
+        }
+        Ok(output)
     }
 }
 

@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assemblyline_markings::classification::ClassificationParser;
 use strum::IntoEnumIterator;
 
 use assemblyline_models::config::Priority;
@@ -24,7 +25,7 @@ use chrono::{DateTime, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use rand::Rng;
-use redis_objects::queue::MultiQueue;
+use redis_objects::queue::{MultiQueue};
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -442,7 +443,7 @@ impl Ingester {
 
     async fn handle_retries(self: &Arc<Ingester>) -> Result<()> {
         while self.is_running() {
-            let now = chrono::Utc::now().timestamp() as f64;
+            let now = chrono::Utc::now().timestamp();
             let tasks = self.retry_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let task_count = tasks.len();
 
@@ -459,7 +460,7 @@ impl Ingester {
 
     async fn handle_timeouts(self: Arc<Self>) -> Result<()> {
         while self.is_running() {
-            let now = chrono::Utc::now().timestamp() as f64;
+            let now = chrono::Utc::now().timestamp();
             let timeouts = self.timeout_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let timeouts_count = timeouts.len();
 

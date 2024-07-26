@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::ExpandingClassification;
 use chrono::{Utc, Duration};
@@ -20,6 +21,7 @@ use crate::Core;
 pub struct SubmitManager {
     datastore: Arc<Elastic>,
     config: Arc<Config>,
+    classification_parser: Arc<ClassificationParser>,
     pub dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>,
 }
 
@@ -29,6 +31,7 @@ impl SubmitManager {
         Self {
             dispatch_submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
             config: core.config.clone(),
+            classification_parser: core.classification_parser.clone(),
             datastore: core.datastore.clone()
         }
     }
@@ -53,7 +56,7 @@ impl SubmitManager {
         // We should now have all the information we need to construct a submission object
         let mut sub = DatastoreSubmission{
             archived: false,
-            classification: ExpandingClassification::new(submission_obj.params.classification.as_str().to_owned())?,
+            classification: ExpandingClassification::new(submission_obj.params.classification.as_str().to_owned(), self.classification_parser.as_ref())?,
             error_count: 0,
             errors: vec![],
             expiry_ts: expiry,
