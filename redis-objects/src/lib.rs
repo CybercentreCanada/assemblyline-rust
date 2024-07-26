@@ -11,6 +11,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use log::debug;
 use queue::MultiQueue;
 use redis::AsyncCommands;
 pub use redis::Msg;
@@ -45,6 +46,7 @@ impl RedisObjects {
 
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
+        debug!("Create redis connection pool.");
         let cfg = deadpool_redis::Config::from_connection_info(config.clone());
         let pool = cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
         let client = redis::Client::open(config)?;
@@ -244,7 +246,7 @@ pub (crate) mod test {
 
     use redis::ConnectionInfo;
 
-    use crate::{RedisObjects, Queue, ErrorTypes};
+    use crate::{ErrorTypes, PriorityQueue, Queue, RedisObjects};
 
 
     pub (crate) async fn redis_connection() -> Arc<RedisObjects> {
@@ -383,36 +385,36 @@ pub (crate) mod test {
         // Should be [(100, 5)] at this point
 
         // for x in 0..5 {
-        for x in 0..1 {
+        for x in 0..5 {
             pq.push(100.0 + x as f64, &x.to_string()).await?;
         }
 
-        // assert_eq!(pq.length().await?, 6);
-        // assert_eq!(pq.dequeue_range(106, None, None, None).await?, []);
-        // assert_eq!(pq.length().await?, 6);
-        // // 3 and 4 are both options, 4 has higher score
-        // assert_eq!(pq.dequeue_range(103, None, None, None), [4]  );
-        // // 2 and 3 are both options, 3 has higher score, skip it
-        // assert_eq!(pq.dequeue_range(102, None, 1, None), [2]  );
-        // // Take some off the other end
-        // assert_eq!(pq.dequeue_range(None, 100, None, 10), [5, 0]  );
-        // assert_eq!(pq.length().await?, 2);
+        assert_eq!(pq.length().await?, 6);
+        assert!(pq.dequeue_range(Some(106), None, None, None).await?.is_empty());
+        assert_eq!(pq.length().await?, 6);
+        // 3 and 4 are both options, 4 has higher score
+        assert_eq!(pq.dequeue_range(Some(103), None, None, None).await?, vec!["4"]);
+        // 2 and 3 are both options, 3 has higher score, skip it
+        assert_eq!(pq.dequeue_range(Some(102), None, Some(1), None).await?, vec!["2"]);
+        // Take some off the other end
+        assert_eq!(pq.dequeue_range(None, Some(100), None, Some(10)).await?, vec!["5", "0"]);
+        assert_eq!(pq.length().await?, 2);
 
-        // let other = redis.priority_queue("second-priority-queue".to_string());
-        // other.delete().await?;
-        // other.push(100, &"a".to_string()).await?;
-        // assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [1, 2]);
-        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
-        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
-        // assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
-        // assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [0, 0]);
+        let other = redis.priority_queue("second-priority-queue".to_string());
+        other.delete().await?;
+        other.push(100.0, &"a".to_string()).await?;
+        assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [1, 2]);
+        assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        assert!(PriorityQueue::select(&[&other, &pq], None).await?.is_some());
+        assert_eq!(PriorityQueue::all_length(&[&other, &pq]).await?, [0, 0]);
 
-        // pq.push(50, &"first".to_string()).await?;
-        // pq.push(-50, &"second".to_string()).await?;
+        pq.push(50.0, &"first".to_string()).await?;
+        pq.push(-50.0, &"second".to_string()).await?;
 
-        // assert pq.dequeue_range(0, 100) == ['first']
-        // assert pq.dequeue_range(-100, 0) == ['second']
-        todo!();
+        assert_eq!(pq.dequeue_range(Some(0), Some(100), None, None).await?, ["first"]);
+        assert_eq!(pq.dequeue_range(Some(-100), Some(0), None, None).await?, ["second"]);
+        Ok(())
     }
     
     

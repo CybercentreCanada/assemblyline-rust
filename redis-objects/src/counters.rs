@@ -3,7 +3,7 @@ use std::{borrow::BorrowMut, sync::Arc};
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use log::error;
+use log::{error, info};
 use rand::Rng;
 use redis::AsyncCommands;
 use serde::Serialize;
@@ -146,7 +146,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
             }
         } 
         if let Some(number) = obj.as_f64() {
-            if number != 0.0 {
+            if number == 0.0 {
                 return true
             }
         } 
@@ -166,34 +166,39 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
         }
     }
 
+    async fn export_once(&mut self) -> Result<(), ErrorTypes> {
+        // Fetch the message that needs to be sent
+        let outgoing = self.reset();
+
+        // create mapping
+        let mut outgoing = serde_json::to_value(&outgoing)?;
+
+        // check if we will export this message
+        if self.config.export_zero || !self.is_all_zero(&outgoing) {
+            // add extra fields
+            if let Some(obj) = outgoing.as_object_mut() {
+                obj.insert("type".to_owned(), json!(self.config.counter_type));
+                obj.insert("name".to_owned(), json!(self.config.counter_name));
+                obj.insert("host".to_owned(), json!(self.config.host));
+            }
+
+            // send the message
+            let data = serde_json::to_string(&outgoing)?;
+            let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.channel_name.as_str(), data.as_str())?;                
+        }
+        Ok(())
+    }
+
     async fn export_loop(&mut self) -> Result<(), ErrorTypes> {
         loop {
             // wait for the configured duration (or we get notified to do it now)
             let _ = tokio::time::timeout(self.config.export_interval, self.config.export_notify.notified()).await;
-
-            // Fetch the message that needs to be sent
-            let outgoing = self.reset();
-
-            // create mapping
-            let mut outgoing = serde_json::to_value(&outgoing)?;
-
-            // check if we will export this message
-            if self.config.export_zero || !self.is_all_zero(&outgoing) {
-                // add extra fields
-                if let Some(obj) = outgoing.as_object_mut() {
-                    obj.insert("type".to_owned(), json!(self.config.counter_type));
-                    obj.insert("name".to_owned(), json!(self.config.counter_name));
-                    obj.insert("host".to_owned(), json!(self.config.host));
-                }
-
-                // send the message
-                let data = serde_json::to_string(&outgoing)?;
-                let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.channel_name.as_str(), data.as_str())?;
-                
-            }
+            self.export_once().await?;
 
             // check if the public object has been dropped
             if Arc::strong_count(&self.current) == 1 {
+                info!("Stopping metrics exporter: {}", self.config.channel_name);
+                self.export_once().await?; // make sure we report any last minute messages that happened during/after the last export
                 return Ok(())
             }
         }
@@ -302,12 +307,20 @@ impl<M: MetricMessage> Drop for AutoExportingMetrics<M> {
 
 //     channel.publish(dict(counts.items()))
 
+#[cfg(test)]
+fn init() {
+    let _ = env_logger::builder().filter_level(log::LevelFilter::Debug).is_test(true).try_init();
+}
 
 #[tokio::test]
 async fn auto_exporting_counter() {
+    use log::info;
+    init();
+
     use serde::Deserialize;
     use crate::test::redis_connection;
     let connection = redis_connection().await;
+    info!("redis connected");
 
     #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
     struct MetricKind {
@@ -319,6 +332,7 @@ async fn auto_exporting_counter() {
     let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned());
 
     {   
+        info!("Fast export");
         // setup an exporter that sends metrics automatically very fast
         let counter = connection.auto_exporting_metrics::<MetricKind>("test_metrics_channel".to_owned(), "component-x".to_owned())
             .export_interval(Duration::from_micros(10))
@@ -327,10 +341,12 @@ async fn auto_exporting_counter() {
 
         // Send a non default quantity via timer
         increment!(counter, started, 5);
+        info!("Waiting for export");
         assert_eq!(subscribe.recv().await.unwrap().unwrap(), MetricKind{started: 5, finished: 0});
     }
 
     {   
+        info!("slow export");
         // setup a slow export
         let counter = connection.auto_exporting_metrics::<MetricKind>("test_metrics_channel".to_owned(), "component-x".to_owned())
             .export_interval(Duration::from_secs(1000))
