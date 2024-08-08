@@ -40,7 +40,7 @@ pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, 
 }
 
 /// Metadata fields required for converting the structs to elasticsearch mappings
-#[derive(Default, PartialEq, Eq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug, Clone)]
 pub struct ElasticMeta {
     pub index: Option<bool>,
     pub store: Option<bool>,
@@ -142,14 +142,35 @@ impl Mappings {
 
         // if a mapping is simple or has been explicity set, use it
         let simple_mapping = meta.mapping.or(simple_mapping(kind));
+
         if let Some(mapping) = simple_mapping {
             if mapping.eq_ignore_ascii_case("classification") {
                 self.insert(&full_name, meta, FieldMapping{type_: "keyword".to_owned().into(), ..Default::default()});
-                if !full_name.contains(".") {
+                if !full_name.contains('.') {
                     self.properties.insert("__access_lvl__".to_owned(), FieldMapping{type_: "integer".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_req__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_grp1__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_grp2__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
+                }
+            } else if mapping.eq_ignore_ascii_case("flattenedobject") {
+                if let Kind::Mapping(key_type, child_type) = kind {
+                    if key_type.kind != Kind::String {
+                        return Err(MappingError::OnlyStringKeys)
+                    }
+    
+                    let index = meta.index.or(child_type.metadata.index).unwrap_or_default();
+                    // todo!("{:?}", child_type.kind);
+                    if !index || matches!(child_type.kind, Kind::Any) {
+                        self.insert(&full_name, meta, FieldMapping{
+                            type_: Some("object".to_owned()),
+                            enabled: Some(false),
+                            ..Default::default()
+                        })
+                    } else {
+                        self.build_dynamic(&(full_name + ".*"), &child_type.kind, meta, true, index)?;
+                    }
+                } else {
+                    return Err(MappingError::UnsupportedType(full_name, format!("{kind:?}")))
                 }
             } else if mapping.eq_ignore_ascii_case("date") {
                 self.insert(&full_name, meta, FieldMapping{ 
@@ -180,8 +201,17 @@ impl Mappings {
                     self.build_field(Some(child.label), &child.type_info.kind, &child.metadata, &path, allow_refuse_implicit)?;
                 }
             },
-            Kind::Aliased { name, kind } => todo!(),
-            Kind::Enum { name, variants } => todo!(),
+            Kind::Aliased { name, kind } => {
+                self.build_field(None, &kind.kind, meta, &path, allow_refuse_implicit)?;
+            },
+            Kind::Enum { name, variants } => {
+                self.insert(&full_name, meta, FieldMapping{ 
+                    type_: Some("keyword".to_owned()), 
+                    // The maximum always safe value in elasticsearch
+                    ignore_above: Some(8191),
+                    ..Default::default()
+                });
+            },
             Kind::Sequence(kind) => {
                 self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
             },
@@ -205,7 +235,10 @@ impl Mappings {
                 //         dynamic.extend(build_templates(f'{name}.*', field.child_type, index=field.index))
                 let index = meta.index.unwrap_or(false);
                 if !index || value.kind == struct_metadata::Kind::Any {
-                    self.insert(&full_name, meta, FieldMapping{
+                    let mut meta = meta.clone();
+                    meta.index = None;
+                    meta.store = None;
+                    self.insert(&full_name, &meta, FieldMapping{
                         type_: "object".to_owned().into(),
                         enabled: false.into(),
                         ..Default::default()
@@ -214,30 +247,31 @@ impl Mappings {
                     self.build_dynamic(&(full_name + ".*"), &value.kind, &value.metadata, false, index)?;
                 }
             },
-            Kind::Any => {
-                        // elif isinstance(field, Any):
-        //     if field.index:
-        //         raise ValueError(f"Any may not be indexed: {name}")
+            Kind::Any | Kind::JSON => {
+                let index = meta.index.unwrap_or(false);
+                if index {
+                    return Err(MappingError::NoIndexedAny(full_name));
+                }
 
-        //     mappings[name.strip(".")] = {
-        //         "type": "keyword",
-        //         "index": False,
-        //         "doc_values": False
-        //     }
-                todo!();
+                self.insert(&full_name, meta, FieldMapping{
+                    type_: Some("keyword".to_string()),
+                    index: Some(false),
+                    doc_values: Some(false),
+                    ..Default::default()
+                });
             },
             _ => return Err(MappingError::UnsupportedType(full_name, format!("{kind:?}")))
         };
-        return Ok(())
+        Ok(())
     }
 
     // // nested_template = false
     // // index = true
     fn build_dynamic(&mut self, name: &str, kind: &Kind<ElasticMeta>, meta: &ElasticMeta, nested_template: bool, index: bool) -> Result<(), MappingError> {
-    //     if isinstance(field, (Keyword, Boolean, Integer, Float, Text, Json)):
+        // if isinstance(field, (Keyword, Boolean, Integer, Float, Text, Json)):
         match kind {
-            Kind::String | Kind::U64 | Kind::I64 | Kind::U32 | Kind::I32 |
-            Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 |
+            Kind::JSON | Kind::String | Kind::Enum { .. } |
+            Kind::U64 | Kind::I64 | Kind::U32 | Kind::I32 | Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 |
             Kind::F64 | Kind::F32 |
             Kind::Bool => {
                 if nested_template {
@@ -265,37 +299,19 @@ impl Mappings {
                 }
                 return Ok(())
             },
-    //     elif isinstance(field, Any) or not index:
-            Kind::Any | _ if !index => {
-                if index {
-                    return Err(MappingError::NoIndexedAny(name.to_owned()))
-                }
-
-                self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
-                    path_match: Some(name.to_owned()),
-                    mapping: FieldMapping {
-                        type_: "keyword".to_owned().into(),
-                        index: false.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
-
-                return Ok(())
-            },
             
-        // elif isinstance(field, (Mapping, List)):
+            // elif isinstance(field, (Mapping, List)):
             Kind::Mapping(_, child) | Kind::Sequence(child) => {
                 // let temp_name = if field {
                 //     format!("{name}.{}", field.name)
                 // } else {
                 //     name.to_owned()
                 // };
-                return self.build_dynamic(&name, &child.kind, &child.metadata, true, true)
+                return self.build_dynamic(name, &child.kind, &child.metadata, true, true)
             }
 
 
-        // elif isinstance(field, Compound):
+            // elif isinstance(field, Compound):
             Kind::Struct { children, .. } => {
                 // let temp_name =  name
                 // if field.name:
@@ -312,7 +328,7 @@ impl Mappings {
                 return Ok(())
             }
 
-        // elif isinstance(field, Optional):
+            // elif isinstance(field, Optional):
             Kind::Option(kind) => { 
                 return self.build_dynamic(name, &kind.kind, meta, nested_template, true);
                 // return build_templates(name, field.child_type, nested_template=nested_template)
@@ -321,12 +337,26 @@ impl Mappings {
             _ => {}
         }
 
+        // elif isinstance(field, Any) or not index:
+        if matches!(kind, Kind::Any) || !index {
+            if index {
+                return Err(MappingError::NoIndexedAny(name.to_owned()))
+            }
 
-        todo!()
+            self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
+                path_match: Some(name.to_owned()),
+                mapping: FieldMapping {
+                    type_: "keyword".to_owned().into(),
+                    index: false.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
 
-    //     else:
-    //         raise NotImplementedError(f"Unknown type for elasticsearch dynamic mapping: {field.__class__}")
+            return Ok(())
+        }
 
+        todo!("Unknown type for elasticsearch dynamic mapping: {kind:?}");
     }
 
     pub fn insert_dynamic(&mut self, name: String, template: DynamicTemplate) {
@@ -458,8 +488,14 @@ fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
             None => simple_mapping(&kind.kind),
         },
         Kind::Enum { name, variants } => Some("keyword"),
-        Kind::Sequence(kind) => simple_mapping(&kind.kind),
-        Kind::Option(kind) => simple_mapping(&kind.kind),
+        Kind::Sequence(kind) => match kind.metadata.mapping {
+            Some(mapping) => Some(mapping),
+            None => simple_mapping(&kind.kind),
+        },
+        Kind::Option(kind) => match kind.metadata.mapping {
+            Some(mapping) => Some(mapping),
+            None => simple_mapping(&kind.kind),
+        },
         Kind::Mapping(key, value) => None,
         Kind::DateTime => Some("date"),
         Kind::String => Some("keyword"),
@@ -471,7 +507,8 @@ fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
         Kind::F32 => Some("float"),
         Kind::Bool => Some("boolean"),
         Kind::Any => Some("keyword"),
-        _ => todo!(),
+        Kind::JSON => None,
+        _ => todo!("{kind:?}"),
     }
     // Text: 'text',
     // Classification: 'keyword',

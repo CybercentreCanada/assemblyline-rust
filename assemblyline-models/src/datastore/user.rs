@@ -6,7 +6,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
-use crate::{ElasticMeta, Email, ExpandingClassification, UpperString};
+use crate::{ElasticMeta, Email, ExpandingClassification, Readable, UpperString};
 
 
 
@@ -390,3 +390,7 @@ fn default_api_quota() -> u32 { 10 }
 fn default_user_types() -> Vec<UserType> { vec![UserType::User] }
 fn default_submission_quota() -> u32 { 5 }
 fn default_user_is_active() -> bool { true }
+
+impl Readable for User {
+    fn set_from_archive(&mut self, from_archive: bool) {}
+}

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{ClassificationString, ElasticMeta, JsonMap, Text};
+use crate::{ClassificationString, ElasticMeta, JsonMap, Readable, Text};
 
 use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, ParamKinds, RegistryType, SignatureDelimiter};
 
@@ -225,4 +225,8 @@ pub struct ServiceDelta {
     pub update_channel: Option<ChannelKinds>,
     /// REF_SERVICE
     pub update_config: Option<UpdateConfigDelta>,
+}
+
+impl Readable for ServiceDelta {
+    fn set_from_archive(&mut self, from_archive: bool) {}
 }

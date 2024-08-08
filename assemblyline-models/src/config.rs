@@ -591,7 +591,9 @@ pub struct Ingester {
     /// How many files to send to dispatcher concurrently
     pub max_inflight: u64,
     /// How long are files results cached
-    pub cache_dtl: u32
+    pub cache_dtl: u32,
+    /// Always create submissions even on cache hit?
+    pub always_create_submission: bool,
 }
 
 impl Default for Ingester {
@@ -617,7 +619,8 @@ impl Default for Ingester {
                 (Priority::High, 1000000),
                 (Priority::Critical, 500000),
             ].into_iter().collect(),
-            max_inflight: 5000
+            max_inflight: 5000,
+            always_create_submission: false,
         }
     }
 }
@@ -1392,7 +1395,8 @@ pub struct UI {
 //     discover_url: str = odm.Optional(odm.Keyword(), description="Discover URL")
 //     download_encoding = odm.Enum(values=["raw", "cart"], description="Which encoding will be used for downloads?")
 //     email: str = odm.Optional(odm.Email(), description="Assemblyline admins email address")
-//     enforce_quota: bool = odm.Boolean(description="Enforce the user's quotas?")
+    /// Enforce the user's quotas?
+    pub enforce_quota: bool,
 //     external_links: List[ExternalLinks] = odm.List(odm.Compound(ExternalLinks),description="List of external pivot links")
 //     external_sources: List[ExternalSource] = odm.List(odm.Compound(ExternalSource), description="List of external sources to query")
 //     fqdn: str = odm.Text(description="Fully qualified domain name to use for the 2-factor authentication validation")
@@ -1431,7 +1435,7 @@ impl Default for UI {
 //     "discover_url": None,
 //     "download_encoding": "cart",
 //     "email": None,
-//     "enforce_quota": True,
+            enforce_quota: true,
 //     "external_links": [],
 //     "external_sources": [],
 //     "fqdn": "localhost",

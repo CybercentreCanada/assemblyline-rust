@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Sha256, ElasticMeta};
+use crate::{ElasticMeta, Readable, Sha256};
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
 #[metadata_type(ElasticMeta)]
@@ -78,3 +78,7 @@ pub struct Error {
 }
 
 fn default_error_type() -> ErrorTypes { ErrorTypes::Exception }
+
+impl Readable for Error {
+    fn set_from_archive(&mut self, from_archive: bool) {}
+}

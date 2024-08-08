@@ -33,7 +33,7 @@ pub struct Submission {
     /// File block
     pub files: Vec<File>, 
     /// Metadata submitted with the file
-    pub metadata: HashMap<String, String>, 
+    pub metadata: HashMap<String, serde_json::Value>, 
     /// Notification queue parameters
     pub notification: Notification,
     /// Parameters of the submission

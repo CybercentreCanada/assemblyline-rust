@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, Sid};
+use crate::{ElasticMeta, Readable, Sid};
 
 
 /// Model of Scoring related to a File
@@ -23,4 +23,8 @@ pub struct FileScore {
     pub sid: Sid,
     /// Epoch time at which the FileScore entry was created
     pub time: f64,
+}
+
+impl Readable for FileScore {
+    fn set_from_archive(&mut self, from_archive: bool) {}
 }

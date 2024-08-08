@@ -17,6 +17,16 @@ pub use meta::ElasticMeta;
 
 pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
+pub trait Readable: for <'de> Deserialize<'de> {
+    fn set_from_archive(&mut self, from_archive: bool);
+}
+
+impl Readable for JsonMap {
+    fn set_from_archive(&mut self, from_archive: bool) {
+        self.insert("from_json".to_owned(), serde_json::json!(from_archive));
+    }
+}
+
 #[derive(Debug)]
 pub enum ModelError {
     InvalidSha256(String),
@@ -62,6 +72,7 @@ pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 /// Uppercase String
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
 #[metadata_type(ElasticMeta)]
+#[metadata(mapping="keyword")]
 pub struct UpperString {
     value: String
 }
@@ -329,15 +340,22 @@ impl<const USER: bool> ExpandingClassification<USER> {
 
 impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> {
     fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
+
+        // let group_meta = ElasticMeta {
+        //     index: Some(true),
+        //     store: None,
+        //     ..Default::default()
+        // };
+
         struct_metadata::Descriptor { 
             docs: None, 
             metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, 
             kind: struct_metadata::Kind::new_struct("ExpandingClassification", vec![
-                struct_metadata::Entry { label: "classification", docs: None, metadata: Default::default(), type_info: String::metadata(), has_default: false, aliases: &["classification"] },
-                struct_metadata::Entry { label: "__access_lvl__", docs: None, metadata: Default::default(), type_info: i32::metadata(), has_default: false, aliases: &["__access_lvl__"] },
-                struct_metadata::Entry { label: "__access_req__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_req__"] },
-                struct_metadata::Entry { label: "__access_grp1__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp1__"] },
-                struct_metadata::Entry { label: "__access_grp2__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp2__"] },
+                struct_metadata::Entry { label: "classification", docs: None, metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, type_info: String::metadata(), has_default: false, aliases: &["classification"] },
+                // struct_metadata::Entry { label: "__access_lvl__", docs: None, metadata: Default::default(), type_info: i32::metadata(), has_default: false, aliases: &["__access_lvl__"] },
+                // struct_metadata::Entry { label: "__access_req__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_req__"] },
+                // struct_metadata::Entry { label: "__access_grp1__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp1__"] },
+                // struct_metadata::Entry { label: "__access_grp2__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp2__"] },
             ], &mut []),
             // kind: struct_metadata::Kind::Aliased { 
             //     name: "ExpandingClassification", 
@@ -350,6 +368,7 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
 /// A classification value stored as a string
 #[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
+#[metadata(mapping="classification")]
 pub struct ClassificationString(String);
 
 impl From<ClassificationString> for String {

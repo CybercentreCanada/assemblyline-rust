@@ -73,6 +73,7 @@ mod python {
     use serde_json::json;
 
     use super::{RetrohuntHit, Retrohunt, File};
+    use crate::datastore::Submission;
     use crate::meta::Mappings;
 
     use crate::meta::build_mapping;
@@ -149,6 +150,15 @@ mod python {
         let mut py_mappings = load_mapping("file", "File");
         py_mappings.properties.remove("archive_ts");
         let mapping = build_mapping::<File>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    
+    #[test]
+    fn submission_schema() {
+        let mut py_mappings = load_mapping("submission", "Submission");
+        py_mappings.properties.remove("archive_ts");
+        let mapping = build_mapping::<Submission>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
 

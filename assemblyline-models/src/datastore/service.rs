@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{JsonMap, ElasticMeta, Text};
+use crate::{ElasticMeta, JsonMap, Readable, Text};
 
 /// Environment Variable Model
 #[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
@@ -355,7 +355,6 @@ impl Service {
     }
 }
 
-
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
@@ -368,3 +367,7 @@ pub enum ChannelKinds {
 
 fn default_service_accepts() -> String { ".*".to_string() }
 fn default_service_rejects() -> Option<String> { Some("empty|metadata/.*".to_string()) }
+
+impl Readable for Service {
+    fn set_from_archive(&mut self, from_archive: bool) {}
+}

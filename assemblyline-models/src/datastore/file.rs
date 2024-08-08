@@ -1,10 +1,12 @@
 
 use chrono::{DateTime, Utc};
+use md5::Digest;
+use rand::prelude::Distribution;
 use serde::{Serialize, Deserialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
+use crate::{ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, Text, MD5};
 
 /// Model of File
 #[derive(Debug, Serialize, Deserialize, Described, Clone)]
@@ -80,6 +82,50 @@ pub struct File {
     pub comments: Vec<Comment>,
 }
 
+impl File {
+    pub fn gen_for_sample<R: rand::Rng + ?Sized>(data: &[u8], rng: &mut R) -> File {
+        let sha256 = hex::encode(sha2::Sha256::new().chain_update(&data).finalize());
+        let sha1 = hex::encode(sha1::Sha1::new().chain_update(&data).finalize());
+        let md5 = hex::encode(md5::Md5::new().chain_update(&data).finalize());
+
+        File {
+            ascii: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
+            classification: ExpandingClassification {
+                classification: "".to_string(),
+                __access_lvl__: 0,
+                __access_req__: vec![],
+                __access_grp1__: vec![],
+                __access_grp2__: vec![],
+            },
+            entropy: rng.gen_range(0.0..1.0),
+            expiry_ts: None,
+            is_section_image: rng.r#gen(),
+            is_supplementary: rng.r#gen(),
+            hex: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
+            labels: vec![],
+            label_categories: Default::default(),
+            md5: md5.parse().unwrap(),
+            magic: "Binary data".to_string(),
+            mime: Some("application/octet-stream".to_string()),
+            seen: Seen { count: 1, first: chrono::Utc::now(), last: chrono::Utc::now() },
+            sha1: sha1.parse().unwrap(),
+            sha256: sha256.parse().unwrap(),
+            size: data.len() as u64,
+            ssdeep: rng.gen(),
+            file_type: "unknown".to_string(),
+            tlsh: None,
+            from_archive: false,
+            uri_info: None,
+            comments: vec![],
+        }
+    }
+}
+
+impl Readable for File {
+    fn set_from_archive(&mut self, from_archive: bool) {
+        self.from_archive = from_archive;
+    }
+}
 
 /// URI Information Model
 #[derive(Debug, Serialize, Deserialize, Described, Clone)]

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use struct_metadata::Described;
 
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Sha256, Sid, UpperString};
+use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, UpperString};
 
 
 /// Model of Submission
@@ -37,8 +37,8 @@ pub struct Submission {
     /// Maximum score of all the files in the scan
     pub max_score: i32,
     /// Metadata associated to the submission
-    #[metadata(store=false)]
-    pub metadata: HashMap<String, String>,
+    #[metadata(store=false, mapping="flattenedobject")]
+    pub metadata: HashMap<String, serde_json::Value>,
     /// Submission parameter details
     pub params: SubmissionParams,
     /// List of result keys
@@ -65,6 +65,13 @@ pub struct Submission {
     pub scan_key: Option<String>,
 }
 
+impl Readable for Submission {
+    fn set_from_archive(&mut self, from_archive: bool) {
+        self.from_archive = from_archive
+    }
+}
+
+
 /// Submission Parameters
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
@@ -77,7 +84,7 @@ pub struct SubmissionParams {
     /// Description of the submission
     #[serde(skip_serializing_if = "Option::is_none")]
     #[metadata(store=true, copyto="__text__")]
-    pub description: Option<String>,
+    pub description: Option<Text>,
     /// Should this submission generate an alert?
     pub generate_alert: bool,
     /// List of groups related to this scan
@@ -96,9 +103,9 @@ pub struct SubmissionParams {
     /// Is the file submitted already known to be malicious?
     pub malicious: bool,
     /// Max number of extracted files
-    pub max_extracted: u32,
+    pub max_extracted: i32,
     /// Max number of supplementary files
-    pub max_supplementary: u32,
+    pub max_supplementary: i32,
     /// Priority of the scan
     pub priority: u16,
     /// Should the submission do extra profiling?
@@ -114,20 +121,23 @@ pub struct SubmissionParams {
     #[metadata(store=true, copyto="__text__")]
     pub submitter: String,
     /// Time, in days, to live for this submission
-    pub ttl: u32,
+    pub ttl: i32,
     /// Type of submission
     #[serde(rename="type")]
     pub submission_type: String,
     /// Initialization for temporary submission data
     #[serde(skip_serializing_if = "Option::is_none")]
     #[metadata(index=false)]
-    pub initial_data: Option<String>,
+    pub initial_data: Option<Text>,
     /// Does the submission automatically goes into the archive when completed?
     pub auto_archive: bool,
     /// When the submission is archived, should we delete it from hot storage right away?
     pub delete_after_archive: bool,
     /// Parent submission ID
     pub psid: Option<Sid>,
+    /// Should we use the alternate dtl while archiving?
+    #[serde(default)]
+    pub use_archive_alternate_dtl: bool,
 }
 
 
@@ -159,6 +169,7 @@ impl SubmissionParams {
             auto_archive: false,
             delete_after_archive: false,
             psid: None,
+            use_archive_alternate_dtl: false,
         }
     }
 
@@ -227,9 +238,6 @@ impl SubmissionParams {
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct ServiceSelection {
-    /// List of selected services
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub selected: Vec<String>,
     /// List of excluded services
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub excluded: Vec<String>,
@@ -239,6 +247,9 @@ pub struct ServiceSelection {
     /// Add to service selection when resubmitting
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub resubmit: Vec<String>,
+    /// List of selected services
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub selected: Vec<String>,
 }
 
 /// Submission-Relevant Times
@@ -307,6 +318,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub name: String,
     /// Size of the file in bytes
+    #[metadata(mapping="integer")]
     pub size: Option<u64>,
     /// SHA256 hash of the file
     #[metadata(copyto="__text__")]
