@@ -1,3 +1,4 @@
+use assemblyline_markings::config::{ClassificationConfig, ClassificationGroup, ClassificationLevel, DynamicGroupType};
 use strum_macros::{Display, EnumIter};
 
 

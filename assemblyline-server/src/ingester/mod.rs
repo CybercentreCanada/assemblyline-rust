@@ -10,14 +10,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use assemblyline_markings::classification::ClassificationParser;
+use redis_objects::quota::UserQuotaTracker;
 use strum::IntoEnumIterator;
 
 use assemblyline_models::config::Priority;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::{Sha256, Sid, UpperString};
+use assemblyline_models::{ExpandingClassification, Sha256, Sid, UpperString};
 use assemblyline_models::datastore::alert::ExtendedScanValues;
 use assemblyline_models::messages::submission::{Submission as MessageSubmission, SubmissionMessage};
 use assemblyline_models::datastore::submission::Submission as DatabaseSubmission;
@@ -25,7 +25,7 @@ use chrono::{DateTime, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use rand::Rng;
-use redis_objects::queue::{MultiQueue};
+use redis_objects::queue::MultiQueue;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
@@ -170,6 +170,9 @@ struct Ingester {
     // Utility object to handle post-processing actions
     postprocess_worker: Arc<ActionWorker>,
     submit_manager: SubmitManager,
+
+    // Async Submission quota tracker
+    async_submission_tracker: UserQuotaTracker,
 }
 
 
@@ -211,6 +214,8 @@ pub async fn main(core: Core) -> Result<()> {
         queue_bypass: Mutex::new(Default::default()),
         postprocess_worker: ActionWorker::new(true, &core).await?,
         submit_manager: SubmitManager::new(&core),
+        async_submission_tracker: core.redis_persistant.user_quota_tracker("async_submissions".to_owned())
+            .set_timeout(chrono::Duration::days(1).to_std().unwrap()),
         core,
     });
 
@@ -295,24 +300,15 @@ impl Ingester {
                 },
             };
 
+            // continue if there has been a timeout
             let message = match message {
                 Some(message) => message,
                 None => continue,
             };
 
-            // try:
-                // if 'submission' in message:
-                //     # A retried task
-                //     task = IngestTask(message)
-                // else:
-                //     # A new submission
-                //     sub = MessageSubmission(message)
+            // setup the task object and spawn a new task to handle it
             let mut task = Box::new(IngestTask::new(message));
             task.submission.sid = rand::thread_rng().gen(); // Reset to new random uuid
-            
-            // Write all input to the traffic queue
-            self.traffic_queue.publish(&SubmissionMessage::ingested(task.submission.clone()));
-
             self.spawn_ingest(task);
         }
         Ok(())
@@ -538,7 +534,7 @@ impl Ingester {
                 let sid = task.submission.sid;
 
                 // Check if its already complete in the database
-                let from_db = self.core.datastore.submission.get(&sid.to_string()).await?;
+                let from_db = self.core.datastore.submission.get(&sid.to_string(), None).await?;
                 if let Some(from_db) = from_db {
                     if from_db.state == SubmissionState::Completed {
                         warn!("Completing a hanging finished submission [{sid}]");
@@ -580,6 +576,10 @@ impl Ingester {
 
     async fn ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> Result<()> {
         info!("[{} :: {}] Task received for processing", task.ingest_id, task.sha256());
+
+        // Write all input to the traffic queue
+        self.traffic_queue.publish(&SubmissionMessage::ingested(task.submission.clone()));
+
         // Load a snapshot of ingest parameters as of right now.
         let max_file_size = self.core.config.submission.max_file_size;
         // let param = task.params();
@@ -594,7 +594,8 @@ impl Ingester {
 
         // Clean up metadata strings, since we may delete some, iterate on a copy of the keys
         for (key, value) in task.submission.metadata.clone() {
-            if value.len() > self.core.config.submission.max_metadata_length as usize {
+            let encoded_value = serde_json::to_string(&value)?;
+            if encoded_value.len() > self.core.config.submission.max_metadata_length as usize {
                 info!("[{} :: {}] Removing {key} from metadata because value is too big", task.ingest_id, task.sha256());
                 task.submission.metadata.remove(&key);
             }
@@ -620,7 +621,7 @@ impl Ingester {
 
         // Check if this file is already being processed
         Self::stamp_filescore_key(&mut task, None);
-        let (pprevious, previous, score, _) = if !task.params().ignore_cache {
+        let (mut pprevious, previous, score, _) = if !task.params().ignore_cache {
             self.check(&mut task, false).await?
         } else {
             (None, None, None, "".to_owned())
@@ -651,8 +652,34 @@ impl Ingester {
 
         // Do this after priority has been assigned.
         // (So we don't end up dropping the resubmission).
-        if let Some(previous) = previous {
+        if let Some(mut previous) = previous {
             increment!(self.counter, duplicates);
+
+            if self.core.config.core.ingester.always_create_submission {
+                // Create a submission record based on the cache hit
+                if let Ok(Some(mut submission)) = self.core.datastore.submission.get(&previous.to_string(), None).await {
+
+                    // Assign the current submission as the PSID for the new submission
+                    pprevious = Some(previous);
+                    previous = task.ingest_id;
+                    task.submission.params.psid = pprevious;
+
+                    submission.archived = false;
+                    submission.classification = ExpandingClassification::new(task.params().classification.as_str().to_owned(), &self.core.classification_parser)?;
+                    submission.expiry_ts = Some(Utc::now() + chrono::Duration::days(task.params().ttl.into()));
+                    submission.from_archive = false;
+                    submission.metadata = task.submission.metadata.clone();
+                    submission.params = task.params().clone();
+                    submission.sid = previous;
+                    submission.to_be_deleted = false;
+                    submission.times.submitted = task.ingest_time;
+                    submission.times.completed = Some(Utc::now());
+
+                    self.core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await?;
+                }
+            }
+
+
             self.finalize(pprevious, previous, score, &mut task, true).await?;
 
             // On cache hits of any kind we want to send out a completed message
@@ -682,7 +709,7 @@ impl Ingester {
         let sha256 = sub.files[0].sha256.clone();
         let ingest_id = match sub.metadata.get("ingest_id") {
             Some(id) => id.to_owned(),
-            None => "unknown".to_owned(),
+            None => serde_json::Value::String("unknown".to_owned()),
         };
         let scan_key = match sub.scan_key {
             Some(key) => key,
@@ -746,24 +773,6 @@ impl Ingester {
             self.finalize(psid, sid, Some(score), &mut dup, true).await?;
         }
 
-        // def exhaust() -> Iterable[IngestTask]:
-        //     while True:
-        //         res = self.duplicate_queue.pop(scan_key, blocking=False)
-        //         if res is None:
-        //             break
-        //         res = IngestTask(res)
-        //         res.submission.sid = sid
-        //         yield res
-
-        // // You may be tempted to remove the assignment to dups and use the
-        // // value directly in the for loop below. That would be a mistake.
-        // // The function finalize may push on the duplicate queue which we
-        // // are pulling off and so condensing those two lines creates a
-        // // potential infinite loop.
-        // dups = [dup for dup in exhaust()]
-        // for dup in dups:
-        //     self.finalize(psid, sid, score, dup, cache=True)
-
         return Ok(scan_key)
     }
 
@@ -802,17 +811,22 @@ impl Ingester {
     }
 
     async fn _notify_drop(&self, task: &mut IngestTask) -> Result<()> {
-        self.send_notification(&mut task, None, false).await?;
+        if self.core.config.ui.enforce_quota {
+            self.async_submission_tracker.end(&task.params().submitter).await?;
+        }
 
-        let c12n = task.params().classification;
+        self.send_notification(task, None, false).await?;
+
+        let c12n = &task.params().classification;
         let expiry = Utc::now() + chrono::Duration::seconds(86400);
-        let sha256 = task.submission.files[0].sha256;
+        let sha256 = &task.submission.files[0].sha256;
 
         self.core.datastore.save_or_freshen_file(
             &sha256, 
-            [("sha256".to_owned(), sha256)].into_iter().collect(), 
+            [("sha256".to_owned(), serde_json::Value::String(sha256.to_string()))].into_iter().collect(), 
             Some(expiry), 
-            c12n, 
+            c12n.as_str().to_owned(), 
+            &self.core.classification_parser
         ).await?;
         Ok(())
     }
@@ -857,7 +871,7 @@ impl Ingester {
             return Ok(groups.clone())
         }
 
-        let user_data: Option<User> = self.core.datastore.user.get(username).await?;
+        let user_data: Option<User> = self.core.datastore.user.get(username, None).await?;
         if let Some(user_data) = user_data {
             cache.cache.insert(username.to_owned(), user_data.groups.clone());
             Ok(user_data.groups)
@@ -878,7 +892,7 @@ impl Ingester {
                 result.clone()
             },
             None => {
-                let result = match self.core.datastore.filescore.get(&key).await? {
+                let result = match self.core.datastore.filescore.get(&key, None).await? {
                     Some(result) => {
                         increment!(self.counter, cache_hit);
                         info!("[{} :: {}] Remote cache hit", task.ingest_id, task.sha256());
@@ -892,7 +906,7 @@ impl Ingester {
                     }
                 };
 
-                self.cache.lock().insert(key, result.clone());
+                self.cache.lock().insert(key.clone(), result.clone());
                 result
             },
         };
@@ -905,7 +919,7 @@ impl Ingester {
             info!("[{} :: {}] Cache hit dropped, cache has expired", task.ingest_id, task.sha256());
             increment!(self.counter, cache_expired);
             self.cache.lock().remove(&key);
-            self.core.datastore.filescore.delete(&key).await?;
+            self.core.datastore.filescore.delete(&key, None).await?;
             return Ok((None, None, None, key))
         } else if self.stale(age, errors) {
             info!("[{} :: {}] Cache hit dropped, cache is stale", task.ingest_id, task.sha256());
@@ -1039,12 +1053,20 @@ impl Ingester {
         task.submission.sid = sid;
 
         if cache {
-            let did_resubmit = self.postprocess_worker.process_cachehit(task.submission, score).await?;
+            let did_resubmit = if let serde_json::Value::Object(submission) = serde_json::to_value(&task.submission)? {
+                self.postprocess_worker.process_cachehit(submission, score, task.params().auto_archive).await?
+            } else {
+                panic!();
+            };
 
             if did_resubmit {
                 task.extended_scan = ExtendedScanValues::Submitted;
                 task.submission.params.psid = None;
             }
+        }
+
+        if self.core.config.ui.enforce_quota {
+            self.async_submission_tracker.end(&task.params().submitter).await?;
         }
 
         self.send_notification(&mut task, None, false).await?;

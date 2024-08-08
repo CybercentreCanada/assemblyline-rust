@@ -42,9 +42,9 @@ impl SubmitManager {
         // Enforce maximum DTL
         if self.config.submission.max_dtl > 0 {
             if submission_obj.params.ttl > 0 {
-                submission_obj.params.ttl = submission_obj.params.ttl.min(self.config.submission.max_dtl);
+                submission_obj.params.ttl = submission_obj.params.ttl.min(self.config.submission.max_dtl as i32);
             } else {
-                submission_obj.params.ttl = self.config.submission.max_dtl;
+                submission_obj.params.ttl = self.config.submission.max_dtl as i32;
             }
         }
         let expiry = if submission_obj.params.ttl > 0 {

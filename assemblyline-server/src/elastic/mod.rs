@@ -1,8 +1,13 @@
 
+use std::fmt::Display;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use log::error;
 
 pub mod responses;
 pub mod collection;
+pub mod error;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
@@ -11,11 +16,13 @@ use assemblyline_models::{JsonMap, Sha256};
 use assemblyline_models::datastore::{Error as ErrorModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, Utc};
 use collection::{Collection, OperationBatch};
-use elasticsearch::Elasticsearch;
+use error::{ElasticErrorInner, WithContext};
 use itertools::Itertools;
 use log::info;
+use reqwest::{Method, StatusCode};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-
+use self::error::{ElasticError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Index {
@@ -27,12 +34,31 @@ pub enum Index {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Version {
     Create,
-    Expected(i64, i64),
+    Expected{primary_term: i64, sequence_number: i64},
 }
+
+
+/// Methods supported for copying indices
+enum CopyMethod {
+    /// Copy the index by cloning it
+    Clone,
+}
+
+impl std::fmt::Display for CopyMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CopyMethod::Clone => f.write_str("_clone")
+        }
+    }
+}
+
+
+/// Maximum time between retries when an error occurs
+const MAX_RETRY_SECONDS: u64 = 10;
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(MAX_RETRY_SECONDS);
 
 const DEFAULT_SEARCH_FIELD: &str = "__text__";
 const KEEP_ALIVE: &str = "5m";
-const MAX_RETRY_BACKOFF: u64 = 10;
 
 
 fn strip_nulls(d: serde_json::Value) -> serde_json::Value {
@@ -83,201 +109,284 @@ fn recursive_update(mut d: serde_json::Value, u: serde_json::Value, stop_keys: O
     return d
 }
 
-
-fn parse_sort(sort: &str) -> Result<Vec<String>> {
-    todo!()
-//     """
-//     This function tries to do two things at once:
-//         - convert AL sort syntax to elastic,
-//         - convert any sorts on the key _id to id
-//     """
-//     if sort is None:
-//         return sort
-
-//     if isinstance(sort, list):
-//         return [parse_sort(row, ret_list=False) for row in sort]
-//     elif isinstance(sort, dict):
-//         return {('id' if key == '_id' else key): value for key, value in sort.items()}
-//     elif "," in sort:
-//         return [parse_sort(row.strip(), ret_list=False) for row in sort.split(',')]
-
-//     parts = sort.split(' ')
-//     if len(parts) == 1:
-//         if parts == '_id':
-//             if ret_list:
-//                 return ['id']
-//             return 'id'
-//         if ret_list:
-//             return [parts]
-//         return parts
-//     elif len(parts) == 2:
-//         if parts[1] not in ['asc', 'desc']:
-//             raise SearchException('Unknown sort parameter ' + sort)
-//         if parts[0] == '_id':
-//             if ret_list:
-//                 return [{'id': parts[1]}]
-//             return {'id': parts[1]}
-//         if ret_list:
-//             return [{parts[0]: parts[1]}]
-//         return {parts[0]: parts[1]}
-//     raise SearchException('Unknown sort parameter ' + sort)
+/// The header section and local parameters to a request to elasticsearch.
+/// 
+/// Not to be confused with the actual HTTP request constructed to make a query.
+/// This is just some of the things you need to build that HTTP request and information
+/// needed to handle its outcome locally
+#[derive(Debug, Clone)]
+struct Request {
+    method: reqwest::Method, 
+    url: reqwest::Url,
+    raise_conflicts: bool,
 }
 
-macro_rules! with_retries_on {
-    ($helper:expr, $index_name:expr, $expression:expr) => {{
-        crate::elastic::with_retries_detail!($helper, Some($index_name), false, $expression)
-    }}
-}
-use with_retries_on;
-
-macro_rules! with_retries_raise_confict {
-    ($helper:expr, $index_name:expr, $expression:expr) => {{
-        crate::elastic::with_retries_detail!($helper, Some($index_name), true, $expression)
-    }}
-}
-use with_retries_raise_confict;
-
-/// This function evaluates the passed expression and reconnect if it fails
-macro_rules! with_retries_detail {
-    ($helper:expr, $index_name:expr, $raise_conflicts:expr, $expression:expr) => {{
-        use log::{info, warn};
-        use std::error::Error;
-        use elasticsearch::http;
-
-        let mut attempts = 0;
-        // let updated = 0;
-        // let deleted = 0;
-        loop {
-            // If this isn't the first time we have tried, wait and reset the connection
-            if attempts > 0 {
-                let sleep_seconds = crate::elastic::MAX_RETRY_BACKOFF.min(attempts);
-                tokio::time::sleep(tokio::time::Duration::from_secs(sleep_seconds)).await;
-                $helper.connection_reset().await?;
-            }
-            attempts += 1;
-
-            // run the actual code being retried
-            let result = $expression;
-
-            // Unify server and client errors
-            let response = match result {
-                // valid response or server error
-                Ok(response) => response.error_for_status_code(),
-                // client error
-                Err(err) => Err(err)
-            };
-
-            // handle non errors, extract errors
-            let original_err = match response {
-                Ok(response) => {
-                    if attempts > 1 {
-                        info!("Reconnected to elasticsearch!");
-                    }
-
-                    // if updated:
-                    //     ret_val['updated'] += updated
-
-                    // if deleted:
-                    //     ret_val['deleted'] += deleted
-
-                    match response.json().await {
-                        Ok(doc) => break Ok(doc),
-                        Err(err) => err,
-                    }
-                },
-                Err(err) => err
-            };
-
-            // Internal library errors are terminal and we stop here
-            let source_err = match original_err.source() {
-                Some(err) => err,
-                None => break Err(ElasticError::fatal(original_err))
-            };
-
-            let hosts = $helper.get_hosts_safe().join(" | ");
-
-            // Some manner of io error, just print a warning and retry, lots of ephemeral errors
-            // will resolve to this type where socket methods have failed
-            if let Some(err) = source_err.downcast_ref::<std::io::Error>() {
-                warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, err, stringify!($expression));
-                continue
-            }
-
-            // Json decoding/encoding error, will probably repeat if we retry, break with error
-            if let Some(err) = source_err.downcast_ref::<serde_json::error::Error>() {
-                break Err(ElasticError::json(err))
-            }
-
-            // HTTP library error
-            if let Some(err) = source_err.downcast_ref::<reqwest::Error>() {
-                // A timeout
-                if err.is_timeout() {
-                    warn!("Elasticsearch connection timeout, server(s): {}, retrying...", hosts);
-                    continue
-                }
-
-                // a connection error
-                if err.is_connect() {
-                    warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, err, stringify!($expression));
-                    continue
-                }
-
-                // handle error types that have HTTP status codes associated
-                if let Some(status) = err.status() {
-
-                    if http::StatusCode::NOT_FOUND == status {
-                        let err_message = err.to_string();
-
-                        // Validate exception type
-                        if $index_name.is_some() || !err_message.contains("No search context found") {
-                            break Err(ElasticError::NotFound(Box::new(err_message)))
-                        }
-
-                        let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-                        warn!("Index {} was removed while a query was running, retrying...", index);
-                        continue
-                    } else if http::StatusCode::CONFLICT == status {
-                        if $raise_conflicts {
-                            // De-sync potential treads trying to write to the index
-                            tokio::time::sleep(tokio::time::Duration::from_secs_f64(rand::random::<f64>() * 0.1)).await;
-                            break Err(ElasticError::VersionConflict(Box::new(err.to_string())))
-                        }
-                        // updated += ce.info.get('updated', 0)
-                        // deleted += ce.info.get('deleted', 0)
-                        continue
-
-                    } else if http::StatusCode::FORBIDDEN == status {
-                        match $index_name {
-                            None => break Err(ElasticError::fatal(original_err)),
-                            Some(index) => {
-                                log::warn!("Elasticsearch cluster is preventing writing operations on index {}, retrying...", index);
-                            }
-                        }
-                        continue
-                    } else if http::StatusCode::SERVICE_UNAVAILABLE == status {
-                        let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-
-                        // Display proper error message
-                        log::warn!("Looks like index {} is not ready yet, retrying...", index);
-                        continue
-                    } else if http::StatusCode::TOO_MANY_REQUESTS == status {
-                        let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-                        log::warn!("Elasticsearch is too busy to perform the requested task on index {}, retrying...", index);
-                        continue
-                    } else if http::StatusCode::UNAUTHORIZED == status {
-                        // authentication errors
-                        warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, err, stringify!($expression));
-                        continue
-                    }
-                }
-            }
-
-            // any other error we can't identify, break out
-            break Err(ElasticError::fatal(original_err))
+impl From<(reqwest::Method, reqwest::Url)> for Request {
+    fn from(value: (reqwest::Method, reqwest::Url)) -> Self {
+        Request {
+            method: value.0,
+            url: value.1,
+            raise_conflicts: false
         }
-    }}
+    }
 }
-use with_retries_detail;
+
+impl Request {
+    pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url) -> Self {
+        Self {
+            method,
+            url,
+            raise_conflicts: true
+        }
+    }
+}
+
+// This function tries to do two things at once:
+//  - convert AL sort syntax to elastic,
+//  - convert any sorts on the key _id to id
+fn parse_sort(sort: &str) -> Result<Vec<(String, SortDirection)>> {
+    if sort.is_empty() {
+        return Ok(vec![])
+    }
+
+    // if isinstance(sort, list) {
+    //     return [parse_sort(row, ret_list=False) for row in sort]
+    // } elif isinstance(sort, dict) {
+    //     return {('id' if key == '_id' else key): value for key, value in sort.items()}
+    // } elif "," in sort {
+    //     return [parse_sort(row.strip(), ret_list=False) for row in sort.split(',')]
+    // }
+    if sort.contains(',') {
+        let mut out = vec![];
+        for part in sort.split(',') {
+            out.extend(parse_sort(part)?)
+        }
+        return Ok(out)
+    }
+
+    Ok(if let Some((left, right)) = sort.split_once(' ') {
+        if left == "_id" {
+            vec![("id".to_owned(), right.parse()?)]
+        } else {
+            vec![(left.to_owned(), right.parse()?)]
+        }
+    } else if sort == "_id" {
+        vec![("id".to_owned(), SortDirection::Ascending)]
+    } else {
+        vec![(sort.to_string(), SortDirection::Ascending)]
+    })
+}
+
+enum SortDirection {
+    Ascending,
+    Descending,
+}
+
+impl Display for SortDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Ascending => "asc",
+            Self::Descending => "desc",
+        })
+    }
+}
+
+impl FromStr for SortDirection {
+    type Err = ElasticError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let s = s.to_ascii_lowercase();
+        if s.starts_with("asc") {
+            Ok(Self::Ascending)
+        } else if s.starts_with("desc") {
+            Ok(Self::Descending)
+        } else {
+            Err(ElasticError::fatal(format!("Unknown sort parameter {s}")))
+        }
+    }
+}
+
+// macro_rules! with_retries {
+//     ($helper:expr, $expression:expr) => {{
+//         crate::elastic::with_retries_detail!($helper, None, false, $expression)
+//     }}
+// }
+// use with_retries;
+
+// macro_rules! with_retries_on {
+//     ($helper:expr, $index_name:expr, $expression:expr) => {{
+//         crate::elastic::with_retries_detail!($helper, Some($index_name), false, $expression)
+//     }}
+// }
+// use with_retries_on;
+
+// macro_rules! with_retries_raise_confict {
+//     ($helper:expr, $index_name:expr, $expression:expr) => {{
+//         crate::elastic::with_retries_detail!($helper, Some($index_name), true, $expression)
+//     }}
+// }
+// use with_retries_raise_confict;
+
+// /// This function evaluates the passed expression and reconnect if it fails
+// macro_rules! with_retries_detail {
+//     ($helper:expr, $index_name:expr, $raise_conflicts:expr, $expression:expr) => {{
+//         use log::{info, warn};
+//         use std::error::Error;
+//         use elasticsearch::http;
+//         let hosts = $helper.get_hosts_safe().join(" | ");
+
+//         let handle_error = |original_err: elasticsearch::Error| -> Option<ElasticError> {
+//             // Internal library errors are terminal and we stop here
+//             let source_err = match original_err.source() {
+//                 Some(err) => err,
+//                 None => return Some(ElasticError::fatal(original_err))
+//             };
+
+//             // Some manner of io error, just print a warning and retry, lots of ephemeral errors
+//             // will resolve to this type where socket methods have failed
+//             if let Some(err) = source_err.downcast_ref::<std::io::Error>() {
+//                 warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, err, stringify!($expression));
+//                 return None
+//             }
+
+//             // Json decoding/encoding error, will probably repeat if we retry, break with error
+//             if let Some(err) = source_err.downcast_ref::<serde_json::error::Error>() {
+//                 return Some(ElasticError::json(err))
+//             }
+
+//             // HTTP library error
+//             if let Some(err) = source_err.downcast_ref::<reqwest::Error>() {
+//                 // A timeout
+//                 if err.is_timeout() {
+//                     warn!("Elasticsearch connection timeout, server(s): {}, retrying...", hosts);
+//                     return None
+//                 }
+
+//                 // a connection error
+//                 if err.is_connect() {
+//                     warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, err, stringify!($expression));
+//                     return None
+//                 }
+
+//             }
+
+//             // any other error we can't identify, break out
+//             Some(ElasticError::fatal(original_err))
+//         };
+
+//         let mut attempts = 0;
+//         // let updated = 0;
+//         // let deleted = 0;
+//         loop {
+//             // If this isn't the first time we have tried, wait and reset the connection
+//             if attempts > 0 {
+//                 let sleep_seconds = crate::elastic::MAX_RETRY_SECONDS.min(attempts);
+//                 tokio::time::sleep(tokio::time::Duration::from_secs(sleep_seconds)).await;
+//                 $helper.connection_reset().await?;
+//             }
+//             attempts += 1;
+
+//             // run the actual code being retried
+//             let result = $expression;
+
+
+//             let response = match result {
+//                 // we have managed to load response headers (may still be an error)
+//                 Ok(response) => response,
+//                 // error that stopped us from getting a response
+//                 Err(err) => match handle_error(err) {
+//                     Some(err) => break Err(err),
+//                     None => continue
+//                 },
+//             };
+
+//             // at this point we know we have a respones, even if its an error
+//             if attempts > 1 {
+//                 info!("Reconnected to elasticsearch!");
+//             }
+
+//             // if updated:
+//             //     ret_val['updated'] += updated
+
+//             // if deleted:
+//             //     ret_val['deleted'] += deleted
+
+//             let status = response.status_code();
+
+//             if status.is_success() {
+//                 match response.json().await {
+//                     Ok(doc) => break Ok(doc),
+//                     Err(err) => match handle_error(err) {
+//                         Some(err) => break Err(err),
+//                         None => continue
+//                     },
+//                 }
+//             }
+
+//             let mut message = match response.text().await {
+//                 Ok(message) => message,
+//                 Err(err) => match handle_error(err) {
+//                     Some(err) => break Err(err),
+//                     None => continue
+//                 }
+//             };
+//             if message.is_empty() {
+//                 message = status.to_string()
+//             }
+
+//             // handle specific HTTP status codes we want particular actions for
+//             if http::StatusCode::NOT_FOUND == status {
+//                 // let err_message = err.to_string();
+
+//                 // Validate exception type
+//                 if $index_name.is_some() || !message.contains("No search context found") {
+//                     break Err(ElasticError::NotFound(Box::new(message)))
+//                 }
+
+//                 let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+//                 warn!("Index {} was removed while a query was running, retrying...", index);
+//                 continue
+//             } else if http::StatusCode::CONFLICT == status {
+//                 if $raise_conflicts {
+//                     // De-sync potential treads trying to write to the index
+//                     tokio::time::sleep(tokio::time::Duration::from_secs_f64(rand::random::<f64>() * 0.1)).await;
+//                     break Err(ElasticError::VersionConflict(Box::new(message)))
+//                 }
+//                 // updated += ce.info.get('updated', 0)
+//                 // deleted += ce.info.get('deleted', 0)
+//                 continue
+
+//             } else if http::StatusCode::FORBIDDEN == status {
+//                 match $index_name {
+//                     None => break Err(ElasticError::fatal(message)),
+//                     Some(index) => {
+//                         log::warn!("Elasticsearch cluster is preventing writing operations on index {}, retrying...", index);
+//                     }
+//                 }
+//                 continue
+//             } else if http::StatusCode::SERVICE_UNAVAILABLE == status {
+//                 let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+
+//                 // Display proper error message
+//                 log::warn!("Looks like index {} is not ready yet, retrying...", index);
+//                 continue
+//             } else if http::StatusCode::TOO_MANY_REQUESTS == status {
+//                 let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+//                 log::warn!("Elasticsearch is too busy to perform the requested task on index {}, retrying...", index);
+//                 continue
+//             } else if http::StatusCode::UNAUTHORIZED == status {
+//                 // authentication errors
+//                 let hosts = $helper.get_hosts_safe().join(" | ");
+//                 warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, message, stringify!($expression));
+//                 continue
+//             } else {
+//                 break Err(ElasticError::fatal(message))
+//             }
+//         }
+//     }}
+// }
+// use with_retries_detail;
+
 
 fn get_transport_timeout() -> std::time::Duration {
     let seconds = match std::env::var("AL_DATASTORE_TRANSPORT_TIMEOUT") {
@@ -290,39 +399,439 @@ fn get_transport_timeout() -> std::time::Duration {
 /// Wrapper around the elasticsearch client for helper methods used across contexts
 /// This struct is deliberately private to this module
 struct ElasticHelper {
-    pub es: tokio::sync::RwLock<Elasticsearch>,
-    pub hosts: Vec<url::Url>,
+    pub client: reqwest::Client,
+    // pub es: tokio::sync::RwLock<elasticsearch::Elasticsearch>,
+    pub host: url::Url,
     pub archive_access: bool,
 }
 
 impl ElasticHelper {
-    async fn connect(url: &str, archive_access: bool) -> Result<Self> {
-        let host = url::Url::parse(url)?;
+    async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool) -> Result<Self> {
+        let host: url::Url = url.parse()?;
+        let mut builder = reqwest::Client::builder()
+            .timeout(get_transport_timeout());
+
+        if let Some(ca_cert) = ca_cert {
+            let cert = reqwest::Certificate::from_pem(ca_cert.as_bytes()).map_err(ElasticError::fatal)?;
+            builder = builder.add_root_certificate(cert);
+        }
+
+        if connect_unsafe {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+
         Ok(ElasticHelper{
-            es: tokio::sync::RwLock::new(Self::_create_connection(host.clone())?),
-            hosts: vec![host],
+            // es: tokio::sync::RwLock::new(Self::_create_connection(host.clone())?),
+            client: builder.build().map_err(ElasticError::fatal)?,
+            host,
             archive_access,
         })
     }
 
-    async fn connection_reset(&self) -> Result<()> {
-        *self.es.write().await = Self::_create_connection(self.hosts[0].clone())?;
+    // async fn connection_reset(&self) -> Result<()> {
+    //     *self.es.write().await = Self::_create_connection(self.host.clone())?;
+    //     Ok(())
+    // }
+
+    // fn _create_connection(host: url::Url) -> Result<Elasticsearch> {
+    //     let conn_pool = elasticsearch::http::transport::SingleNodeConnectionPool::new(host);
+    //     let transport = elasticsearch::http::transport::TransportBuilder::new(conn_pool)
+    //         .timeout(get_transport_timeout())
+    //         .build()?;
+    //     Ok(Elasticsearch::new(transport))
+    // }
+
+    /// start an index copy operation and wait for it to complete
+    async fn safe_index_copy(&self, copy_method: CopyMethod, src: &str, target: &str, settings: Option<serde_json::Value>, min_status: Option<&str>) -> Result<()> {
+        let min_status = min_status.unwrap_or("yellow");
+        let mut url = self.host.join(&format!("{src}/{copy_method}/{target}"))?;
+        url.query_pairs_mut().append_pair("timeout", "60s");
+        let body = settings.map(|value| json!({"settings": value}));
+        let response = match body {
+            Some(body) => self.make_request_json(&mut 0, &(Method::POST, url).into(), &body).await?,
+            None => self.make_request(&mut 0, &(Method::POST, url).into()).await?
+        };
+
+        let ret: responses::Command = response.json().await?;
+
+        if !ret.acknowledged {
+            return Err(ElasticErrorInner::FailedToCreateIndex{ src: src.to_owned(), target: target.to_owned()}.into())
+        }
+
+        self.wait_for_status(target, Some(min_status)).await
+    }
+
+    /// Wait for an index responds with a given status level
+    async fn wait_for_status(&self, index: &str, min_status: Option<&str>) -> Result<()> {
+        let min_status = min_status.unwrap_or("yellow");
+        let mut url = self.host.join("_cluster/health/")?.join(index)?;
+        url.query_pairs_mut().append_pair("timeout", "5s").append_pair("wait_for_status", min_status);
+
+        loop {
+            match self.client.request(Method::GET, url.clone()).send().await {
+                Ok(response) => {
+                    if response.status() == reqwest::StatusCode::REQUEST_TIMEOUT {
+                        continue
+                    } else if response.status() != reqwest::StatusCode::OK {
+                        return Err(ElasticError::fatal("unexpected response status"))
+                    }
+                    let response: responses::Status = response.json().await?;
+                    if !response.timed_out {
+                        return Ok(())
+                    }
+                }
+                Err(err) => {
+                    if err.is_connect() || err.is_timeout() {
+                        continue
+                    }
+                    return Err(err.into())
+                }
+            }
+        }
+    }
+
+    /// Given an http query result decide whether to retry or extract the response
+    async fn handle_result(attempt: &mut u64, request: &Request, result: reqwest::Result<reqwest::Response>) -> Result<Option<reqwest::Response>> {
+        match Self::_handle_result(result, request).await? {
+            Some(value) => Ok(Some(value)),
+            None => {
+                let delay = MAX_RETRY_DELAY.min(Duration::from_secs_f64((*attempt as f64).powf(2.0)/5.0));
+                tokio::time::sleep(delay).await;
+                Ok(None)
+            },
+        }
+    }
+
+    /// Given an http query result decide whether to retry or extract the response
+    async fn _handle_result(result: reqwest::Result<reqwest::Response>, request: &Request) -> Result<Option<reqwest::Response>> {
+        // Handle connection errors with a retry, let other non http errors bubble up
+        let response = match result {
+            Ok(response) => response,
+            Err(err) => {
+                // always retry for connect and timeout errors
+                if err.is_connect() || err.is_timeout() {
+                    error!("Error connecting to datastore: {err}");
+                    return Ok(None)
+                }
+
+                return Err(err.into())
+            },
+        };
+
+        // At this point we have a response from the server, but it may be describing an error.
+        let status = response.status();
+        
+        // handle non-errors
+        if status.is_success() {
+            return Ok(Some(response))
+        }
+
+        // Since we know we have an error, load the body, for some errors this will have more information
+        let headers = response.headers().clone();
+        let url = response.url().clone();
+        let body = match response.text().await {
+            Ok(body) => body,
+            Err(err) => {
+                // always retry for connect and timeout errors
+                if err.is_request() || err.is_connect() || err.is_timeout() {
+                    error!("Error connecting to datastore: {err}");
+                    return Ok(None)
+                }
+
+                return Err(err.into())
+            }
+        };
+
+        if StatusCode::NOT_FOUND == status {
+            if body.is_empty() {
+                return Err(ElasticErrorInner::IndexNotFound("".to_string()).into())
+            }
+
+            /// An agregate of several similar responess that indicate a missing document under different cercumstances.
+            #[derive(Deserialize)]
+            struct NotFoundResponse<'a> {
+                _index: String,
+                _id: String,
+                // If a delete or update is directed to a missing document this should be "not_found"
+                #[serde(default)]
+                result: Option<&'a str>,
+                // If a get is directed to a missing document this should be false
+                #[serde(default)]
+                found: Option<bool>,
+            }
+
+            if let Ok(body) = serde_json::from_str::<NotFoundResponse>(&body) {
+                if body.result == Some("not_found") || body.found == Some(false) {
+                    return Err(ElasticErrorInner::DocumentNotFound{
+                        index: body._index,
+                        id: body._id,
+                    }.into())
+                }    
+            }
+        } else if StatusCode::CONFLICT == status {
+            if request.raise_conflicts {
+                // De-sync potential treads trying to write to the index
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(rand::random::<f64>() * 0.1)).await;
+
+                // try to pull out a sensible error message from the response
+                if let Ok(response) = serde_json::from_str::<responses::Error>(&body) {
+                    return Err(ElasticErrorInner::VersionConflict(response.error.reason).into())
+                }
+
+                // couldn't get an error message, who knows what happened
+                return Err(ElasticErrorInner::VersionConflict("unknown".to_owned()).into())
+            }
+            // updated += ce.info.get('updated', 0)
+            // deleted += ce.info.get('deleted', 0)
+            return Ok(None)
+        }
+
+        todo!("{url} {status:?} {body:?} {headers:?}");
+                
+        // // handle specific HTTP status codes we want particular actions for
+        // if StatusCode::NOT_FOUND == status {
+            
+        //     // let err_message = err.to_string();
+
+        //     // Validate exception type
+        //     if $index_name.is_some() || !body.contains("No search context found") {
+        //         break Err(ElasticError::NotFound(Box::new(message)))
+        //     }
+
+        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+        //     warn!("Index {} was removed while a query was running, retrying...", index);
+        //     continue
+
+
+        // } else if http::StatusCode::FORBIDDEN == status {
+        //     match $index_name {
+        //         None => break Err(ElasticError::fatal(message)),
+        //         Some(index) => {
+        //             log::warn!("Elasticsearch cluster is preventing writing operations on index {}, retrying...", index);
+        //         }
+        //     }
+        //     continue
+        // } else if http::StatusCode::SERVICE_UNAVAILABLE == status {
+        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+
+        //     // Display proper error message
+        //     log::warn!("Looks like index {} is not ready yet, retrying...", index);
+        //     continue
+        // } else if http::StatusCode::TOO_MANY_REQUESTS == status {
+        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
+        //     log::warn!("Elasticsearch is too busy to perform the requested task on index {}, retrying...", index);
+        //     continue
+        // } else if http::StatusCode::UNAUTHORIZED == status {
+        //     // authentication errors
+        //     let hosts = $helper.get_hosts_safe().join(" | ");
+        //     warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, message, stringify!($expression));
+        //     continue
+        // } else {
+        //     break Err(ElasticError::fatal(message))
+        // }
+
+        // return if status.is_server_error() {
+        //     let body = response.text().await.unwrap_or(status.to_string());
+        //     error!("Server error in datastore: {body}");
+        //     let delay = MAX_RETRY_DELAY.min(Duration::from_secs_f64((*attempt as f64).powf(2.0)/5.0));
+        //     tokio::time::sleep(delay).await;
+        //     return Ok(None)                        
+        // } else if status.is_client_error() {
+        //     let path = response.url().path().to_owned();
+        //     let body = response.text().await.unwrap_or(status.to_string());
+        //     Err(ElasticError::HTTPError{path: Some(path), code: status, message: body})
+        // } else {
+        //     Ok(Some(response))
+        // }
+    }
+
+    /// Start an http request with an empty body
+    async fn make_request(&self, attempt: &mut u64, request: &Request) -> Result<reqwest::Response> {
+        loop {
+            *attempt += 1;
+
+            // Build and dispatch the request
+            let result = self.client.request(request.method.clone(), request.url.clone())
+                .send().await;
+            
+            // Handle connection errors with a retry, let other non http errors bubble up
+            match Self::handle_result(attempt, request, result).await? {
+                Some(response) => return Ok(response),
+                None => continue,
+            }
+        }     
+    }
+
+    /// start an http request with a json body
+    async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<reqwest::Response> {
+        loop {
+            *attempt += 1;
+
+            // Build and dispatch the request
+            let result = self.client.request(request.method.clone(), request.url.clone())
+                .json(body)
+                .send().await;
+            
+            // Handle connection errors with a retry, let other non http errors bubble up
+            match Self::handle_result(attempt, request, result).await? {
+                Some(response) => return Ok(response),
+                None => continue,
+            }
+        }     
+    }
+
+    /// start an http request with a binary body
+    async fn make_request_data(&self, attempt: &mut u64, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
+        // TODO: body can probably be a boxed stream of some sort which will be faster to clone
+        loop {
+            *attempt += 1;
+
+            // Build and dispatch the request
+            let result = self.client.request(request.method.clone(), request.url.clone())
+                .header("Content-Type", "application/x-ndjson")
+                .body(body.to_owned())
+                .send().await;
+            
+            // Handle connection errors with a retry, let other non http errors bubble up
+            match Self::handle_result(attempt, request, result).await? {
+                Some(response) => return Ok(response),
+                None => continue,
+            }
+        }     
+    }
+
+    /// checking if an index of the given name exists
+    pub async fn does_index_exist(&self, name: &str) -> Result<bool> {
+        let url = self.host.join(name)?;
+        match self.make_request(&mut 0, &(Method::HEAD, url).into()).await {
+            Ok(result) => {
+                Ok(result.status() == reqwest::StatusCode::OK)
+            },
+            Err(err) => if err.is_index_not_found() {
+                Ok(false)
+            } else {
+                Err(err)
+            }
+        }
+    }
+
+    /// Check if an alias with the given name is defined
+    pub async fn does_alias_exist(&self, name: &str) -> Result<bool> {
+        // self.with_retries(self.datastore.client.indices.exists_alias, name=alias)
+        let url = self.host.join("_alias/")?.join(name)?;
+        let result = self.make_request(&mut 0, &(reqwest::Method::HEAD, url).into()).await?;
+        Ok(result.status() == reqwest::StatusCode::OK)
+    }
+
+    /// Create an index alias
+    pub async fn put_alias(&self, index: &str, name: &str) -> Result<()> {
+        // self.with_retries(self.datastore.client.indices.put_alias, index=index, name=alias)
+        let url = self.host.join(&format!("{index}/_alias/{name}"))?;
+        self.make_request(&mut 0, &(Method::PUT, url).into()).await?;
         Ok(())
     }
 
-    fn _create_connection(host: url::Url) -> Result<Elasticsearch> {
-        let conn_pool = elasticsearch::http::transport::SingleNodeConnectionPool::new(host);
-        let transport = elasticsearch::http::transport::TransportBuilder::new(conn_pool)
-            .timeout(get_transport_timeout())
-            .build()?;
-        Ok(Elasticsearch::new(transport))
+    /// Get the settings map for creating a new index
+    fn get_index_settings(&self, index: &str, archive: bool) -> serde_json::Value {
+        default_settings(json!({
+            "number_of_shards": index_shards(index, archive), // self.shards if not archive else self.archive_shards,
+            "number_of_replicas": index_replicas(index, archive), // self.replicas if not archive else self.archive_replicas    
+        }))
     }
 
     fn get_hosts_safe(&self) -> Vec<String> {
-        self.hosts.iter().map(|url|format!("{}:{}", url.host_str().unwrap_or_default(), url.port_or_known_default().unwrap_or(80))).collect()
+        // self.hosts.iter().map(|url|format!("{}:{}", url.host_str().unwrap_or_default(), url.port_or_known_default().unwrap_or(80))).collect()
+        vec![format!("{}:{}", self.host.host_str().unwrap_or_default(), self.host.port_or_known_default().unwrap_or(80))]
     }
 }
 
+
+/// Get the number of shards defined for this index
+pub fn index_shards(name: &str, archive: bool) -> Option<u32> {
+    let name = name.to_uppercase();
+    let shards: u32 = match std::env::var(format!("ELASTIC_{name}_SHARDS")) {
+        Ok(var) => var.parse().ok()?,
+        Err(_) => match std::env::var("ELASTIC_DEFAULT_SHARDS") {
+            Ok(var) => var.parse().ok()?,
+            Err(_) => 1
+        },
+    };
+
+    if archive {
+        match std::env::var(format!("ELASTIC_{name}_ARCHIVE_SHARDS")) {
+            Ok(var) => var.parse().ok(),
+            Err(_) => Some(shards)
+        }
+    } else {
+        Some(shards)
+    }
+}
+
+/// Get the number of replicas defined for this index
+fn index_replicas(name: &str, archive: bool) -> Option<u32> {
+    let name = name.to_uppercase();
+    let replicas: u32 = match std::env::var(format!("ELASTIC_{name}_REPLICAS")) {
+        Ok(var) => var.parse().ok()?,
+        Err(_) => match std::env::var("ELASTIC_DEFAULT_REPLICAS") {
+            Ok(var) => var.parse().ok()?,
+            Err(_) => 0
+        },
+    };
+
+    if archive {
+        match std::env::var(format!("ELASTIC_{name}_ARCHIVE_REPLICAS")) {
+            Ok(var) => var.parse().ok(),
+            Err(_) => Some(replicas)
+        }
+    } else {
+        Some(replicas)
+    }
+}
+
+
+
+
+pub fn default_settings(index: serde_json::Value) -> serde_json::Value {
+    json!({
+       "analysis": {
+           "filter": {
+               "text_ws_dsplit": {
+                   "type": "pattern_replace",
+                   "pattern": r"(\.)",
+                   "replacement": " "
+               }
+           },
+           "analyzer": {
+               "string_ci": {
+                   "type": "custom",
+                   "tokenizer": "keyword",
+                   "filter": ["lowercase"]
+               },
+               "text_fuzzy": {
+                   "type": "pattern",
+                   "pattern": r"\s*:\s*",
+                   "lowercase": false
+               },
+               "text_whitespace": {
+                   "type": "whitespace"
+               },
+               "text_ws_dsplit": {
+                   "type": "custom",
+                   "tokenizer": "whitespace",
+                   "filters": ["text_ws_dsplit"]
+               }
+           },
+           "normalizer": {
+               "lowercase_normalizer": {
+                   "type": "custom",
+                   "char_filter": [],
+                   "filter": ["lowercase"]
+               }
+           }
+       },
+       "index": index,
+   })
+}
 
 /// Public interface to our elastic datastore.
 /// details are actually in Collection and ElasticHelper classes.
@@ -342,23 +851,23 @@ pub struct Elastic {
 }
 
 impl Elastic {
-    pub async fn connect(url: &str, archive_access: bool) -> Result<Arc<Self>> {
-        let helper = Arc::new(ElasticHelper::connect(url, archive_access).await?);
+    pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool) -> Result<Arc<Self>> {
+        let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
         Ok(Arc::new(Self {
             es: helper.clone(),
-            file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned())),
-            submission: Collection::new(helper.clone(), "submission".to_owned(), Some("submission-ma".to_owned())),
-            error: Collection::new(helper.clone(), "error".to_owned(), None),
-            service: Collection::new(helper.clone(), "service".to_owned(), None),
-            service_delta: Collection::new(helper.clone(), "service_delta".to_owned(), None),
-            user: Collection::new(helper.clone(), "user".to_owned(), None),
-            filescore: Collection::new(helper.clone(), "filescore".to_owned(), None),
+            file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned())).await?,
+            submission: Collection::new(helper.clone(), "submission".to_owned(), Some("submission-ma".to_owned())).await?,
+            error: Collection::new(helper.clone(), "error".to_owned(), None).await?,
+            service: Collection::new(helper.clone(), "service".to_owned(), None).await?,
+            service_delta: Collection::new(helper.clone(), "service_delta".to_owned(), None).await?,
+            user: Collection::new(helper.clone(), "user".to_owned(), None).await?,
+            filescore: Collection::new(helper.clone(), "filescore".to_owned(), None).await?,
         }))
     }
 
-    pub async fn update_service_delta(&self, name: &str, delta: &JsonMap) -> Result<()> {
-        todo!();
-    }
+    // pub async fn update_service_delta(&self, name: &str, delta: &JsonMap) -> Result<()> {
+    //     todo!();
+    // }
 
     pub async fn get_service_with_delta(&self, service_name: &str, version: Option<String>) -> Result<Option<Service>> {
         let svc = self.service_delta.get_json(service_name, None).await?;
@@ -404,12 +913,18 @@ impl Elastic {
         // service_data = [Service(s, mask=mask)
         //                 for s in self.service.multiget([f"{item.id}_{item.version}" for item in service_delta],
         //                                                as_obj=False, as_dictionary=False)]
+
         let mut service_keys = vec![];
+
+        fn get_id(data: &JsonMap) -> Option<String> {
+            Some(format!("{}_{}", data.get("id")?.as_str()?, data.get("version")?.as_str()?))
+        }
+
         for delta in service_deltas.iter() {
-            service_keys.push(format!("{}_{}", delta.get("id").unwrap(), delta.get("version").unwrap()))
+            service_keys.push(get_id(delta).ok_or_else(|| ElasticError::fatal("version not found in service delta"))?)
         }
         let key_refs: Vec<&str> = service_keys.iter().map(|val|val.as_str()).collect();
-        let mut service_data = self.service.multiget::<JsonMap>(key_refs, None, None).await?;
+        let mut service_data = self.service.multiget::<JsonMap>(&key_refs, None, None).await.context("multiget_json")?;
 
         // // Recursively update the service data with the service delta while stripping nulls
         // services = [recursive_update(data.as_primitives(strip_null=True), delta.as_primitives(strip_null=True),
@@ -455,7 +970,7 @@ impl Elastic {
             let current = self.file.get_if_exists(sha256, None).await?;
 
             let (mut current_fileinfo, version) = match current {
-                None => (JsonMap::new(), Version::Create),
+                None => (JsonMap::from_iter([("expiry_ts".to_owned(), json!(expiry))]), Version::Create),
                 Some((current_fileinfo, version)) => {
                     // If the freshen we are doing won't change classification, we can do it via an update operation
                     let server_classification = cl_engine.normalize_classification(&current_fileinfo.classification.classification)?;
@@ -527,12 +1042,11 @@ impl Elastic {
             let result = self.file.save(sha256, &current_fileinfo, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(()),
-                Err(err) => {
-                    if err.is_version_conflict() {
-                        info!("Retrying save or freshen due to version conflict: {err}");
-                        continue
-                    }
-                }
+                Err(err) if err.is_version_conflict() => {
+                    info!("Retrying save or freshen due to version conflict: {err}");
+                    continue
+                },
+                Err(err) => return Err(err)
             }
         }
     }
@@ -545,93 +1059,23 @@ fn extract_number(container: &JsonMap, name: &str) -> u64 {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ElasticError {
-    // start out with a range of errors we may want to recover from specifically
-    #[error("Index {0} does not have an archive")]
-    ArchiveNotFound(Box<String>),
-    #[error("Trying to get access to the archive on a datastore where archive_access is disabled")]
-    ArchiveDisabled,
-    #[error("Keys couldn't be found during multiget: {0:?}")]
-    MultiKeyError(Box<Vec<String>>),
-    #[error("Document not found: {0}")]
-    NotFound(Box<String>),
-    #[error("Version conflict: {0}")]
-    VersionConflict(Box<String>),
-
-    // bundle all of our non-recoverable/fatal errors under broad catagories
-    #[error("Network error: {0}")]
-    NetworkError(Box<dyn std::error::Error + Send + Sync>),
-    #[error("Json format error: {0}")]
-    JsonError(Box<String>),
-    #[error("Datastore error: {0}")]
-    Fatal(Box<String>),
-}
-
-
-impl ElasticError {
-    pub fn multi_key_error(keys: &[&str]) -> Self {
-        ElasticError::MultiKeyError(Box::new(keys.into_iter().map(|key| key.to_string()).collect_vec()))
-    }
-
-    pub fn json(error: impl std::fmt::Display) -> Self {
-        ElasticError::JsonError(Box::new(error.to_string()))
-    }
-
-    pub fn fatal(error: impl std::fmt::Display) -> Self {
-        ElasticError::Fatal(Box::new(error.to_string()))
-    }
-
-    pub fn is_version_conflict(&self) -> bool {
-        matches!(self, Self::VersionConflict(_))
-    }
-
-    pub fn is_not_found(&self) -> bool {
-        matches!(self, Self::NotFound(_))
-    }
-}
-
-impl From<serde_json::Error> for ElasticError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::JsonError(Box::new(value.to_string()))
-    }
-} 
-
-impl From<url::ParseError> for ElasticError {
-    fn from(value: url::ParseError) -> Self {
-        Self::NetworkError(Box::new(value))
-    }
-}
-
-impl From<elasticsearch::http::transport::BuildError> for ElasticError {
-    fn from(value: elasticsearch::http::transport::BuildError) -> Self {
-        Self::NetworkError(Box::new(value))
-    }
-}
-
-impl From<assemblyline_markings::errors::Errors> for ElasticError {
-    fn from(value: assemblyline_markings::errors::Errors) -> Self {
-        Self::Fatal(Box::new(value.to_string()))
-    }
-}
-
-impl From<collection::InvalidOperationError> for ElasticError {
-    fn from(value: collection::InvalidOperationError) -> Self {
-        Self::Fatal(Box::new(value.to_string()))
-    }
-}
-
-type Result<T, E=ElasticError> = std::result::Result<T, E>;
-
 #[cfg(test)]
 mod test {
-    use assemblyline_models::datastore::Service;
+    use std::sync::Arc;
+
+    use assemblyline_markings::classification;
+    use assemblyline_models::datastore::{File, Service};
+    use assemblyline_models::JsonMap;
+    use log::debug;
+    use rand::{thread_rng, Rng};
+    use sha2::Digest;
 
     use super::Elastic;
 
     fn create_service(name: &str) -> Service {
         serde_json::from_value(serde_json::json!({
             "name": name,
+            "enabled": true,
             "classification": "U",
             "default_result_classification": "U",
             "version": rand::random::<u8>().to_string(),
@@ -641,29 +1085,35 @@ mod test {
         })).unwrap()
     }
 
-    fn init() {
+    async fn init() -> Arc<Elastic> {
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
+        Elastic::connect("http://elastic:devpass@localhost:9200", false, None, false).await.unwrap()
     }
 
     #[tokio::test]
     async fn list_services() {
-        init();
+        let elastic = init().await;
         use serde_json::json;
         // connect to database
-        let elastic = Elastic::connect("http://elastic:devpass@localhost:9200", true).await.unwrap();
 
         let mut aa = create_service("servicea");
         let bb = create_service("serviceb");
 
+        debug!("save service");
         elastic.service.save(&aa.key(), &aa, None, None).await.unwrap();
         elastic.service.save(&bb.key(), &bb, None, None).await.unwrap();
-        elastic.service_delta.save_json(&aa.name, &[("version".to_owned(), json!(aa.version))].into_iter().collect(), None, None).await.unwrap();
-        elastic.service_delta.save_json(&bb.name, &[("version".to_owned(), json!(bb.version))].into_iter().collect(), None, None).await.unwrap();
+        debug!("save service delta");
+        elastic.service_delta.save_json(&aa.name, &mut [("version".to_owned(), json!(aa.version))].into_iter().collect(), None, None).await.unwrap();
+        elastic.service_delta.save_json(&bb.name, &mut [("version".to_owned(), json!(bb.version))].into_iter().collect(), None, None).await.unwrap();
+        debug!("commit service_delta");
+        elastic.service_delta.commit(None).await.unwrap();
 
         // fetch the services without changes
+        debug!("get service with delta");
         assert_eq!(elastic.get_service_with_delta(&aa.name, None).await.unwrap().unwrap(), aa);
         assert_eq!(elastic.get_service_with_delta(&bb.name, None).await.unwrap().unwrap(), bb);
         {
+            debug!("list_all_services");
             let listed = elastic.list_all_services().await.unwrap();
             assert!(listed.contains(&aa));
             assert!(listed.contains(&bb));
@@ -672,10 +1122,14 @@ mod test {
         // change one of the services
         aa.category = "DOGHOUSE".to_string();
         aa.enabled = false;
-        elastic.update_service_delta(&aa.name, &[
-            ("category".to_owned(), json!("DOGHOUSE")),
-            ("enabled".to_owned(), json!(false)),
-        ].into_iter().collect()).await.unwrap();
+        {
+            debug!("update delta");
+            let mut delta = elastic.service_delta.get(&aa.name, None).await.unwrap().unwrap();
+            delta.category = Some("DOGHOUSE".to_owned());
+            delta.enabled = Some(false);
+            elastic.service_delta.save(&aa.name, &delta, None, None).await.unwrap();
+            elastic.service_delta.commit(None).await.unwrap();
+        }
 
         // fetch them again and ensure the changes have been applied
         assert_eq!(elastic.get_service_with_delta(&aa.name, None).await.unwrap().unwrap(), aa);
@@ -691,6 +1145,56 @@ mod test {
         }
     }
 
+    #[tokio::test]
+    async fn test_save_or_freshen_file() {
+        let ds = init().await;
+
+        let classification = assemblyline_markings::classification::sample_config();
+        let ce = assemblyline_markings::classification::ClassificationParser::new(classification).unwrap();
+
+
+        // Generate random data
+        let mut data: Vec<u8> = vec![]; 
+        for _ in 0..64 {
+            data.extend(b"asfd");
+        }
+        let expiry_create = chrono::Utc::now() + chrono::Duration::days(14).to_std().unwrap();
+        let expiry_freshen = chrono::Utc::now() + chrono::Duration::days(15).to_std().unwrap();
+
+        // Generate file info for random file
+        let mut f = File::gen_for_sample(&data, &mut thread_rng());
+        f.expiry_ts = Some(chrono::Utc::now());
+
+        // Make sure file does not exists
+        ds.file.delete(&f.sha256.to_string(), None).await.unwrap();
+
+        // Save the file
+        let raw = if let serde_json::Value::Object(raw) = serde_json::to_value(&f).unwrap() { raw } else { panic!(); };
+        ds.save_or_freshen_file(&f.sha256, raw.clone(), Some(expiry_create), ce.restricted().to_owned(), &ce).await.unwrap();
+
+        // Validate created file
+        let (saved_file, _) = ds.file.get_if_exists(&f.sha256.to_string(), None).await.unwrap().unwrap();
+        assert_eq!(saved_file.sha256, f.sha256);
+        assert_eq!(saved_file.sha1, f.sha1);
+        assert_eq!(saved_file.md5, f.md5);
+        assert_eq!(saved_file.expiry_ts, Some(expiry_create));
+        assert_eq!(saved_file.seen.count, 1);
+        assert_eq!(saved_file.seen.first, saved_file.seen.last);
+        assert_eq!(saved_file.classification.classification, ce.restricted());
+
+        // Freshen the file
+        ds.save_or_freshen_file(&f.sha256, raw, Some(expiry_freshen), ce.unrestricted().to_owned(), &ce).await.unwrap();
+
+        // Validate freshened file
+        let (freshened_file, _) = ds.file.get_if_exists(&f.sha256.to_string(), None).await.unwrap().unwrap();
+        assert_eq!(freshened_file.sha256, f.sha256);
+        assert_eq!(freshened_file.sha1, f.sha1);
+        assert_eq!(freshened_file.md5, f.md5);
+        assert_eq!(freshened_file.expiry_ts, Some(expiry_freshen));
+        assert_eq!(freshened_file.seen.count, 2);
+        assert!(freshened_file.seen.first < freshened_file.seen.last);
+        assert_eq!(freshened_file.classification.classification, ce.unrestricted());
+    }
     
 // import hashlib
 // from assemblyline.common.isotime import now_as_iso
@@ -1198,49 +1702,6 @@ mod test {
 //             'validator_type': 'integer',
 //         })
 //     })
-
-// def test_save_or_freshen_file(ds: AssemblylineDatastore):
-//     classification = forge.get_classification()
-
-//     # Generate random data
-//     data = b"asfd"*64
-//     expiry_create = now_as_iso(60 * 60 * 24 * 14)
-//     expiry_freshen = now_as_iso(60 * 60 * 24 * 15)
-
-//     # Generate file info for random file
-//     f = random_minimal_obj(File)
-//     f.sha256 = hashlib.sha256(data).hexdigest()
-//     f.sha1 = hashlib.sha1(data).hexdigest()
-//     f.md5 = hashlib.md5(data).hexdigest()
-
-//     # Make sure file does not exists
-//     ds.file.delete(f.sha256)
-
-//     # Save the file
-//     ds.save_or_freshen_file(f.sha256, f.as_primitives(), expiry_create, classification.RESTRICTED)
-
-//     # Validate created file
-//     saved_file = ds.file.get_if_exists(f.sha256)
-//     assert saved_file.sha256 == f.sha256
-//     assert saved_file.sha1 == f.sha1
-//     assert saved_file.md5 == f.md5
-//     assert saved_file.expiry_ts.strftime(DATEFORMAT) == expiry_create
-//     assert saved_file.seen.count == 1
-//     assert saved_file.seen.first == saved_file.seen.last
-//     assert saved_file.classification.long() == classification.normalize_classification(classification.RESTRICTED)
-
-//     # Freshen the file
-//     ds.save_or_freshen_file(f.sha256, f.as_primitives(), expiry_freshen, classification.UNRESTRICTED)
-
-//     # Validate freshened file
-//     freshened_file = ds.file.get_if_exists(f.sha256)
-//     assert freshened_file.sha256 == f.sha256
-//     assert freshened_file.sha1 == f.sha1
-//     assert freshened_file.md5 == f.md5
-//     assert freshened_file.expiry_ts.strftime(DATEFORMAT) == expiry_freshen
-//     assert freshened_file.seen.count == 2
-//     assert freshened_file.seen.first < freshened_file.seen.last
-//     assert freshened_file.classification.long() == classification.normalize_classification(classification.UNRESTRICTED)
 
 
 // def test_switch_user(ds: AssemblylineDatastore):

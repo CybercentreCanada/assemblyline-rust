@@ -76,17 +76,17 @@ impl From<tokio::sync::oneshot::error::RecvError> for Error {
     }
 }
 
-impl From<elasticsearch::Error> for Error {
-    fn from(value: elasticsearch::Error) -> Self {
-        todo!()
-    }
-}
+// impl From<elasticsearch::Error> for Error {
+//     fn from(value: elasticsearch::Error) -> Self {
+//         todo!()
+//     }
+// }
 
-impl From<elasticsearch::http::transport::BuildError> for Error {
-    fn from(value: elasticsearch::http::transport::BuildError) -> Self {
-        todo!()
-    }
-}
+// impl From<elasticsearch::http::transport::BuildError> for Error {
+//     fn from(value: elasticsearch::http::transport::BuildError) -> Self {
+//         todo!()
+//     }
+// }
 
 impl From<()> for Error {
     fn from(value: ()) -> Self {

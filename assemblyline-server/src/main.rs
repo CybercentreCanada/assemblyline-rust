@@ -23,7 +23,7 @@ use tokio::sync::Notify;
 
 use crate::logging::configure_logging;
 
-// mod ingester;
+mod ingester;
 mod submit;
 mod core_dispatcher;
 mod archive;
@@ -65,7 +65,7 @@ async fn main() -> ExitCode {
 
     // configure logging, the object returned here owns the log processing internals
     // and needs to be held until the program ends
-    let log_manager = configure_logging(&config).expect("Could not configure logging");
+    let _log_manager = configure_logging(&config).expect("Could not configure logging");
 
     // Connect to all the supporting components
     let core = match Core::setup(config).await {
@@ -79,9 +79,7 @@ async fn main() -> ExitCode {
     // pick the module to launch
     let result = match args.command {
         Commands::Ingester {  } => {
-            todo!();
-            anyhow::Ok(())
-            // crate::ingester::main(core).await
+            crate::ingester::main(core).await
         },
     };
 
@@ -147,7 +145,8 @@ impl Core {
         let redis_metrics = RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port)?;
 
         // connect to elastic
-        let datastore = Elastic::connect(&config.datastore.hosts[0], false).await?;
+        // TODO Fill in ca parameter
+        let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false).await?;
 
         Ok(Core {
             // start a daemon that keeps an up-to-date local cache of service info
