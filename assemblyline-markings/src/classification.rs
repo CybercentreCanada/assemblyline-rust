@@ -1131,6 +1131,16 @@ impl ClassificationParser {
     pub fn levels(&self) -> &HashMap<i32, ClassificationLevel> {
         &self.levels
     }
+
+    /// Get the classification string predefined as maximally restricted
+    pub fn restricted(&self) -> &str {
+        self.restricted.as_str()
+    }
+
+    /// Get the classification string predefined as minimally restricted
+    pub fn unrestricted(&self) -> &str {
+        self.unrestricted.as_str()
+    }
 }
 
 /// values describing a classification string after parsing
@@ -1257,6 +1267,39 @@ impl NormalizeOptions {
 //     }
 // }
 
+/// Generate a featureful configuration composed of mostly nonsense useful for testing.
+pub fn sample_config() -> ClassificationConfig {
+    ClassificationConfig{
+        enforce: true,
+        dynamic_groups: false,
+        dynamic_groups_type: crate::config::DynamicGroupType::All,
+        levels: vec![
+            ClassificationLevel::new(1, "L0", "Level 0", vec!["Open"]),
+            ClassificationLevel::new(5, "L1", "Level 1", vec![]),
+            ClassificationLevel::new(15, "L2", "Level 2", vec![]),
+        ],
+        groups: vec![
+            ClassificationGroup::new("A", "Group A"),
+            ClassificationGroup::new("B", "Group B"),
+            ClassificationGroup::new_solitary("X", "Group X", "XX"),
+        ],
+        required: vec![
+            ClassificationMarking::new("LE", "Legal Department", vec!["Legal"]),
+            ClassificationMarking::new("AC", "Accounting", vec!["Acc"]),
+            ClassificationMarking::new_required("orcon", "Originator Controlled"),
+            ClassificationMarking::new_required("nocon", "No Contractor Access"),
+        ],
+        subgroups: vec![
+            ClassificationSubGroup::new_aliased("R1", "Reserve One", vec!["R0"]),
+            ClassificationSubGroup::new_with_required("R2", "Reserve Two", "X"),
+            ClassificationSubGroup::new_with_limited("R3", "Reserve Three", "X"),
+        ],
+        restricted: "L2".to_owned(),
+        unrestricted: "L0".to_owned(),
+    }
+}
+
+
 #[cfg(test)]
 mod test {
 
@@ -1270,40 +1313,8 @@ mod test {
     use std::path::Path;
 
     use crate::classification::{NormalizeOptions, ParsedClassification};
-    use crate::config::{ClassificationConfig, ClassificationLevel, ClassificationGroup, ClassificationMarking, ClassificationSubGroup};
 
-    use super::{ClassificationParser, Result};
-
-    fn setup_config() -> ClassificationConfig {
-        ClassificationConfig{
-            enforce: true,
-            dynamic_groups: false,
-            dynamic_groups_type: crate::config::DynamicGroupType::All,
-            levels: vec![
-                ClassificationLevel::new(1, "L0", "Level 0", vec!["Open"]),
-                ClassificationLevel::new(5, "L1", "Level 1", vec![]),
-                ClassificationLevel::new(15, "L2", "Level 2", vec![]),
-            ],
-            groups: vec![
-                ClassificationGroup::new("A", "Group A"),
-                ClassificationGroup::new("B", "Group B"),
-                ClassificationGroup::new_solitary("X", "Group X", "XX"),
-            ],
-            required: vec![
-                ClassificationMarking::new("LE", "Legal Department", vec!["Legal"]),
-                ClassificationMarking::new("AC", "Accounting", vec!["Acc"]),
-                ClassificationMarking::new_required("orcon", "Originator Controlled"),
-                ClassificationMarking::new_required("nocon", "No Contractor Access"),
-            ],
-            subgroups: vec![
-                ClassificationSubGroup::new_aliased("R1", "Reserve One", vec!["R0"]),
-                ClassificationSubGroup::new_with_required("R2", "Reserve Two", "X"),
-                ClassificationSubGroup::new_with_limited("R3", "Reserve Three", "X"),
-            ],
-            restricted: "L2".to_owned(),
-            unrestricted: "L0".to_owned(),
-        }
-    }
+    use super::{sample_config as setup_config, ClassificationParser, Result};
 
     fn setup() -> ClassificationParser {
         ClassificationParser::new(setup_config()).unwrap()
@@ -1406,12 +1417,12 @@ mod test {
 
         // missing restricted
         let mut config = setup_config();
-        config.restricted = "XF".to_owned();
+        config.restricted = "XF".to_string();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // missing unrestricted
         let mut config = setup_config();
-        config.unrestricted = "XF".to_owned();
+        config.unrestricted = "XF".to_string();
         assert!(ClassificationParser::new(config.clone()).is_err());
 
         // Use levels outside of range

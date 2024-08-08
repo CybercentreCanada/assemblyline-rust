@@ -142,11 +142,11 @@ pub fn ready_classification(config_data: Option<&str>) -> Result<ClassificationC
     if let Some(config_data) = config_data {
         // Load modifiers from the yaml config
         let yml_data: serde_yaml::mapping::Mapping = serde_yaml::from_str(config_data)?;
-        let mut config: serde_yaml::Value = serde_yaml::from_str(&DEFAULT_CLASSIFICATION_DATA)?;
+        let mut config: serde_yaml::Value = serde_yaml::from_str(DEFAULT_CLASSIFICATION_DATA)?;
         config.as_mapping_mut().unwrap().extend(yml_data);
         Ok(serde_yaml::from_value(config)?)
     } else {
-        Ok(serde_yaml::from_str(&DEFAULT_CLASSIFICATION_DATA)?)
+        Ok(serde_yaml::from_str(DEFAULT_CLASSIFICATION_DATA)?)
     }
 }
 
@@ -241,7 +241,7 @@ pub struct ClassificationLevel {
 }
 
 impl ClassificationLevel {
-    #[cfg(test)]
+    /// construct a classification level from its rank (higher is more restricted) and how it should be displayed
     pub fn new(lvl: i32, short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         ClassificationLevel {
             aliases: aliases.into_iter().map(|x|x.parse().unwrap()).collect(),
@@ -300,7 +300,7 @@ pub struct ClassificationMarking {
 }
 
 impl ClassificationMarking {
-    #[cfg(test)]
+    /// Create a marking from canonical names and aliases
     pub fn new(short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         Self {
             aliases: aliases.into_iter().map(|x|x.parse().unwrap()).collect(),
@@ -312,7 +312,7 @@ impl ClassificationMarking {
         }
     }
 
-    #[cfg(test)]
+    /// Create a marking from canonical names that is a required group
     pub fn new_required(short_name: &str, name: &str) -> Self {
         let mut new = Self::new(short_name, name, vec![]);
         new.is_required_group = true;
@@ -359,7 +359,7 @@ pub struct ClassificationGroup {
 }
 
 impl ClassificationGroup {
-    #[cfg(test)]
+    /// Create access control group from canonical names
     pub fn new(short_name: &str, name: &str) -> Self {
         Self {
             name: name.parse().unwrap(),
@@ -371,7 +371,7 @@ impl ClassificationGroup {
         }
     }
 
-    #[cfg(test)]
+    /// Create access control group from canonical names that has a special display form when presented alone
     pub fn new_solitary(short_name: &str, name: &str, solitary_display: &str) -> Self {
         let mut new = Self::new(short_name, name);
         new.solitary_display_name = Some(solitary_display.parse().unwrap());
@@ -423,7 +423,7 @@ pub struct ClassificationSubGroup {
 
 
 impl ClassificationSubGroup {
-    #[cfg(test)]
+    /// Create a new subgroup with aliases
     pub fn new_aliased(short_name: &str, name: &str, aliases: Vec<&str>) -> Self {
         Self {
             short_name: short_name.parse().unwrap(),
@@ -436,14 +436,14 @@ impl ClassificationSubGroup {
         }
     }
 
-    #[cfg(test)]
+    /// create a new subgroup with required group
     pub fn new_with_required(short_name: &str, name: &str, required: &str) -> Self {
         let mut new = Self::new_aliased(short_name, name, vec![]);
         new.require_group = Some(required.parse().unwrap());
         return new
     }
 
-    #[cfg(test)]
+    /// Create a new subgroup limited in access to a given group
     pub fn new_with_limited(short_name: &str, name: &str, limited: &str) -> Self {
         let mut new = Self::new_aliased(short_name, name, vec![]);
         new.limited_to_group = Some(limited.parse().unwrap());
@@ -511,7 +511,7 @@ fn check_default_configurations() {
     let default_config = ready_classification(None).unwrap();
     assert!(!default_config.enforce);
 
-    println!("{:?}", serde_yaml::to_value(&DEFAULT_CLASSIFICATION_DATA).unwrap());
+    println!("{:?}", serde_yaml::to_value(DEFAULT_CLASSIFICATION_DATA).unwrap());
        
     let config = ready_classification(Some("enforce: true")).unwrap();
     assert!(config.enforce);
