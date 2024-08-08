@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use log::debug;
 use queue::MultiQueue;
+use quota::UserQuotaTracker;
 use redis::AsyncCommands;
 pub use redis::Msg;
 use serde::Serialize;
@@ -105,6 +106,10 @@ impl RedisObjects {
         self.pubsub_listener()
             .subscribe(channel)
             .listen()
+    }
+
+    pub fn user_quota_tracker(self: &Arc<Self>, prefix: String) -> UserQuotaTracker {
+        UserQuotaTracker::new(self.clone(), prefix)
     }
 }
 
