@@ -29,12 +29,14 @@ pub struct Submission {
     /// Submission ID to use
     pub sid: Sid,
     /// Message time
+    #[serde(default="chrono::Utc::now")]
     pub time: chrono::DateTime<chrono::Utc>,
     /// File block
     pub files: Vec<File>, 
     /// Metadata submitted with the file
     pub metadata: HashMap<String, serde_json::Value>, 
     /// Notification queue parameters
+    #[serde(default)]
     pub notification: Notification,
     /// Parameters of the submission
     pub params: SubmissionParams,

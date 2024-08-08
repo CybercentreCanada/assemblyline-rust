@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::OnceLock;
 use assemblyline_models::ElasticMeta;
-use chrono::{Utc, Duration, DateTime, Months};
+use chrono::{DateTime, Datelike, Duration, DurationRound, Months, SubsecRound, Timelike, Utc};
 use itertools::Itertools;
 use struct_metadata::Described;
 use super::ParsingError;
@@ -208,15 +208,15 @@ impl Query {
             },
             Query::MatchField(field, query) => {
                 let fields = get_field(data, field);
-                println!("Field list: {field:?} ");
-                println!("\t{:?}", data);
-                println!("\t{:?}", fields);
+                // println!("Field list: {field:?} ");
+                // println!("\t{:?}", data);
+                // println!("\t{:?}", fields);
                 if fields.is_empty() {
                     return Ok(false)
                 }
                 for field in fields {
                     if query.test(field)? {
-                        println!("hit");
+                        // println!("hit");
                         return Ok(true)
                     }
                 }
@@ -329,7 +329,7 @@ impl FieldQuery {
                         &temp
                     }
                 };
-                println!("Regex {regex} on {data}, {}", regex.is_match(data));
+                // println!("Regex {regex} on {data}, {}", regex.is_match(data));
                 Ok(regex.is_match(data))
             },
             FieldQuery::Match(query) => query.test(data),
@@ -465,7 +465,7 @@ impl RangeQuery {
             },
             RangeTerm::Value(start) => {
                 let data = make_string(data);
-                println!("{data} <~ {start}");
+                // println!("{data} <~ {start}");
                 match self.start_bound {
                     RangeBound::Inclusive => if *data < start[..] {
                         return Ok(false)
@@ -509,7 +509,7 @@ impl RangeQuery {
             },
             RangeTerm::Value(end) => {
                 let data = make_string(data);
-                println!("{end} <~ {data}");
+                // println!("{end} <~ {data}");
                 match self.end_bound {
                     RangeBound::Inclusive => if end[..] < *data {
                         return Ok(false)
@@ -591,7 +591,21 @@ impl DateExpression {
     }
 
     pub fn apply_truncation(base: DateTime<Utc>, trunc: DateUnit) -> DateTime<Utc> {
-        todo!()
+        use chrono::{NaiveDate, NaiveTime};
+        let naive = base.naive_utc();
+        let naive_date = naive.date();
+        let naive_time = naive.time();
+        let offset = base.offset();
+        match trunc {
+            DateUnit::Year => DateTime::from_naive_utc_and_offset(NaiveDate::from_ymd_opt(naive_date.year(), 1, 1).unwrap().into(), *offset),
+            DateUnit::Month => DateTime::from_naive_utc_and_offset(NaiveDate::from_ymd_opt(naive_date.year(), naive_date.month(), 1).unwrap().into(), *offset),
+            DateUnit::Week => DateTime::from_naive_utc_and_offset(NaiveDate::from_isoywd_opt(naive_date.year(), naive_date.iso_week().week(), chrono::Weekday::Mon).unwrap().into(), *offset),
+            DateUnit::Day => DateTime::from_naive_utc_and_offset(naive_date.into(), *offset),
+            DateUnit::Hour => DateTime::from_naive_utc_and_offset(naive_date.and_time(NaiveTime::from_hms_opt(naive_time.hour(), 0, 0).unwrap()), *offset),
+            DateUnit::Minute => DateTime::from_naive_utc_and_offset(naive_date.and_time(NaiveTime::from_hms_opt(naive_time.hour(), naive_time.minute(), 0).unwrap()), *offset),
+            DateUnit::Second => DateTime::from_naive_utc_and_offset(naive_date.and_time(NaiveTime::from_hms_opt(naive_time.hour(), naive_time.minute(), naive_time.second()).unwrap()), *offset),
+            DateUnit::Millis => base.trunc_subsecs(3),
+        }
     }
 
     pub fn resolve(&self) -> Option<DateTime<Utc>> {

@@ -101,14 +101,14 @@ fn number_term(input: &str) -> IResult<&str, FieldQuery> {
 
 // field_term: PREFIX_OPERATOR? (phrase_term | SIMPLE_TERM)
 fn field_term(input: &str) -> IResult<&str, FieldQuery> {
-    println!("field_term: {input}");
+    // println!("field_term: {input}");
     alt((
         map(string_query, |query|FieldQuery::Match(query)),
         map(pattern_term, |query|FieldQuery::Regex(query)),
     ))(input)
 }
 fn string_query(input: &str) -> IResult<&str, StringQuery> {
-    println!("string_query: {input}");
+    // println!("string_query: {input}");
     let (remain, (operator, value)) = tuple((opt(ws(prefix_operator)), alt((phrase_term, simple_term))))(input)?;
     Ok((remain, StringQuery { operator, value }))
 }
@@ -129,7 +129,7 @@ fn is_special(value: char) -> bool {
     }
 }
 fn simple_term(input: &str) -> IResult<&str, String> {
-    println!("simple_term: {input}");
+    // println!("simple_term: {input}");
     map_res(escaped_transform(
         alt((alphanumeric1, take_while1(is_special))),
         '\\',
@@ -166,14 +166,13 @@ fn simple_term(input: &str) -> IResult<&str, String> {
 }
 
 fn pattern_term(input: &str) -> IResult<&str, regex::Regex> {
-    println!("pattern_term: {input}");
+    // println!("pattern_term: {input}");
     map_res(many1(alt((
-        map(tag("*"), |_|{println!("pattern *");String::from(".*")}),
-        map(tag("?"), |_|{println!("pattern ?");String::from(".")}),
-        map(simple_term, |row|{println!("pattern ({}) {row}", row.len());regex::escape(&row)}),
+        map(tag("*"), |_|{String::from(".*")}),
+        map(tag("?"), |_|{String::from(".")}),
+        map(simple_term, |row|{regex::escape(&row)}),
     ))), |parts|{
         let pattern = parts.join("");
-        println!("Pattern regex: {pattern}");
         regex::Regex::new(&pattern)
     })(input)
 }

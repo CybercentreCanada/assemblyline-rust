@@ -294,7 +294,7 @@ impl ActionWorker {
                     "extended_scan": extended_scan,
                     "ingest_id": submission_msg.metadata.get("ingest_id"),
                     "submission": resubmission,
-                }));
+                })).await?;
                 did_resubmit = true;
             }
         }
@@ -337,9 +337,11 @@ impl ActionWorker {
         }))?);
         let mut pool = tokio::task::JoinSet::new();
         for hook in webhooks.into_iter() {
-            pool.spawn(self.clone().process_hook(hook, sid.clone(), payload.clone()));
+            pool.spawn(self.clone().process_hook(hook, sid, payload.clone()));
         }
-        while let Some(_) = pool.join_next().await { }
+        loop {
+            if pool.join_next().await.is_none() { break }
+        }
 
         return Ok(did_resubmit)
     }

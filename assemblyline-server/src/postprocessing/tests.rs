@@ -1,12 +1,14 @@
 
-use std::{net::TcpListener, sync::{Arc, Mutex}};
+use std::{collections::HashMap, sync::Arc};
 
 use assemblyline_models::config::{NamedValue, PostprocessAction, Webhook};
 use chrono::{Utc, Duration};
 use poem::{listener::{Acceptor, Listener}, EndpointExt};
+use rand::thread_rng;
 use serde_json::json;
+use rand::Rng;
 
-use crate::postprocessing::{search::CacheAvailabilityStatus, ParsingError};
+use crate::{postprocessing::{search::CacheAvailabilityStatus, ActionWorker, ParsingError, SubmissionFilter}, Core};
 
 use super::parse;
 
@@ -249,27 +251,35 @@ fn test_exists() {
 
 #[test]
 fn test_date_truncate() {
-    todo!();
+    let fltr = parse("times.completed: [2020-08-08T10:10:10.000Z TO 2020-08-09T10:10:10.000Z]").unwrap();
+    let sub = json!({
+        "times": {
+            "completed": "2020-08-08T09:10:10.000Z"
+        }
+    });
+    assert!(!fltr.test(&sub).unwrap());
+
+    let fltr = parse("times.completed: [2020-08-08T10:10:10.000Z||/d TO 2020-08-09T10:10:10.000Z]").unwrap();
+    assert!(fltr.test(&sub).unwrap());
 }
 
-type HitList = Arc<Mutex<Vec<(poem::http::HeaderMap, Vec<u8>)>>>;
+type HitList = tokio::sync::mpsc::Receiver<(poem::http::HeaderMap, Vec<u8>)>;
+type HitListSend = tokio::sync::mpsc::Sender<(poem::http::HeaderMap, Vec<u8>)>;
 
 async fn run_server() -> (u16, HitList) {
     use poem::{handler, http::{StatusCode, HeaderMap}, Body, web::Data, Route, post, Server};
 
     #[handler]
-    async fn hello(headers: &HeaderMap, body: Body, data: Data<&HitList>) -> StatusCode {
+    async fn hello(headers: &HeaderMap, body: Body, data: Data<&HitListSend>) -> StatusCode {
         let body = body.into_vec().await.unwrap();
-        let mut data = data.lock().unwrap();
-        data.push((
+        let _ = data.send((
             headers.clone(),
             body,
-        ));
+        )).await;
         StatusCode::OK
     }
 
-    let data = Arc::new(Mutex::new(vec![]));
-    let out = data.clone();
+    let (data, out) = tokio::sync::mpsc::channel(100);
     let listener = poem::listener::TcpListener::bind("0.0.0.0:0");
     let acceptor = listener.into_acceptor().await.unwrap();
     let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
@@ -287,7 +297,9 @@ async fn run_server() -> (u16, HitList) {
 
 #[tokio::test]
 async fn test_hook() {
-    let (port, hits) = run_server().await;
+    use assemblyline_models::datastore::submission::Submission;
+
+    let (port, mut hits) = run_server().await;
     
     let action = PostprocessAction{
         enabled: true,
@@ -314,26 +326,37 @@ async fn test_hook() {
         archive_submission: false
     };
 
-    // worker = ActionWorker(cache=False, config=config, datastore=datastore_connection, redis_persist=redis_connection);
+    let core = Core::test_setup().await;
+    let worker = ActionWorker::new(false, &core).await.unwrap();
 
-    // worker.actions = {
-    //     'action': (SubmissionFilter(action.filter), action)
-    // }
+    {
+        let mut actions = worker.actions.write().await;
+        *actions = Arc::new(HashMap::from_iter([
+            ("action".to_string(), (SubmissionFilter::new(&action.filter).unwrap(), action))
+        ]));
+    }
 
-    // sub: Submission = random_minimal_obj(Submission)
-    // sub.metadata = dict(ok='bad')
-    // worker.process_submission(sub, tags=[])
+    {
+        let mut sub: Submission = thread_rng().gen();
+        sub.metadata.insert("ok".to_string(), serde_json::Value::String("bad".to_string()));
+        let serde_json::Value::Object(sub_obj) = serde_json::to_value(&sub).unwrap() else { panic!(); };
+        worker.process(sub_obj, Default::default(), sub.max_score, false).await.unwrap(); 
+    }
 
-    // sub: Submission = random_minimal_obj(Submission)
-    // sub.metadata = dict(ok='good', do_hello='yes')
-    // worker.process_submission(sub, tags=[])
+    {
+        let mut sub: Submission = thread_rng().gen();
+        sub.metadata.insert("ok".to_string(), serde_json::Value::String("good".to_string()));
+        sub.metadata.insert("do_hello".to_string(), serde_json::Value::String("yes".to_string()));
+        let serde_json::Value::Object(sub_obj) = serde_json::to_value(&sub).unwrap() else { panic!(); };
+        worker.process(sub_obj, Default::default(), sub.max_score, false).await.unwrap();
+    }
 
-    // obj = server_hits.get(timeout=3)
-    // assert obj['headers']['CARE-OF'] == 'assemblyline'
-    // assert json.loads(obj['body'])['submission']['metadata']['ok'] == 'good'
+    let (headers, body) = tokio::time::timeout(std::time::Duration::from_secs(3), hits.recv()).await.unwrap().unwrap();
+    assert_eq!(headers.get("CARE-OF").unwrap(), "assemblyline");
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&body).unwrap().get("submission").unwrap().get("metadata").unwrap().get("ok").unwrap(), "good");
 
-    // assert server_hits.qsize() == 0
-    todo!()
+    // make sure no more messages are incoming
+    assert!(tokio::time::timeout(std::time::Duration::from_secs(3), hits.recv()).await.is_err());
 }
 
 

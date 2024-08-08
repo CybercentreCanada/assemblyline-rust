@@ -13,6 +13,7 @@ use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::Result;
 use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_markings::config::ClassificationConfig;
 use assemblyline_models::config::Config;
 use clap::{Command, Parser, Subcommand};
 use elastic::Elastic;
@@ -148,6 +149,18 @@ impl Core {
         // TODO Fill in ca parameter
         let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false).await?;
 
+        // load classification from given config blob or file
+        let mut classification_config = config.classification.config.clone();
+        if classification_config.is_none() {
+            if let Some(path) = &config.classification.path {
+                classification_config = Some(tokio::fs::read_to_string(path).await?);
+            }
+        }
+        let classification_config = match classification_config {
+            Some(config) => serde_yaml::from_str(&config)?,
+            None => ClassificationConfig::default(),
+        };
+
         Ok(Core {
             // start a daemon that keeps an up-to-date local cache of service info
             services: ServiceHelper::start(datastore.clone(), &redis_volatile).await?,
@@ -158,10 +171,36 @@ impl Core {
             redis_metrics,
             running: Arc::new(Flag::new(true)),
             enabled: Arc::new(Flag::new(true)),
-            classification_parser: todo!(),
+            classification_parser: Arc::new(ClassificationParser::new(classification_config)?),
         })
     }
     
+    /// Produce a set of core resources suitable for testing
+    #[cfg(test)]
+    pub async fn test_setup() -> Self {
+        let mut config: Config = serde_json::from_value(serde_json::json!({
+            "core": {
+                "redis": {
+                    "persistent": {
+                        "host": "localhost",
+                        "port": 6379,
+                    },
+                    "nonpersistent": {
+                        "host": "localhost",
+                        "port": 6379,
+                    }
+                },
+                "metrics": {
+                    "redis": {
+                        "host": "localhost",
+                        "port": 6379,
+                    }
+                }
+            }
+        })).unwrap();
+        config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
+        Self::setup(Arc::new(config)).await.unwrap()
+    }
 }
 
 struct Flag {

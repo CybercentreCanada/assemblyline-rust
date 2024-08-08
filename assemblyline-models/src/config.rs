@@ -461,6 +461,22 @@ pub fn default_postprocess_actions() -> HashMap<String, PostprocessAction> {
 //     "threshold": 500
 // }
 
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Classification {
+    pub path: Option<PathBuf>,
+    pub config: Option<String>,
+}
+
+impl Default for Classification {
+    fn default() -> Self {
+        Self { 
+            path: Some("/etc/assemblyline/config.yml".into()), 
+            config: None,
+        }
+    }
+}
+
 
 // @odm.model(index=False, store=False, description="Dispatcher Configuration")
 // class Dispatcher(odm.Model):
@@ -1643,6 +1659,8 @@ impl Default for Submission {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
+    /// Classification information
+    pub classification: Classification,
     // /// Authentication module configuration
     // pub auth: Auth,
     /// Core component configuration
@@ -1667,3 +1685,5 @@ pub struct Config {
     // /// Retrohunt configuration for the frontend and server
     // pub retrohunt: Option<Retrohunt>,
 }
+
+

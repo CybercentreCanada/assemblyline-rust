@@ -42,7 +42,10 @@ pub struct RedisObjects {
 impl RedisObjects {
     /// Open given more limited connection info
     pub fn open_host(host: &str, port: u16) -> Result<Arc<Self>, ErrorTypes> {
-        todo!()
+        Self::open(redis::ConnectionInfo{
+            addr: redis::ConnectionAddr::Tcp(host.to_string(), port),
+            redis: Default::default(),
+        })
     }
 
     /// Open a connection pool

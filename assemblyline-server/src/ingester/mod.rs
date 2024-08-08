@@ -378,21 +378,21 @@ impl Ingester {
             // }
 
             // Check if this file has been previously processed.
-            let (pprevious, previous, score, scan_key) = if !task.submission.params.ignore_cache {
+            let (cache_entry, scan_key) = if !task.submission.params.ignore_cache {
                 self.check(&mut task, true).await?
             } else {
-                (None, None, None, Self::stamp_filescore_key(&mut task, None))
+                (None, Self::stamp_filescore_key(&mut task, None))
             };
 
             // If it HAS been previously processed, we are dealing with a resubmission
             // finalize will decide what to do, and put the task back in the queue
             // rewritten properly if we are going to run it again
-            if let Some(previous) = previous {
+            if let Some(FileScore { sid: previous, score, psid, .. }) = cache_entry {
                 let resubmit_empty: bool = task.submission.params.services.resubmit.is_empty();
-                if !resubmit_empty && pprevious.is_none() {
+                if !resubmit_empty && psid.is_none() {
                     warn!("No psid for what looks like a resubmission of {sha256}: {scan_key}");
                 }
-                self.finalize(pprevious, previous, score, &mut task, true).await?;
+                self.finalize(psid, previous, score, &mut task, true).await?;
                 // End of ingest message (finalized)
                 continue
             }
@@ -568,17 +568,20 @@ impl Ingester {
         Ok(())
     }
 
-    async fn spawn_ingest(self: &Arc<Self>, task: Box<IngestTask>) {
-        if let Err(err) = self.ingest(task).await {
-            error!("Error while ingesting a file: {err}");
-        }
+    fn spawn_ingest(self: &Arc<Self>, task: Box<IngestTask>) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            if let Err(err) = this.ingest(task).await {
+                error!("Error while ingesting a file: {err}");
+            }
+        });
     }
 
     async fn ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> Result<()> {
         info!("[{} :: {}] Task received for processing", task.ingest_id, task.sha256());
 
         // Write all input to the traffic queue
-        self.traffic_queue.publish(&SubmissionMessage::ingested(task.submission.clone()));
+        self.traffic_queue.publish(&SubmissionMessage::ingested(task.submission.clone())).await?;
 
         // Load a snapshot of ingest parameters as of right now.
         let max_file_size = self.core.config.submission.max_file_size;
@@ -621,10 +624,10 @@ impl Ingester {
 
         // Check if this file is already being processed
         Self::stamp_filescore_key(&mut task, None);
-        let (mut pprevious, previous, score, _) = if !task.params().ignore_cache {
+        let (cache_entry, _) = if !task.params().ignore_cache {
             self.check(&mut task, false).await?
         } else {
-            (None, None, None, "".to_owned())
+            (None, "".to_owned())
         };
 
         // Assign priority.
@@ -652,7 +655,7 @@ impl Ingester {
 
         // Do this after priority has been assigned.
         // (So we don't end up dropping the resubmission).
-        if let Some(mut previous) = previous {
+        if let Some(FileScore { psid: mut pprevious, score, sid: mut previous, .. }) = cache_entry {
             increment!(self.counter, duplicates);
 
             if self.core.config.core.ingester.always_create_submission {
@@ -668,7 +671,7 @@ impl Ingester {
                     submission.classification = ExpandingClassification::new(task.params().classification.as_str().to_owned(), &self.core.classification_parser)?;
                     submission.expiry_ts = Some(Utc::now() + chrono::Duration::days(task.params().ttl.into()));
                     submission.from_archive = false;
-                    submission.metadata = task.submission.metadata.clone();
+                    submission.metadata.clone_from(&task.submission.metadata);
                     submission.params = task.params().clone();
                     submission.sid = previous;
                     submission.to_be_deleted = false;
@@ -750,7 +753,7 @@ impl Ingester {
         self.cache.lock().insert(scan_key.clone(), fs.clone());
         self.core.datastore.filescore.save(&scan_key, &fs, None, None).await?;
 
-        self.finalize(psid, sid, Some(score), &mut task, false).await?;
+        self.finalize(psid, sid, score, &mut task, false).await?;
 
 
         // You may be tempted to remove the assignment to dups and use the
@@ -770,7 +773,7 @@ impl Ingester {
         }
 
         for mut dup in dups {
-            self.finalize(psid, sid, Some(score), &mut dup, true).await?;
+            self.finalize(psid, sid, score, &mut dup, true).await?;
         }
 
         return Ok(scan_key)
@@ -804,7 +807,7 @@ impl Ingester {
             return Ok(false)
         }
 
-        task.failure = "Skipped".to_owned();
+        task.failure = "Skipped".to_string();
         self._notify_drop(task).await?;
         increment!(self.counter, skipped);
         return Ok(true)
@@ -822,7 +825,7 @@ impl Ingester {
         let sha256 = &task.submission.files[0].sha256;
 
         self.core.datastore.save_or_freshen_file(
-            &sha256, 
+            sha256, 
             [("sha256".to_owned(), serde_json::Value::String(sha256.to_string()))].into_iter().collect(), 
             Some(expiry), 
             c12n.as_str().to_owned(), 
@@ -882,10 +885,11 @@ impl Ingester {
     }
 
 //     def check(self, task: IngestTask, count_miss=True) -> Tuple[Optional[str], Optional[str], Optional[float], str]:
-    async fn check(&self, task: &mut IngestTask, count_miss: bool) -> Result<(Option<Sid>, Option<Sid>, Option<i32>, String)> {
+    async fn check(&self, task: &mut IngestTask, count_miss: bool) -> Result<(Option<FileScore>, String)> {
         let key = Self::stamp_filescore_key(task, None);
 
-        let result = match self.cache.lock().get(&key) {
+        let cache_entry = self.cache.lock().get(&key).cloned();
+        let result = match cache_entry {
             Some(result) => {
                 increment!(self.counter, cache_hit_local);
                 info!("[{} :: {}] Local cache hit", task.ingest_id, task.sha256());
@@ -902,7 +906,7 @@ impl Ingester {
                         if count_miss {
                             increment!(self.counter, cache_miss);
                         }
-                        return Ok((None, None, None, key));
+                        return Ok((None, key));
                     }
                 };
 
@@ -920,14 +924,14 @@ impl Ingester {
             increment!(self.counter, cache_expired);
             self.cache.lock().remove(&key);
             self.core.datastore.filescore.delete(&key, None).await?;
-            return Ok((None, None, None, key))
+            return Ok((None, key))
         } else if self.stale(age, errors) {
             info!("[{} :: {}] Cache hit dropped, cache is stale", task.ingest_id, task.sha256());
             increment!(self.counter, cache_stale);
-            return Ok((None, None, Some(result.score), key))
+            return Ok((None, key))
         }
 
-        return Ok((result.psid, Some(result.sid), Some(result.score), key))
+        return Ok((Some(result), key))
     }
 
 //     def stop(self):
@@ -1037,19 +1041,19 @@ impl Ingester {
         } else {
             info!("[{} :: {}] Requeuing ({err})", task.ingest_id, task.sha256());
             task.retries = retries;
-            self.retry_queue.push((current_time + _RETRY_DELAY).timestamp() as f64, &task).await?;
+            self.retry_queue.push((current_time + _RETRY_DELAY).timestamp() as f64, task).await?;
         }
         Ok(())
     }
 
     /// cache = False
-    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: Option<i32>, task: &mut IngestTask, cache: bool) -> Result<()> {
+    async fn finalize(&self, psid: Option<Sid>, sid: Sid, score: i32, task: &mut IngestTask, cache: bool) -> Result<()> {
         // let cache = cache.unwrap_or(false);
         info!("[{} :: {}] Completed", task.ingest_id, task.sha256());
         if let Some(psid) = psid {
             task.submission.params.psid = Some(psid);
         }
-        task.score = score;
+        task.score = Some(score);
         task.submission.sid = sid;
 
         if cache {
@@ -1069,7 +1073,7 @@ impl Ingester {
             self.async_submission_tracker.end(&task.params().submitter).await?;
         }
 
-        self.send_notification(&mut task, None, false).await?;
+        self.send_notification(task, None, false).await?;
         Ok(())
     }
 
