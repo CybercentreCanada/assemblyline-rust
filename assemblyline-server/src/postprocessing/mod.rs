@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::ArchiveAction;
 use assemblyline_models::{JsonMap, Sid};
 use bytes::Bytes;
@@ -18,6 +19,7 @@ use serde_json::json;
 use tokio::sync::RwLock;
 
 use assemblyline_models::config::{default_postprocess_actions, Config, PostprocessAction, Webhook};
+use assemblyline_models::messages::submission::Submission as MessageSubmission;
 
 use crate::archive::ArchiveManager;
 use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH_NAME, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
@@ -193,30 +195,31 @@ impl ActionWorker {
         Ok(())
     }
 
-    pub async fn process_cachehit(self: &Arc<Self>, submission: JsonMap, score: i32, force_archive: bool) -> Result<bool> {
-        self.process(submission, serde_json::Map::<String, serde_json::Value>::new().into(), score, force_archive).await
+    pub async fn process_cachehit(self: &Arc<Self>, submission: &MessageSubmission, score: i32, force_archive: bool) -> Result<bool> {
+        // convert submission data to searchable json data
+        let mut data = json!(submission);
+        if let Some(data) = data.as_object_mut() {
+            data.insert("tags".to_string(), serde_json::Value::Object(Default::default()));
+        };
+
+        // do the search
+        self._process(submission, data, score, force_archive).await
     }
 
     /// Handle any postprocessing events for a submission.
     /// Return bool indicating if a resubmission action has happened.
-    pub async fn process(self: &Arc<Self>, mut submission: JsonMap, tags: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
+    pub async fn process(self: &Arc<Self>, submission: &Submission, tags: serde_json::Value, force_archive: bool) -> Result<bool> {
         // Add tags to submission
-        submission.insert("tags".into(), tags);
-
-        // run the post-processing, capture results for later
-        let result = {
-            let submission = serde_json::Value::Object(submission);
-            self._process(submission, score, force_archive).await
+        let mut data = json!(submission);
+        if let Some(data) = data.as_object_mut() {
+            data.insert("tags".into(), tags);
         };
 
-        // // Clean up the tags from submission
-        // submission.remove("tags");
-
-        // return result captured
-        return result;
+        // run the post-processing
+        self._process(&submission.into(), data, submission.max_score, force_archive).await
     }
 
-    async fn _process(self: &Arc<Self>, submission: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
+    async fn _process(self: &Arc<Self>, submission: &MessageSubmission, data: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
         let mut archive_submission = force_archive;
         let mut create_alert = false;
         let mut resubmit: Option<HashSet<String>> = None;
@@ -224,7 +227,7 @@ impl ActionWorker {
 
         let actions = self.actions.read().await.clone();
         for (fltr, action) in actions.values() {
-            if !fltr.test(&submission)? {
+            if !fltr.test(&data)? {
                 continue
             }
 
@@ -261,7 +264,7 @@ impl ActionWorker {
         }
 
         // Prepare a message formatted submission
-        let submission_msg: assemblyline_models::messages::submission::Submission = serde_json::from_value(submission.clone())?;
+        let submission_msg: MessageSubmission = submission.clone();
         let sid = submission_msg.sid;
 
         // Trigger resubmit

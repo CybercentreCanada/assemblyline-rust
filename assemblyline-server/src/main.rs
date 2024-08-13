@@ -137,13 +137,13 @@ impl Core {
     /// Initialize connections to resources that everything uses
     pub async fn setup(config: Arc<Config>) -> Result<Self> {
         // connect to redis one
-        let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port)?;
+        let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?;
 
         // connect to redis two
-        let redis_volatile = RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port)?;
+        let redis_volatile = RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?;
 
         // connect to redis three
-        let redis_metrics = RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port)?;
+        let redis_metrics = RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?;
 
         // connect to elastic
         // TODO Fill in ca parameter
@@ -175,31 +175,80 @@ impl Core {
         })
     }
     
-    /// Produce a set of core resources suitable for testing
     #[cfg(test)]
-    pub async fn test_setup() -> Self {
+    pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, RedisGuard) {
+        use std::sync::LazyLock;
+        use parking_lot::Mutex;
+
+        static USED_DB: LazyLock<Arc<Mutex<Vec<i64>>>> = LazyLock::new(|| {
+            let out = Vec::from_iter(1..16);
+            Arc::new(Mutex::new(out))
+        });
+
+        let table = USED_DB.clone();
+        let db = loop {
+            {
+                let mut table = table.lock();
+                if let Some(value) = table.pop() {
+                    break value
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        };
+
+        let host = "localhost";
+        let port = 6379;
+        let redis = RedisObjects::open_host(host, port, db).unwrap();
+        redis.wipe().await.unwrap();
+
         let mut config: Config = serde_json::from_value(serde_json::json!({
             "core": {
                 "redis": {
                     "persistent": {
-                        "host": "localhost",
-                        "port": 6379,
+                        "host": host,
+                        "port": port,
+                        "db": db,
                     },
                     "nonpersistent": {
-                        "host": "localhost",
-                        "port": 6379,
+                        "host": host,
+                        "port": port,
+                        "db": db,
                     }
                 },
                 "metrics": {
                     "redis": {
-                        "host": "localhost",
-                        "port": 6379,
+                        "host": host,
+                        "port": port,
+                        "db": db,
                     }
                 }
             }
         })).unwrap();
+        callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
-        Self::setup(Arc::new(config)).await.unwrap()
+        (
+            Self::setup(Arc::new(config)).await.unwrap(),
+            RedisGuard { used: db, table }
+        )
+    }
+    
+    /// Produce a set of core resources suitable for testing
+    #[cfg(test)]
+    pub async fn test_setup() -> (Self, RedisGuard) {
+        Self::test_custom_setup(|_| {}).await
+    }
+}
+
+/// While this struct is held prevent 
+struct RedisGuard {
+    used: i64,
+    table: Arc<parking_lot::Mutex<Vec<i64>>>,
+}
+
+impl Drop for RedisGuard {
+    fn drop(&mut self) {
+        let mut table = self.table.lock();
+        table.push(self.used);
     }
 }
 

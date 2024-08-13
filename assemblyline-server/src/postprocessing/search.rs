@@ -1,9 +1,8 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 use std::sync::OnceLock;
 use assemblyline_models::ElasticMeta;
-use chrono::{DateTime, Datelike, Duration, DurationRound, Months, SubsecRound, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, Months, SubsecRound, Timelike, Utc};
 use itertools::Itertools;
 use struct_metadata::Described;
 use super::ParsingError;
@@ -237,7 +236,7 @@ impl Query {
             Query::Or(parts) => for part in parts {
                 fields.extend(part.list_fields().into_iter());
             },
-            Query::Not(part) => fields.extend(part.list_fields().into_iter()),
+            Query::Not(part) => fields.extend(part.list_fields()),
             Query::MatchAny(_) => {},
             Query::RegexAny(_) => {},
             Query::FieldExists(field) |
@@ -249,7 +248,7 @@ impl Query {
     }
 }
 
-fn get_all_fields<'a>(data: &'a serde_json::Value) -> Vec<&'a serde_json::Value> {
+fn get_all_fields(data: &serde_json::Value) -> Vec<&serde_json::Value> {
     match data {
         serde_json::Value::Null => vec![],
         serde_json::Value::Array(array) => {
@@ -270,10 +269,10 @@ fn get_all_fields<'a>(data: &'a serde_json::Value) -> Vec<&'a serde_json::Value>
     }
 }
 
-fn get_full_text_fields<'a>(data: &'a serde_json::Value) -> Vec<&'a serde_json::Value> {
+fn get_full_text_fields(data: &serde_json::Value) -> Vec<&serde_json::Value> {
     let mut output = vec![];
     for field in get_full_text_field_names() {
-        output.extend(get_field(data, &field));
+        output.extend(get_field(data, field));
     }
     if let Some(map) = data.as_object() {
         if let Some(tags) = map.get("tags") {
@@ -552,14 +551,14 @@ impl std::fmt::Display for DateExpression {
         match self {
             DateExpression::Fixed(date) => write!(f, "{date}"),
             DateExpression::Relative { changes, truncation } => {
-                let mut result = write!(f, "NOW")?;
+                write!(f, "NOW")?;
                 for (quantity, unit) in changes {
-                    result = write!(f, ":+{quantity}{unit}")?;
+                    write!(f, ":+{quantity}{unit}")?;
                 }
                 if let Some(trunc) = truncation {
-                    result = write!(f, "/{trunc}")?;
+                    write!(f, "/{trunc}")?;
                 }
-                Ok(result)
+                Ok(())
             },
         }
     }

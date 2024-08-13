@@ -326,7 +326,7 @@ async fn test_hook() {
         archive_submission: false
     };
 
-    let core = Core::test_setup().await;
+    let (core, _redis_lock) = Core::test_setup().await;
     let worker = ActionWorker::new(false, &core).await.unwrap();
 
     {
@@ -339,16 +339,14 @@ async fn test_hook() {
     {
         let mut sub: Submission = thread_rng().gen();
         sub.metadata.insert("ok".to_string(), serde_json::Value::String("bad".to_string()));
-        let serde_json::Value::Object(sub_obj) = serde_json::to_value(&sub).unwrap() else { panic!(); };
-        worker.process(sub_obj, Default::default(), sub.max_score, false).await.unwrap(); 
+        worker.process(&sub, Default::default(), false).await.unwrap(); 
     }
 
     {
         let mut sub: Submission = thread_rng().gen();
         sub.metadata.insert("ok".to_string(), serde_json::Value::String("good".to_string()));
         sub.metadata.insert("do_hello".to_string(), serde_json::Value::String("yes".to_string()));
-        let serde_json::Value::Object(sub_obj) = serde_json::to_value(&sub).unwrap() else { panic!(); };
-        worker.process(sub_obj, Default::default(), sub.max_score, false).await.unwrap();
+        worker.process(&sub, Default::default(), false).await.unwrap(); 
     }
 
     let (headers, body) = tokio::time::timeout(std::time::Duration::from_secs(3), hits.recv()).await.unwrap().unwrap();
