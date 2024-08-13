@@ -70,7 +70,7 @@ impl std::error::Error for ModelError {}
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// Uppercase String
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="keyword")]
 pub struct UpperString {
@@ -100,6 +100,12 @@ impl std::str::FromStr for UpperString {
     }
 }
 
+impl From<&str> for UpperString {
+    fn from(s: &str) -> Self {
+        let value = s.trim().to_uppercase();
+        UpperString{ value }
+    }
+}
 
 /// sha256 hash of a file
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq)]
@@ -267,6 +273,13 @@ impl rand::distributions::Distribution<Sid> for rand::distributions::Standard {
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text")]
 pub struct Text(pub String);
+
+impl From<&str> for Text {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
 
 /// Unvalidated uuid type
 pub type Uuid = String;

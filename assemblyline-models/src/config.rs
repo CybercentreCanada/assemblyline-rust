@@ -649,19 +649,23 @@ pub struct RedisServer {
     pub host: String,
     /// Port of Redis instance
     pub port: u16,
+    /// Which db to connect to
+    pub db: i64,
 }
 
 fn default_redis_nonpersistant() -> RedisServer {
     RedisServer {
         host: "127.0.0.1".to_owned(),
-        port: 6379
+        port: 6379,
+        db: 0,
     }
 }
 
 fn default_redis_persistant() -> RedisServer {
     RedisServer {
         host: "127.0.0.1".to_owned(),
-        port: 6380
+        port: 6380,
+        db: 0,
     }
 }
 

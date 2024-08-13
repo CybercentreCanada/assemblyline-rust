@@ -58,19 +58,19 @@ impl Submission {
     }
 }
 
-// def from_datastore_submission(submission: DatabaseSubmission):
-//     """
-//     A helper to convert between database model version of Submission
-//     and the message version of Submission.
-//     """
-//     return Submission({
-//         'sid': submission.sid,
-//         'files': submission.files,
-//         'metadata': submission.metadata,
-//         'params': submission.params,
-//         'scan_key': submission.scan_key
-//     })
-
+impl From<&crate::datastore::submission::Submission> for Submission {
+    fn from(value: &crate::datastore::submission::Submission) -> Self {
+        Self {
+            sid: value.sid,
+            files: value.files.clone(),
+            metadata: value.metadata.clone(),
+            params: value.params.clone(),
+            scan_key: value.scan_key.clone(),
+            time: chrono::Utc::now(),
+            notification: Default::default(),
+        }
+    }
+}
 
 /// Model of Submission Message
 #[derive(Serialize, Deserialize)]

@@ -394,3 +394,34 @@ fn default_user_is_active() -> bool { true }
 impl Readable for User {
     fn set_from_archive(&mut self, from_archive: bool) {}
 }
+
+impl Default for User {
+    fn default() -> Self {
+        User {
+            agrees_with_tos: None,
+            api_quota: default_api_quota(),
+            apikeys: Default::default(),
+            apps: Default::default(),
+            can_impersonate: false,
+            classification: ExpandingClassification {
+                classification: Default::default(),
+                __access_lvl__: Default::default(),
+                __access_req__: Default::default(),
+                __access_grp1__: Default::default(),
+                __access_grp2__: Default::default(),
+            },
+            dn: None,
+            email: None,
+            groups: Default::default(),
+            is_active: default_user_is_active(),
+            name: "User".to_owned(),
+            otp_sk: None,
+            password: Default::default(),
+            submission_quota: default_submission_quota(),
+            user_types: default_user_types(),
+            roles: Default::default(),
+            security_tokens: Default::default(),
+            uname: "user".to_owned(),
+        }
+    }
+}
