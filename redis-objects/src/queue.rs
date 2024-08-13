@@ -107,15 +107,21 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
             None => None,
         })
     }
+
+    /// access the untyped raw queue underlying the typed Queue object
+    pub fn raw(&self) -> RawQueue {
+        self.raw.clone()
+    }
 }
 
 /// A FIFO queue
 /// Optionally has a server side time to live
+#[derive(Clone)]
 pub struct RawQueue {
     name: String,
     store: Arc<RedisObjects>,
     ttl: Option<Duration>,
-    last_expire_time: std::sync::Mutex<Option<std::time::Instant>>,
+    last_expire_time: Arc<std::sync::Mutex<Option<std::time::Instant>>>,
 }
 
 impl RawQueue {
@@ -124,7 +130,7 @@ impl RawQueue {
             name,
             store,
             ttl,
-            last_expire_time: std::sync::Mutex::new(None),
+            last_expire_time: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 

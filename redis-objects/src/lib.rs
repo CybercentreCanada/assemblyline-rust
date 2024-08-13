@@ -41,13 +41,16 @@ pub struct RedisObjects {
 
 impl RedisObjects {
     /// Open given more limited connection info
-    pub fn open_host(host: &str, port: u16) -> Result<Arc<Self>, ErrorTypes> {
+    pub fn open_host(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
         Self::open(redis::ConnectionInfo{
             addr: redis::ConnectionAddr::Tcp(host.to_string(), port),
-            redis: Default::default(),
+            redis: redis::RedisConnectionInfo {
+                db,
+                ..Default::default()
+            },
         })
     }
-
+   
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");
@@ -113,6 +116,12 @@ impl RedisObjects {
 
     pub fn user_quota_tracker(self: &Arc<Self>, prefix: String) -> UserQuotaTracker {
         UserQuotaTracker::new(self.clone(), prefix)
+    }
+
+    pub async fn wipe(&self) -> Result<(), ErrorTypes> {
+        let mut con = self.pool.get().await?;
+        redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut con).await?;
+        Ok(())
     }
 }
 
