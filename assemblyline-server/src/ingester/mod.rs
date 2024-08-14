@@ -203,7 +203,9 @@ pub async fn main(core: Core) -> Result<()> {
     let mut components = tokio::task::JoinSet::new();
 
     // Launch the http interface
-    components.spawn(http::start(ingester.clone()));
+    let bind_address = crate::config::load_bind_address()?;
+    let tls_config = crate::config::TLSConfig::load().await?;
+    components.spawn(http::start(bind_address, tls_config, ingester.clone()));
 
     // Launch the redis interface to pull in new submissions
     for n in 0..ingest_threads()? {

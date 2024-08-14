@@ -36,6 +36,7 @@ mod logging;
 mod tls;
 mod error;
 mod constants;
+mod config;
 
 
 #[derive(Debug, Parser)]
