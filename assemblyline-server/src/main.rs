@@ -8,28 +8,27 @@
 #![allow(clippy::needless_return)]
 // #![allow(clippy::needless_return, clippy::while_let_on_iterator, clippy::collapsible_else_if)]
 
-use std::sync::atomic::AtomicBool;
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::Result;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ClassificationConfig;
 use assemblyline_models::config::Config;
-use clap::{Command, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use elastic::Elastic;
 use redis_objects::RedisObjects;
 use log::error;
 use services::ServiceHelper;
-use tokio::sync::Notify;
 
 use crate::logging::configure_logging;
 
 mod ingester;
 mod submit;
 mod core_dispatcher;
+mod core_metrics;
 mod archive;
 mod services;
-// mod dispatcher;
+mod dispatcher;
 mod postprocessing;
 mod elastic;
 mod logging;
@@ -161,10 +160,11 @@ impl Core {
             Some(config) => serde_yaml::from_str(&config)?,
             None => ClassificationConfig::default(),
         };
+        let classification_parser = Arc::new(ClassificationParser::new(classification_config)?);
 
         Ok(Core {
             // start a daemon that keeps an up-to-date local cache of service info
-            services: ServiceHelper::start(datastore.clone(), &redis_volatile).await?,
+            services: ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), config.services.clone()).await?,
             config,
             datastore,
             redis_persistant,
@@ -172,7 +172,7 @@ impl Core {
             redis_metrics,
             running: Arc::new(Flag::new(true)),
             enabled: Arc::new(Flag::new(true)),
-            classification_parser: Arc::new(ClassificationParser::new(classification_config)?),
+            classification_parser,
         })
     }
     
@@ -238,14 +238,35 @@ impl Core {
     pub async fn test_setup() -> (Self, RedisGuard) {
         Self::test_custom_setup(|_| {}).await
     }
+
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.running.read()
+    }
+
+    #[must_use]
+    pub fn is_active(&self) -> bool {
+        self.enabled.read()
+    }
+
+    // pub async fn while_running(&self, duration: Duration) {
+        
+    // }
+
+    pub async fn sleep(&self, duration: std::time::Duration) -> bool {
+        _ = tokio::time::timeout(duration, self.running.wait_for(false)).await;
+        self.running.read()
+    }
 }
 
 /// While this struct is held prevent 
+#[cfg(test)]
 struct RedisGuard {
     used: i64,
     table: Arc<parking_lot::Mutex<Vec<i64>>>,
 }
 
+#[cfg(test)]
 impl Drop for RedisGuard {
     fn drop(&mut self) {
         let mut table = self.table.lock();
@@ -277,5 +298,9 @@ impl Flag {
         while *watcher.borrow_and_update() != value {
             _ = watcher.changed().await;
         }
+    }
+
+    pub fn install_terminate_handler(self: &Arc<Self>) {
+        todo!()
     }
 }

@@ -4,9 +4,11 @@ use std::str::FromStr;
 
 use anyhow::Result;
 
-use assemblyline_models::messages::SubmissionDispatchMessage;
+use assemblyline_models::messages::task::Task;
+use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
 use assemblyline_models::Sid;
 
+use crate::constants::service_queue_name;
 use crate::Core;
 
 pub const DISPATCH_DIRECTORY: &str = "dispatchers-directory";
@@ -28,6 +30,10 @@ impl Core {
             .into_iter().map(|str|Sid::from_str(&str))
             .collect::<Result<Vec<Sid>, _>>()?
         )
+    }
+
+    pub fn get_service_queue(&self, service: &str) -> redis_objects::PriorityQueue<Task> {
+        self.redis_persistant.priority_queue(service_queue_name(service))
     }
 
     // def dispatcher_queue_lengths(redis, instance_id):

@@ -413,7 +413,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
     /// :param index_type: Type of indices to target
     /// :return: a generator of dictionary of field list results
     pub async fn stream_search<RT: DeserializeOwned + Debug>(&self,
-        query: String,
+        query: &str,
         fl: String,
         mut filters: Vec<String>,
         access_control: Option<String>,
@@ -1009,7 +1009,7 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<T>> {
+    pub async fn next(&mut self) -> Result<Option<T>> {
         if self.finished {
             return Ok(None)
         }

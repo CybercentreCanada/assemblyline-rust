@@ -180,7 +180,7 @@ struct Ingester {
 
 pub const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
 
-// This is a simple macro named `say_hello`.
+// This is a simple macro that wraps the given method in a retry loop
 macro_rules! retry {
     ($name: expr, $ingester: ident, $method: ident) => {
         {
@@ -189,7 +189,7 @@ macro_rules! retry {
             async move {
                 while let Err(err) = ingester.clone().$method().await {
                     error!("Error in {name}: {err}");
-                    ingester.sleep(ERROR_BACKOFF).await;
+                    ingester.core.sleep(ERROR_BACKOFF).await;
                 }        
             }
         }
@@ -199,6 +199,7 @@ macro_rules! retry {
 pub async fn main(core: Core) -> Result<()> {
     // Initialize ingester Internal state
     let ingester = Arc::new(Ingester::new(core).await?);
+    ingester.core.running.install_terminate_handler();
 
     let mut components = tokio::task::JoinSet::new();
 
@@ -270,33 +271,15 @@ impl Ingester {
         })
     }
 
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.core.running.read()
-    }
-
-    #[must_use]
-    pub fn is_active(&self) -> bool {
-        self.core.enabled.read()
-    }
-
-    // pub async fn while_running(&self, duration: Duration) {
-        
-    // }
-
-    pub async fn sleep(&self, duration: Duration) {
-        _ = tokio::time::timeout(duration, self.core.running.wait_for(false)).await
-    }
-
     async fn handle_ingest(self: Arc<Self>) -> Result<()> {
         // Move from ingest to unique and waiting queues.
         // While there are entries in the ingest queue we consume chunk_size
         // entries at a time and move unique entries to uniqueq / queued and
         // duplicates to their own queues / waiting.
-        while self.is_running() {
-            while !self.is_active() {
+        while self.core.is_running() {
+            while !self.core.is_active() {
                 // Ingester is disabled... waiting for it to be reactivated
-                self.sleep(Duration::from_millis(100)).await;
+                self.core.sleep(Duration::from_millis(100)).await;
             }
 
             self.ingest_once().await?;
@@ -321,14 +304,13 @@ impl Ingester {
         };
 
         // setup the task object and spawn a new task to handle it
-        let mut task = Box::new(IngestTask::new(message));
-        task.submission.sid = rand::thread_rng().gen(); // Reset to new random uuid
+        let task = Box::new(IngestTask::new(message));
         self.spawn_ingest(task);
         Ok(())
     }
 
     async fn handle_complete(self: &Arc<Self>) -> Result<()> {
-        while self.is_running() {
+        while self.core.is_running() {
             let result = match self.complete_queue.pop_timeout(Duration::from_secs(3)).await? {
                 Some(result) => result,
                 None => continue
@@ -353,7 +335,7 @@ impl Ingester {
     }
     
     async fn handle_submit(self: &Arc<Self>, block_on_redis: bool) -> Result<()> {
-        while self.is_running() {
+        while self.core.is_running() {
             self.submit_once(block_on_redis).await?;
         }
         Ok(())
@@ -363,7 +345,7 @@ impl Ingester {
         // Check if there is room for more submissions
         let length = self.scanning.length().await?;
         if length >= self.core.config.core.ingester.max_inflight {
-            self.sleep(Duration::from_millis(100)).await;
+            self.core.sleep(Duration::from_millis(100)).await;
             return Ok(())
         }
 
@@ -455,7 +437,7 @@ impl Ingester {
     }
 
     async fn handle_retries(self: &Arc<Ingester>) -> Result<()> {
-        while self.is_running() {
+        while self.core.is_running() {
             let now = chrono::Utc::now().timestamp();
             let tasks = self.retry_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let task_count = tasks.len();
@@ -465,14 +447,14 @@ impl Ingester {
             }
     
             if task_count == 0 {
-                self.sleep(Duration::from_secs(3)).await;
+                self.core.sleep(Duration::from_secs(3)).await;
             }
         }
         Ok(())
     }
 
     async fn handle_timeouts(self: Arc<Self>) -> Result<()> {
-        while self.is_running() {
+        while self.core.is_running() {
             let now = chrono::Utc::now().timestamp();
             let timeouts = self.timeout_queue.dequeue_range(None, Some(now), None, Some(100)).await?;
             let timeouts_count = timeouts.len();
@@ -484,7 +466,7 @@ impl Ingester {
             }
 
             if timeouts_count == 0 {
-                self.sleep(Duration::from_secs(3)).await;
+                self.core.sleep(Duration::from_secs(3)).await;
             }
         }
         Ok(())
@@ -528,7 +510,7 @@ impl Ingester {
     async fn handle_missing(self: &Arc<Self>) -> Result<()> {
         let mut last_round: HashSet<Sid> = Default::default();
 
-        while self.is_running() {
+        while self.core.is_running() {
             // Get the current set of outstanding tasks
             let mut outstanding = self.scanning.items().await?;
 
@@ -577,21 +559,25 @@ impl Ingester {
 
             // wait a few minutes before checking again
             if last_round.is_empty() {
-                self.sleep(Duration::from_secs(900)).await;
+                self.core.sleep(Duration::from_secs(900)).await;
             } else {
-                self.sleep(Duration::from_secs(300)).await;
+                self.core.sleep(Duration::from_secs(300)).await;
             }
         }
         Ok(())
     }
 
-    fn spawn_ingest(self: &Arc<Self>, task: Box<IngestTask>) {
+    fn spawn_ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> tokio::task::JoinHandle<()> {
+        // Reset to new random uuid
+        task.submission.sid = rand::thread_rng().gen(); 
+
+        // spawn a task to process this
         let this = self.clone();
         tokio::spawn(async move {
             if let Err(err) = this.ingest(task).await {
                 error!("Error while ingesting a file: {err}");
             }
-        });
+        })
     }
 
     async fn ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> Result<()> {
@@ -1097,7 +1083,7 @@ impl Ingester {
                     return Some(task)
                 }
             }
-            _ = self.sleep(Duration::from_secs(120)) => {}
+            _ = self.core.sleep(Duration::from_secs(120)) => {}
         }
         
         // if its a timeout close the collector and check for a last minute value
@@ -1159,38 +1145,6 @@ fn drop_chance(length: u64, maximum: i64) -> f64 {
     let maximum = maximum as f64;
     f64::max(0.0, f64::tanh((length - maximum) / maximum * 2.0))
 }
-
-// class Ingester(ThreadedCoreBase):
-//     def __init__(self, datastore=None, logger: Optional[logging.Logger] = None,
-//                  classification=None, redis=None, persistent_redis=None,
-//                  , config=None):
-//         super().__init__('assemblyline.ingester', logger, redis=redis, redis_persist=persistent_redis,
-//                          datastore=datastore, config=config)
-
-//         # Cache the user groups
-//         self.notification_queues: dict[str, NamedQueue] = {}
-//         self.whitelisted: dict[str, Any] = {}
-//         self.whitelisted_lock = threading.RLock()
-
-//         # Module path parameters are fixed at start time. Changing these involves a restart
-//         self.is_low_priority = load_module_by_path(self.config.core.ingester.is_low_priority)
-//         self.get_whitelist_verdict = load_module_by_path(self.config.core.ingester.get_whitelist_verdict)
-//         self.whitelist = load_module_by_path(self.config.core.ingester.whitelist)
-
-//         # Constants are loaded based on a non-constant path, so has to be done at init rather than load
-//         constants = forge.get_constants(self.config)
-//         self.priority_value: dict[str, int] = constants.PRIORITIES
-//         self.priority_range: dict[str, Tuple[int, int]] = constants.PRIORITY_RANGES
-//         self.threshold_value: dict[str, int] = constants.PRIORITY_THRESHOLDS
-
-//         # Classification engine
-//         self.ce = classification or forge.get_classification()
-
-
-
-//         # Utility object to help submit tasks to dispatching
-//         self.submit_client = SubmissionClient(datastore=self.datastore, redis=self.redis)
-
 
 fn current_hour() -> i64 {
     Utc::now().timestamp()/HOUR_IN_SECONDS

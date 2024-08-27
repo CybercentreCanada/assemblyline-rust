@@ -1,4 +1,5 @@
 use assemblyline_markings::config::{ClassificationConfig, ClassificationGroup, ClassificationLevel, DynamicGroupType};
+use assemblyline_models::Sid;
 use strum_macros::{Display, EnumIter};
 
 
@@ -12,6 +13,20 @@ pub(crate) const COMPLETE_QUEUE_NAME: &str = "m-complete";
 pub(crate) const INGEST_QUEUE_NAME: &str = "m-ingest";
 pub(crate) const SUBMISSION_QUEUE: &str = "dispatch-submission-queue";
 pub(crate) const ARCHIVE_QUEUE_NAME: &str = "m-archive";
+pub(crate) const DISPATCH_TASK_HASH: &str = "dispatch-active-submissions";
+pub(crate) const DISPATCH_RUNNING_TASK_HASH: &str = "dispatch-active-tasks";
+pub(crate) const SCALER_TIMEOUT_QUEUE: &str = "scaler-timeout-queue";
+
+
+/// Take the name of a service, and provide the queue name to send tasks to that service.
+pub fn service_queue_name(service: &str) -> String {
+    format!("service-queue-{service}")
+}
+
+/// Get the name of the list dispatcher will pull for sending out submission events.
+pub fn make_watcher_list_name(sid: Sid) -> String {    
+    format!("dispatch-watcher-list-{sid}")
+}
 
 
 // # Queue priority values for each bucket in the ingester

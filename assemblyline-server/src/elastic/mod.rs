@@ -907,7 +907,7 @@ impl Elastic {
     pub async fn list_all_services(&self) -> Result<Vec<Service>> {
         // List all services from service delta (Return all fields if full is true)
         // // service_delta = list(self.service_delta.stream_search("id:*", fl="*" if full else None))
-        let service_deltas = self.service_delta.stream_search::<JsonMap>("id:*".to_owned(), "*".to_owned(), vec![], None, None, None).await?.collect().await?;
+        let service_deltas = self.service_delta.stream_search::<JsonMap>("id:*", "*".to_owned(), vec![], None, None, None).await?.collect().await?;
 
         // // Gather all matching services and apply a mask if we don't want the full source object
         // service_data = [Service(s, mask=mask)

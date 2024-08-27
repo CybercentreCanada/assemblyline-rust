@@ -10,7 +10,7 @@ use chrono::{Utc, Duration};
 
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 use assemblyline_models::datastore::submission::{Submission as DatastoreSubmission, SubmissionState};
-use assemblyline_models::messages::SubmissionDispatchMessage;
+use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
 use redis_objects::{Queue, RedisObjects};
 
 use crate::constants::SUBMISSION_QUEUE;
@@ -22,7 +22,7 @@ pub struct SubmitManager {
     datastore: Arc<Elastic>,
     config: Arc<Config>,
     classification_parser: Arc<ClassificationParser>,
-    pub dispatch_submission_queue: Queue<assemblyline_models::messages::SubmissionDispatchMessage>,
+    pub dispatch_submission_queue: Queue<SubmissionDispatchMessage>,
 }
 
 impl SubmitManager {

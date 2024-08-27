@@ -167,10 +167,6 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
             "assemblyline".to_owned(),
             connection
         )?);
-
-        todo!()
-        //     syslog_handler.formatter = logging.Formatter(AL_SYSLOG_FORMAT)
-        //     logger.addHandler(syslog_handler)
     }
 
     Ok(builder.start()?)
