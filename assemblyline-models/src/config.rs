@@ -478,45 +478,23 @@ impl Default for Classification {
 }
 
 
-// @odm.model(index=False, store=False, description="Dispatcher Configuration")
-// class Dispatcher(odm.Model):
-//     timeout: float = odm.Integer(
-//         description="Time between re-dispatching attempts, as long as some action (submission or any task completion) "
-//         "happens before this timeout ends, the timeout resets.")
-//     max_inflight: int = odm.Integer(description="Maximum submissions allowed to be in-flight")
-
-// DEFAULT_DISPATCHER = {
-//     "timeout": 15*60,
-//     "max_inflight": 1000
-// }
-
-#[derive(Serialize, Deserialize, Default)]
-pub struct Dispatcher {
-    pub broker_bind: BindDetails,
-    pub broker_storage_path: String,
-}
-
+/// Dispatcher Configuration
 #[derive(Serialize, Deserialize)]
-pub struct BindDetails {
-    pub address: std::net::SocketAddr,
-    pub tls: Option<TlsConfig>,
-    pub path: Option<String>,
+#[serde(default)]
+struct Dispatcher {
+    /// Time between re-dispatching attempts, as long as some action (submission or any task completion) happens before this timeout ends, the timeout resets.
+    pub timeout: f64,
+    /// Maximum submissions allowed to be in-flight
+    pub max_inflight: u64,
 }
 
-impl Default for BindDetails {
+impl Default for Dispatcher {
     fn default() -> Self {
-        Self {
-            address: std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 5000),
-            tls: None,
-            path: None,
+        Self { 
+            timeout: 15.0 * 60.0, 
+            max_inflight: 1000 
         }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct TlsConfig {
-    pub certificate_pem: String,
-    pub key_pem: String,
 }
 
 
@@ -1133,16 +1111,18 @@ impl Default for Logging {
 //     'Static Analysis',
 // ]
 
-// SERVICE_STAGES = [
-//     'FILTER',
-//     'EXTRACT',
-//     'CORE',
-//     'SECONDARY',
-//     'POST',
-//     'REVIEW'
-// ]
+fn default_service_stages() -> Vec<String> {
+    vec![
+        "FILTER".to_string(),
+        "EXTRACT".to_string(),
+        "CORE".to_string(),
+        "SECONDARY".to_string(),
+        "POST".to_string(),
+        "REVIEW".to_string(),
+    ]
+}
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy)]
 // #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum SafelistHashTypes {
@@ -1153,7 +1133,7 @@ pub enum SafelistHashTypes {
 
 /// Service's Safelisting Configuration
 // @odm.model(index=False, store=False, description="")
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServiceSafelist {
     /// Should services be allowed to check extracted files against safelist?
@@ -1182,56 +1162,42 @@ impl Default for ServiceSafelist {
 //     password: str = odm.Keyword(description="Password for container registry")
 
 
-// @odm.model(index=False, store=False, description="Services Configuration")
-// class Services(odm.Model):
+/// Services Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Services {
 //     categories: List[str] = odm.List(odm.Keyword(), description="List of categories a service can be assigned to")
 //     default_timeout: int = odm.Integer(description="Default service timeout time in seconds")
-//     stages: List[str] = odm.List(odm.Keyword(), description="List of execution stages a service can be assigned to")
-//     image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''),
-//                                                   description="Substitution variables for image paths "
-//                                                   "(for custom registry support)")
-//     update_image_variables: Dict[str, str] = odm.Mapping(
-//         odm.Keyword(default=''), description="Similar to `image_variables` but only applied to the updater. "
-//                                              "Intended for use with local registries.")
+    /// List of execution stages a service can be assigned to
+    pub stages: Vec<String>, 
+//     image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), description="Substitution variables for image paths (for custom registry support)")
+//     update_image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), description="Similar to `image_variables` but only applied to the updater. Intended for use with local registries.")
 //     preferred_update_channel: str = odm.Keyword(description="Default update channel to be used for new services")
 //     allow_insecure_registry: bool = odm.Boolean(description="Allow fetching container images from insecure registries")
-//     preferred_registry_type: str = odm.Enum(
-//         values=REGISTRY_TYPES,
-//         default='docker',
-//         description="Global registry type to be used for fetching updates for a service (overridable by a service)")
-//     prefer_service_privileged: bool = odm.Boolean(
-//         default=False,
-//         description="Global preference that controls if services should be "
-//                     "privileged to communicate with core infrastucture")
-//     cpu_reservation: float = odm.Float(
-//         description="How much CPU do we want to reserve relative to the service's request?<br>"
-//         "At `1`, a service's full CPU request will be reserved for them.<br>"
-//         "At `0` (only for very small appliances/dev boxes), the service's CPU will be limited "
-//         "but no CPU will be reserved allowing for more flexible scheduling of containers.")
-//     safelist = odm.Compound(ServiceSafelist)
-//     registries = odm.Optional(odm.List(odm.Compound(ServiceRegistry)),
-//                               description="Global set of registries for services")
-//     service_account = odm.optional(odm.keyword(description="Service account to use for pods in kubernetes "
-//                                                            "where the service does not have one configured."))
+//     preferred_registry_type: str = odm.Enum(values=REGISTRY_TYPES,default='docker',description="Global registry type to be used for fetching updates for a service (overridable by a service)")
+//     prefer_service_privileged: bool = odm.Boolean(default=False,description="Global preference that controls if services should be privileged to communicate with core infrastucture")
+//     cpu_reservation: float = odm.Float(description="How much CPU do we want to reserve relative to the service's request?<br> At `1`, a service's full CPU request will be reserved for them.<br> At `0` (only for very small appliances/dev boxes), the service's CPU will be limited ""but no CPU will be reserved allowing for more flexible scheduling of containers.")
+    pub safelist: ServiceSafelist,
+//     registries = odm.Optional(odm.List(odm.Compound(ServiceRegistry)), description="Global set of registries for services")
+//     service_account = odm.optional(odm.keyword(description="Service account to use for pods in kubernetes where the service does not have one configured."))
+}
 
-
-// DEFAULT_SERVICES = {
-//     "categories": SERVICE_CATEGORIES,
-//     "default_timeout": 60,
-//     "stages": SERVICE_STAGES,
-//     "image_variables": {},
-//     "update_image_variables": {},
-//     "preferred_update_channel": "stable",
-//     "allow_insecure_registry": False,
-//     "cpu_reservation": 0.25,
-//     "safelist": {
-//         "enabled": True,
-//         "hash_types": ['sha1', 'sha256'],
-//         "enforce_safelist_service": False
-//     },
-//     "registries": []
-// }
-
+impl Default for Services {
+    fn default() -> Self {
+        Self { 
+    //     "categories": SERVICE_CATEGORIES,
+    //     "default_timeout": 60,
+            stages: default_service_stages(),
+    //     "image_variables": {},
+    //     "update_image_variables": {},
+    //     "preferred_update_channel": "stable",
+    //     "allow_insecure_registry": False,
+    //     "cpu_reservation": 0.25,
+            safelist: Default::default(),
+    //     "registries": []
+        }
+    }
+}
 
 // @odm.model(index=False, store=False, description="System Configuration")
 // class System(odm.Model):
@@ -1606,8 +1572,8 @@ pub struct Submission {
     // pub dtl: u32,
     /// Maximum number of days submissions will remain in the system
     pub max_dtl: u32,
-    // /// Maximum files extraction depth
-    // pub max_extraction_depth: u32,
+    /// Maximum files extraction depth
+    pub max_extraction_depth: u32,
     /// Maximum size for files submitted in the system
     pub max_file_size: u64,
     /// Maximum length for each metadata values
@@ -1632,7 +1598,7 @@ impl Default for Submission {
             // default_max_supplementary: 500,
             // dtl: 30,
             max_dtl: 0,
-            // max_extraction_depth: 6,
+            max_extraction_depth: 6,
             max_file_size: 104857600,
             max_metadata_length: 4096,
             max_temp_data_length: 4096,
@@ -1678,8 +1644,8 @@ pub struct Config {
     // pub filestore: Filestore,
     /// Logging configuration
     pub logging: Logging,
-    // /// Service configuration
-    // pub services: Services,
+    /// Service configuration
+    pub services: Services,
     // /// System configuration
     // pub system: System,
     /// UI configuration parameters

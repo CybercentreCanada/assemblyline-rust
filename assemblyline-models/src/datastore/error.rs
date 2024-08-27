@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
+use crate::messages::task::{generate_conf_key, Task};
 use crate::{ElasticMeta, Readable, Sha256};
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
@@ -14,7 +15,7 @@ pub enum Status {
     FailRecoverable,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 pub enum ErrorTypes {
     #[strum(serialize = "UNKNOWN")]
@@ -75,6 +76,20 @@ pub struct Error {
     /// Type of error
     #[serde(rename="type", default="default_error_type")]
     pub error_type: ErrorTypes,
+}
+
+impl Error {
+    pub fn build_key(&self, service_tool_version: Option<&str>, task: Option<&Task>) -> Result<String, serde_json::Error> {
+        let key_list = [
+            self.sha256.to_string(),
+            self.response.service_name.replace('.', "_"),
+            format!("v{}", self.response.service_version.replace('.', "_")),
+            format!("c{}", generate_conf_key(service_tool_version, task)?),
+            format!("e{}", self.error_type as u64),
+        ];
+
+        Ok(key_list.join("."))
+    }
 }
 
 fn default_error_type() -> ErrorTypes { ErrorTypes::Exception }

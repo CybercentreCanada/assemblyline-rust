@@ -108,7 +108,7 @@ impl From<&str> for UpperString {
 }
 
 /// sha256 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[metadata(mapping="keyword", normalizer="lowercase_normalizer")]
 #[metadata_type(ElasticMeta)]
 pub struct Sha256 {

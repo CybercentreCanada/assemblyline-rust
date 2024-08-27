@@ -2,17 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::Sid;
 
+pub mod dispatching;
 pub mod changes;
 pub mod task;
 pub mod submission;
 pub mod ingest_heartbeat;
+pub mod service_heartbeat;
+pub mod dispatcher_heartbeat;
 
-
-#[derive(Serialize, Deserialize)]
-pub struct SubmissionDispatchMessage {
-    pub submission: crate::datastore::Submission,
-    pub completed_queue: Option<String>,
-}
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all="lowercase")]
@@ -34,4 +31,10 @@ impl ArchivedMessage {
     pub fn resubmit(sid: Sid) -> Self {
         Self {action: ArchiveAction::Resubmit, sid: Some(sid)}
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct KillContainerCommand {
+    pub service: String,
+    pub container: String,
 }

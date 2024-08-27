@@ -131,7 +131,7 @@ pub struct SubmissionParams {
     /// Ignore the cached service results?
     pub ignore_cache: bool,
     /// Should we ignore dynamic recursion prevention?
-    pub ignore_dynamic_recursion_prevention: bool,
+    pub ignore_recursion_prevention: bool,
     /// Should we ignore filtering services?
     pub ignore_filtering: bool,
     /// Ignore the file size limits?
@@ -188,7 +188,7 @@ impl SubmissionParams {
             generate_alert: false,
             groups: vec![],
             ignore_cache: false,
-            ignore_dynamic_recursion_prevention: false,
+            ignore_recursion_prevention: false,
             ignore_filtering: false,
             ignore_size: false,
             never_drop: false,
@@ -217,7 +217,7 @@ impl SubmissionParams {
             ("classification", json!(self.classification)),
             ("deep_scan", json!(self.deep_scan)),
             ("ignore_cache", json!(self.ignore_cache)),
-            ("ignore_dynamic_recursion_prevention", json!(self.ignore_dynamic_recursion_prevention)),
+            ("ignore_recursion_prevention", json!(self.ignore_recursion_prevention)),
             ("ignore_filtering", json!(self.ignore_filtering)),
             ("ignore_size", json!(self.ignore_size)),
             ("max_extracted", json!(self.max_extracted)),

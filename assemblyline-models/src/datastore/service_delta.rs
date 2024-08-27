@@ -225,6 +225,9 @@ pub struct ServiceDelta {
     pub update_channel: Option<ChannelKinds>,
     /// REF_SERVICE
     pub update_config: Option<UpdateConfigDelta>,
+
+    /// REF_SERVICE
+    pub recursion_prevention: Option<Vec<String>>,
 }
 
 impl Readable for ServiceDelta {

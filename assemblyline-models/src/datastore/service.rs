@@ -341,6 +341,10 @@ pub struct Service {
     pub update_channel: ChannelKinds,
     /// Update configuration for fetching external resources
     pub update_config: Option<UpdateConfig>,
+    
+    /// List of service names/categories where recursion is prevented.
+    #[serde(default)]
+    pub recursion_prevention: Vec<String>,
 }
 
 fn default_category() -> String { "Static Analysis".to_owned() }

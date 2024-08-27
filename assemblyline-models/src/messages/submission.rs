@@ -97,6 +97,14 @@ impl SubmissionMessage {
             sender: "ingester".to_owned()
         }
     }
+    pub fn started(sub: Submission) -> Self {
+        Self {
+            msg: sub,
+            msg_loader: default_message_loader(),
+            msg_type: MessageType::SubmissionStarted,
+            sender: "dispatcher".to_owned()
+        }
+    }
     pub fn completed(sub: Submission, sender: String) -> Self {
         Self {
             msg: sub,

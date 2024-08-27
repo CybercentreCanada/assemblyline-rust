@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use md5::Digest;
+use rand::Rng;
 use serde::{Serialize, Deserialize};
 
 use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInfo, config::ServiceSafelist};
@@ -7,7 +9,7 @@ use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInf
 
 
 /// File Information
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct FileInfo {
     /// The output from libmagic which was used to determine the tag
     pub magic: String,
@@ -55,12 +57,14 @@ pub struct DataItem {
 /// Service Task Model
 #[derive(Serialize, Deserialize)]
 pub struct Task {
+    /// A random ID to differentiate this task
     pub task_id: u64,
+    /// Id of the dispatcher that issued this task
     pub dispatcher: String,
     /// Submission ID
     pub sid: Sid,
     /// Metadata associated to the submission
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<String, serde_json::Value>,
     /// Minimum classification of the file being scanned
     pub min_classification: String,
     /// File info block
@@ -74,9 +78,9 @@ pub struct Task {
     /// File depth relative to initital submitted file
     pub depth: u32,
     /// Maximum number of files that submission can have
-    pub max_files: u32,
+    pub max_files: i32,
     /// Task TTL
-    pub ttl: u32,
+    pub ttl: i32,
 
     /// List of tags
     pub tags: Vec<TagItem>,
@@ -90,7 +94,7 @@ pub struct Task {
     pub ignore_cache: bool, 
 
     /// Whether the service should ignore the dynamic recursion prevention or not
-    pub ignore_dynamic_recursion_prevention: bool,
+    pub ignore_recursion_prevention: bool,
 
     /// Should the service filter it's output?
     pub ignore_filtering: bool,
@@ -111,12 +115,13 @@ pub fn task_default_safelist_config() -> ServiceSafelist {
 }
 
 impl Task {
-    // @staticmethod
-    // def make_key(sid, service_name, sha):
-    //     return f"{sid}_{service_name}_{sha}"
+    pub fn make_key(sid: Sid, service_name: &str, sha: &Sha256) -> String {
+        format!("{sid}_{service_name}_{sha}")
+    }
 
-    // def key(self):
-    //     return Task.make_key(self.sid, self.service_name, self.fileinfo.sha256)
+    pub fn key(&self) -> String {
+        Self::make_key(self.sid, &self.service_name, &self.fileinfo.sha256)
+    }
 
     pub fn signature(&self) -> TaskSignature {
         TaskSignature { 
@@ -127,6 +132,50 @@ impl Task {
         }
     } 
 }
+
+pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>) -> Result<String, serde_json::Error> {
+    if let Some(task) = task {
+        let service_config = serde_json::to_string(&{
+            let mut pairs: Vec<_> = task.service_config.iter().collect();
+            pairs.sort_unstable_by_key(|row| row.0);
+            pairs
+        })?;
+
+        let submission_params_str = serde_json::to_string(&[
+            ("deep_scan", serde_json::json!(task.deep_scan)),
+            ("ignore_filtering", serde_json::json!(task.ignore_filtering)),
+            ("max_files", serde_json::json!(task.max_files)),
+            ("min_classification", serde_json::json!(task.min_classification)),
+        ])?;
+
+        let ignore_salt = if task.ignore_cache {
+             &rand::thread_rng().gen::<u128>().to_string()
+        } else {
+            "None"
+        };
+
+        let service_tool_version = match service_tool_version {
+            Some(value) => value,
+            None => "None",
+        };
+
+        let total_str = format!("{service_tool_version}_{service_config}_{submission_params_str}_{ignore_salt}");
+        
+        // get an md5 hash
+        let mut hasher = md5::Md5::new();
+        hasher.update(total_str);
+        let hash = hasher.finalize();
+        
+        // truncate it to 8 bytes and interpret it as a number
+        let number = u64::from_be_bytes(hash.as_slice()[0..8].try_into().unwrap());
+        
+        // encode it as a string
+        Ok(base62::encode(number))
+    } else {
+        Ok("0".to_string())
+    }
+}
+
 
 #[derive(Hash, PartialEq, Eq)]
 pub struct TaskSignature {
@@ -143,4 +192,75 @@ pub struct TaskSignature {
 pub struct TaskToken {
     pub task_id: u64,
     pub dispatcher: String,
+}
+
+// ============================================================================
+//MARK: Responses 
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ResultSummary {
+    pub key: String,
+    pub drop: bool,
+    pub score: i32,
+    pub children: Vec<(Sha256, String)>
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum ServiceResponse {
+    Result(ServiceResult),
+    Error(ServiceError),
+}
+
+impl ServiceResponse {
+    pub fn sid(&self) -> Sid {
+        match self {
+            ServiceResponse::Result(item) => item.sid,
+            ServiceResponse::Error(item) => item.sid,
+        }
+    }
+
+    pub fn sha256(&self) -> Sha256 {
+        match self {
+            ServiceResponse::Result(item) => item.sha256.clone(),
+            ServiceResponse::Error(item) => item.service_task.fileinfo.sha256.clone(),
+        }
+    }
+
+    pub fn service_name(&self) -> &str {
+        match self {
+            ServiceResponse::Result(item) => &item.service_name,
+            ServiceResponse::Error(item) => &item.service_task.service_name,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TagEntry {
+    pub score: i32,    
+    #[serde(rename="type")]
+    pub tag_type: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServiceResult {
+    pub dynamic_recursion_bypass: Vec<Sha256>,
+    pub sid: Sid,
+    pub sha256: Sha256,
+    pub service_name: String,
+    pub service_version: String,
+    pub service_tool_version: String,
+    pub expiry_ts: Option<chrono::DateTime<chrono::Utc>>,
+    pub result_summary: ResultSummary,
+    pub tags: HashMap<String, TagEntry>,
+    pub extracted_names: HashMap<Sha256, String>,
+    pub temporary_data: JsonMap,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServiceError {
+    pub sid: Sid,
+    pub service_task: Task,
+    pub error: crate::datastore::Error,
+    pub error_key: String,
 }
