@@ -396,8 +396,11 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         retry_call!(self.store.pool, zrank, &self.name, raw_value)
     }
 
-//     def remove(self, raw_value):
-//         return retry_call(self.c.zrem, self.name, raw_value)
+    /// Remove a specific item from the queue based on its raw value
+    pub async fn remove(&self, raw_value: &[u8]) -> Result<bool, ErrorTypes> {
+        let count: i32 = retry_call!(self.store.pool, zrem, &self.name, raw_value)?;
+        Ok(count >= 1)
+    }
 
     /// Pop items from the low priority end of the queue
     pub async fn unpush(&self, num: isize) -> Result<Vec<T>, ErrorTypes> {

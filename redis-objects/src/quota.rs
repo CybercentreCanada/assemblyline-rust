@@ -43,7 +43,7 @@ else
 end
 "#;
 
-
+#[derive(Clone)]
 pub struct UserQuotaTracker {
     store: Arc<RedisObjects>,
     prefix: String,

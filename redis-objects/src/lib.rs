@@ -26,12 +26,14 @@ pub use self::quota::QuotaGuard;
 pub use self::hashmap::Hashmap;
 pub use self::counters::{AutoExportingMetrics, AutoExportingMetricsBuilder, MetricMessage};
 pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder, Publisher};
+pub use self::set::Set;
 
 pub mod queue;
 pub mod quota;
 pub mod hashmap;
 pub mod counters;
 pub mod pubsub;
+pub mod set;
 
 /// Handle for a pool of connections to a redis server.
 pub struct RedisObjects {
@@ -118,11 +120,25 @@ impl RedisObjects {
         UserQuotaTracker::new(self.clone(), prefix)
     }
 
+    pub fn set<T: Serialize + DeserializeOwned>(self: &Arc<Self>, name: String) -> Set<T> {
+        Set::new(name, self.clone(), None)
+    }
+
+    pub fn expiring_set<T: Serialize + DeserializeOwned>(self: &Arc<Self>, name: String, ttl: Option<Duration>) -> Set<T> {
+        let ttl = ttl.unwrap_or_else(|| Duration::from_secs(86400));
+        Set::new(name, self.clone(), Some(ttl))
+    }
+
     pub async fn wipe(&self) -> Result<(), ErrorTypes> {
         let mut con = self.pool.get().await?;
         redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut con).await?;
         Ok(())
     }
+
+    pub async fn keys(&self, pattern: &str) -> Result<Vec<String>, ErrorTypes> {
+        Ok(retry_call!(self.pool, keys, pattern)?)
+    }
+
 }
 
 /// Enumeration over all possible errors
@@ -297,39 +313,44 @@ pub (crate) mod test {
     //     }
     // }
     
-    // # noinspection PyShadowingNames
-    // def test_sets(redis_connection):
-    //     if redis_connection:
-    //         from assemblyline.remote.datatypes.set import Set
-    //         with Set('test-set') as s:
-    //             s.delete()
-    
-    //             values = ['a', 'b', 1, 2]
-    //             assert s.add(*values) == 4
-    //             assert s.length() == 4
-    //             for x in s.members():
-    //                 assert x in values
-    //             assert s.random() in values
-    //             assert s.exist(values[2])
-    //             s.remove(values[2])
-    //             assert not s.exist(values[2])
-    //             pop_val = s.pop()
-    //             assert pop_val in values
-    //             assert not s.exist(pop_val)
-    //             assert s.length() == 2
-    
-    //             assert s.limited_add('dog', 3)
-    //             assert not s.limited_add('cat', 3)
-    //             assert s.exist('dog')
-    //             assert not s.exist('cat')
-    //             assert s.length() == 3
-    
-    //             for pop_val in s.pop_all():
-    //                 assert pop_val in values or pop_val in ['cat', 'dog']
-    //             assert s.pop() is None
-    //             assert s.length() == 0
-    
-    // # noinspection PyShadowingNames
+    #[tokio::test]
+    async fn test_sets() {
+        init();
+        let redis = redis_connection().await;
+        let s = redis.set::<String>("test-set".to_owned());
+
+        s.delete().await.unwrap();
+
+        let values = &["a", "b", "1", "2"];
+        let owned = values.iter().map(|v|v.to_string()).collect::<Vec<_>>();
+        assert_eq!(s.add_batch(&owned).await.unwrap(), 4);
+        assert_eq!(s.length().await.unwrap(), 4);
+        let members = s.members().await.unwrap();
+        assert_eq!(members.len(), 4);
+        for x in members {
+            assert!(owned.contains(&x));
+        }
+        assert!(owned.contains(&s.random().await.unwrap().unwrap()));
+        assert!(s.exist(&owned[2]).await.unwrap());
+        s.remove(&owned[2]).await.unwrap();
+        assert!(!s.exist(&owned[2]).await.unwrap());
+        let pop_val = s.pop().await.unwrap().unwrap();
+        assert!(owned.contains(&pop_val));
+        assert!(!s.exist(&pop_val).await.unwrap());
+        assert_eq!(s.length().await.unwrap(), 2);
+
+        assert!(s.limited_add(&"dog".to_owned(), 3).await.unwrap());
+        assert!(!s.limited_add(&"cat".to_owned(), 3).await.unwrap());
+        assert!(s.exist(&"dog".to_owned()).await.unwrap());
+        assert!(!s.exist(&"cat".to_owned()).await.unwrap());
+        assert_eq!(s.length().await.unwrap(), 3);
+
+        for pop_val in s.pop_all().await.unwrap() {
+            assert!(values.contains(&pop_val.as_str()) || ["cat", "dog"].contains(&pop_val.as_str()));
+        }
+        assert!(s.pop().await.unwrap().is_none());
+        assert_eq!(s.length().await.unwrap(), 0);
+    }
     
     
     // def test_expiring_sets(redis_connection):

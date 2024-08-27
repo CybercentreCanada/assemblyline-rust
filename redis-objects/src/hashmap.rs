@@ -1,6 +1,7 @@
 //! A hash map stored under a single redis key.
 use std::{marker::PhantomData, sync::Arc, collections::HashMap, time::Duration};
 
+use parking_lot::Mutex;
 use redis::AsyncCommands;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -13,14 +14,40 @@ return result
 "#;
 
 
+const CONDITIONAL_REMOVE_SCRIPT: &str = r#"
+local hash_name = KEYS[1]
+local key_in_hash = ARGV[1]
+local expected_value = ARGV[2]
+local result = redis.call('hget', hash_name, key_in_hash)
+if result == expected_value then
+    redis.call('hdel', hash_name, key_in_hash)
+    return 1
+end
+return 0
+"#;
+
+const _limited_add: &str = r#"
+local set_name = KEYS[1]
+local key = ARGV[1]
+local value = ARGV[2]
+local limit = tonumber(ARGV[3])
+
+if redis.call('hlen', set_name) < limit then
+    return redis.call('hsetnx', set_name, key, value)
+end
+return nil
+"#;
+
 
 /// Hashmap opened by `RedisObjects::hashmap`
 pub struct Hashmap<T> {
     name: String,
     store: Arc<RedisObjects>,
     pop_script: redis::Script,
+//     self._limited_add = self.c.register_script(_limited_add)
+    conditional_remove_script: redis::Script,
     ttl: Option<Duration>,
-    last_expire_time: std::sync::Mutex<Option<std::time::Instant>>,
+    last_expire_time: Mutex<Option<std::time::Instant>>,
     _data: PhantomData<T>
 }
 
@@ -30,25 +57,20 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
             name,
             store,
             pop_script: redis::Script::new(POP_SCRIPT),
+    //     self._limited_add = self.c.register_script(_limited_add)
+            conditional_remove_script: redis::Script::new(CONDITIONAL_REMOVE_SCRIPT),
             ttl,
-            last_expire_time: std::sync::Mutex::new(None),
+            last_expire_time: Mutex::new(None),
             _data: PhantomData,
         }
     }
-
-    // def __init__(self, name: str, host: Union[str, Redis] = None, port: int = None):
-    //     self.c = get_client(host, port, False)
-    //     self.name = name
-    //     self._pop = self.c.register_script(h_pop_script)
-    //     self._limited_add = self.c.register_script(_limited_add)
-    //     self._conditional_remove = self.c.register_script(_conditional_remove_script)
 
     async fn conditional_expire(&self) -> Result<(), ErrorTypes> {
         // load the ttl of this object has one set
         if let Some(ttl) = self.ttl {
             let call = {
                 // the last expire time is behind a mutex so that the queue object is threadsafe
-                let mut last_expire_time = self.last_expire_time.lock().unwrap();
+                let mut last_expire_time = self.last_expire_time.lock();
 
                 // figure out if its time to update the expiry, wait until we are half way through the
                 // ttl to avoid resetting something only milliseconds old
@@ -143,8 +165,10 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
         Ok(out)
     }
 
-    // def conditional_remove(self, key: str, value) -> bool:
-    //     return bool(retry_call(self._conditional_remove, keys=[self.name], args=[key, json.dumps(value)]))
+    pub async fn conditional_remove(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {
+        let data = serde_json::to_vec(value)?;
+        retry_call!(method, self.store.pool, self.conditional_remove_script.key(&self.name).arg(key).arg(&data), invoke_async)
+    }
 
     /// Remove and return the item in the hash if found
     pub async fn pop(&self, key: &str) -> Result<Option<T>, ErrorTypes> {

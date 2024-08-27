@@ -258,54 +258,6 @@ impl<M: MetricMessage> Drop for AutoExportingMetrics<M> {
     }
 }
 
-// def export_metrics_once(name, schema, metrics, host=None, counter_type=None, config=None, redis=None):
-//     """Manually publish metric counts to the metrics system.
-
-//     This was built for when the service server is reporting metrics for execution and caching
-//     on behalf of many services. At the moment the metrics system uses the hosts to count the number
-//     of instances of each service. This could be done with a single auto exporting counter for
-//     the service server, but that may require significant downstream changes in the metrics system.
-//     """
-//     config = config or forge.get_config()
-//     redis = redis or get_client(
-//         config.core.metrics.redis.host,
-//         config.core.metrics.redis.port,
-//         False
-//     )
-
-//     # Separate out the timers and normal counters
-//     timer_schema = set()
-//     counter_schema = set()
-
-//     for _k, field_type in schema.fields().items():
-//         if isinstance(field_type, PerformanceTimer):
-//             timer_schema.add(_k)
-//         else:
-//             counter_schema.add(_k)
-
-//     for _k in timer_schema:
-//         counter_schema.discard(_k + '_count')
-
-//     channel = forge.get_metrics_sink(redis)
-
-//     counts = Counters({key: 0 for key in counter_schema})
-//     counts.update({key + '.t': 0 for key in timer_schema})
-//     counts.update({key + '.c': 0 for key in timer_schema})
-
-//     for metric, value in metrics.items():
-//         if metric in counter_schema:
-//             counts[metric] += value
-//         elif metric in timer_schema:
-//             counts[metric + ".c"] += 1
-//             counts[metric + ".t"] += value
-//         else:
-//             raise ValueError(f"{metric} is not an accepted counter")
-
-//     counts['type'] = counter_type or name
-//     counts['name'] = name
-//     counts['host'] = host
-
-//     channel.publish(dict(counts.items()))
 
 #[cfg(test)]
 fn init() {
