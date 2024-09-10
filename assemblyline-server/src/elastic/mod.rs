@@ -1,9 +1,11 @@
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use log::error;
+use log::{error, warn};
 
 pub mod responses;
 pub mod collection;
@@ -13,13 +15,14 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::{JsonMap, Sha256};
-use assemblyline_models::datastore::{Error as ErrorModel, File, Service, ServiceDelta, Submission};
+use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
 use itertools::Itertools;
 use log::info;
 use reqwest::{Method, StatusCode};
+use responses::DescribeIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use self::error::{ElasticError, Result};
@@ -118,24 +121,205 @@ fn recursive_update(mut d: serde_json::Value, u: serde_json::Value, stop_keys: O
 struct Request {
     method: reqwest::Method, 
     url: reqwest::Url,
+    index_name: Option<String>,
     raise_conflicts: bool,
 }
 
-impl From<(reqwest::Method, reqwest::Url)> for Request {
-    fn from(value: (reqwest::Method, reqwest::Url)) -> Self {
-        Request {
-            method: value.0,
-            url: value.1,
-            raise_conflicts: false
-        }
-    }
-}
+// impl From<(reqwest::Method, reqwest::Url)> for Request {
+//     fn from(value: (reqwest::Method, reqwest::Url)) -> Self {
+//         Request {
+//             method: value.0,
+//             url: value.1,
+//             raise_conflicts: false
+//         }
+//     }
+// }
 
 impl Request {
-    pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url) -> Self {
+    
+    pub fn put_index_settings(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::PUT,
+            url: host.join(&format!("{index}/_settings"))?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+    
+    pub fn put_index(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::PUT,
+            url: host.join(index)?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn get_indices(host: &reqwest::Url, prefix: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::GET,
+            url: host.join(&(prefix.to_string() + "*"))?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn head_index(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::HEAD,
+            url: host.join(index)?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }    
+    
+    pub fn delete_index(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::DELETE,
+            url: host.join(index)?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn get_search(host: &reqwest::Url, params: Vec<(&str, Cow<str>)>) -> Result<Self> {
+        let mut url = host.join("_search")?;  
+        url.query_pairs_mut().extend_pairs(params);
+        Ok(Self {
+            method: Method::GET,
+            url,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn post_aliases(host: &reqwest::Url) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join("_aliases")?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn head_alias(host: &reqwest::Url, name: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::HEAD,
+            url: host.join("_alias/")?.join(name)?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }    
+    
+    pub fn put_alias(host: &reqwest::Url, index: &str, alias: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::PUT,
+            url: host.join(&format!("{index}/_alias/{alias}"))?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn post_refresh_index(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join(&format!("{index}/_refresh"))?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn post_clear_index_cache(host: &reqwest::Url, index: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join(&format!("{index}/_cache/clear"))?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str) -> Result<Self> {
+        let mut url = host.join(&format!("{}/_pit", index))?;
+        url.query_pairs_mut().append_pair("keep_alive", keep_alive);
+        Ok(Self {
+            method: Method::POST,
+            url,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn delete_doc(host: &reqwest::Url, index: &str, key: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::DELETE,
+            url: host.join(&format!("{index}/_doc/{key}"))?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn get_doc(host: &reqwest::Url, index: &str, key: &str) -> Result<Self> {
+        // prepare the url
+        let mut url = host.join(&format!("{index}/_doc/{key}"))?;
+        url.query_pairs_mut().append_pair("_source", "true");
+        Ok(Self {
+            method: Method::GET,
+            url,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn mget_doc(host: &reqwest::Url, index: &str) -> Result<Self> {
+        let mut url = host.join(&format!("{index}/_mget"))?;
+        url.query_pairs_mut().append_pair("_source", "true");
+        Ok(Self {
+            method: Method::GET,
+            url,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }    
+    
+    pub fn update_doc(host: &reqwest::Url, index: &str, key: &str, retry_on_conflict: Option<i64>) -> Result<Self> {
+        let mut url = host.join(&format!("/{index}/_update/{key}"))?;
+        if let Some(retry_on_conflict) = retry_on_conflict {
+            url.query_pairs_mut().append_pair("retry_on_conflict", &retry_on_conflict.to_string());
+        }
+        Ok(Self {
+            method: Method::POST,
+            url,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn index_copy(host: &reqwest::Url, src: &str, target: &str, copy_method: CopyMethod) -> Result<Self> {    
+        let mut url = host.join(&format!("{src}/{copy_method}/{target}"))?;
+        url.query_pairs_mut().append_pair("timeout", "60s");
+
+        Ok(Self {
+            method: Method::POST,
+            url,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }    
+
+    pub fn delete_pit(host: &reqwest::Url) -> Result<Self> {
+        Ok(Self {
+            method: Method::DELETE,
+            url: host.join("/_pit")?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url, index: String) -> Self {
         Self {
             method,
             url,
+            index_name: Some(index),
             raise_conflicts: true
         }
     }
@@ -444,12 +628,11 @@ impl ElasticHelper {
     /// start an index copy operation and wait for it to complete
     async fn safe_index_copy(&self, copy_method: CopyMethod, src: &str, target: &str, settings: Option<serde_json::Value>, min_status: Option<&str>) -> Result<()> {
         let min_status = min_status.unwrap_or("yellow");
-        let mut url = self.host.join(&format!("{src}/{copy_method}/{target}"))?;
-        url.query_pairs_mut().append_pair("timeout", "60s");
         let body = settings.map(|value| json!({"settings": value}));
+        let request = Request::index_copy(&self.host, src, target, copy_method)?;
         let response = match body {
-            Some(body) => self.make_request_json(&mut 0, &(Method::POST, url).into(), &body).await?,
-            None => self.make_request(&mut 0, &(Method::POST, url).into()).await?
+            Some(body) => self.make_request_json(&mut 0, &request, &body).await?,
+            None => self.make_request(&mut 0, &request).await?
         };
 
         let ret: responses::Command = response.json().await?;
@@ -584,6 +767,12 @@ impl ElasticHelper {
             // updated += ce.info.get('updated', 0)
             // deleted += ce.info.get('deleted', 0)
             return Ok(None)
+        } else if StatusCode::SERVICE_UNAVAILABLE == status {
+            if let Some(index_name) = &request.index_name {
+                warn!("Looks like index {index_name} is not ready yet, retrying...");
+                return Ok(None)
+            }
+            return Err(ElasticErrorInner::Fatal("Database not available".to_string()).into())
         }
 
         todo!("{url} {status:?} {body:?} {headers:?}");
@@ -702,8 +891,7 @@ impl ElasticHelper {
 
     /// checking if an index of the given name exists
     pub async fn does_index_exist(&self, name: &str) -> Result<bool> {
-        let url = self.host.join(name)?;
-        match self.make_request(&mut 0, &(Method::HEAD, url).into()).await {
+        match self.make_request(&mut 0, &Request::head_index(&self.host, name)?).await {
             Ok(result) => {
                 Ok(result.status() == reqwest::StatusCode::OK)
             },
@@ -718,16 +906,16 @@ impl ElasticHelper {
     /// Check if an alias with the given name is defined
     pub async fn does_alias_exist(&self, name: &str) -> Result<bool> {
         // self.with_retries(self.datastore.client.indices.exists_alias, name=alias)
-        let url = self.host.join("_alias/")?.join(name)?;
-        let result = self.make_request(&mut 0, &(reqwest::Method::HEAD, url).into()).await?;
+        let request = Request::head_alias(&self.host, name)?;
+        let result = self.make_request(&mut 0, &request).await?;
         Ok(result.status() == reqwest::StatusCode::OK)
     }
 
     /// Create an index alias
     pub async fn put_alias(&self, index: &str, name: &str) -> Result<()> {
         // self.with_retries(self.datastore.client.indices.put_alias, index=index, name=alias)
-        let url = self.host.join(&format!("{index}/_alias/{name}"))?;
-        self.make_request(&mut 0, &(Method::PUT, url).into()).await?;
+        let request = Request::put_alias(&self.host, index, name)?;
+        self.make_request(&mut 0, &request).await?;
         Ok(())
     }
 
@@ -837,33 +1025,65 @@ pub fn default_settings(index: serde_json::Value) -> serde_json::Value {
 /// details are actually in Collection and ElasticHelper classes.
 pub struct Elastic {
     es: Arc<ElasticHelper>,
+    prefix: String,
+
     pub file: Collection<File>,
     pub submission: Collection<Submission>,
     pub user: Collection<User>,
     pub error: Collection<ErrorModel>,
 
+    pub result: Collection<assemblyline_models::datastore::result::Result>,
+    pub emptyresult: Collection<EmptyResult>,
+    pub filescore: Collection<FileScore>,
+
     /// Unmodified default service data classes
     pub service: Collection<Service>,
-    pub filescore: Collection<FileScore>,
 
     /// Modifications to service data for this system
     pub service_delta: Collection<ServiceDelta>,
 }
 
 impl Elastic {
-    pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool) -> Result<Arc<Self>> {
+    pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
         let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
         Ok(Arc::new(Self {
             es: helper.clone(),
-            file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned())).await?,
-            submission: Collection::new(helper.clone(), "submission".to_owned(), Some("submission-ma".to_owned())).await?,
-            error: Collection::new(helper.clone(), "error".to_owned(), None).await?,
-            service: Collection::new(helper.clone(), "service".to_owned(), None).await?,
-            service_delta: Collection::new(helper.clone(), "service_delta".to_owned(), None).await?,
-            user: Collection::new(helper.clone(), "user".to_owned(), None).await?,
-            filescore: Collection::new(helper.clone(), "filescore".to_owned(), None).await?,
+            file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned()), prefix.to_string()).await?,
+            submission: Collection::new(helper.clone(), "submission".to_owned(), Some("submission-ma".to_owned()), prefix.to_string()).await?,
+            error: Collection::new(helper.clone(), "error".to_owned(), None, prefix.to_string()).await?,
+            result: Collection::new(helper.clone(), "result".to_owned(), Some("result-ma".to_owned()), prefix.to_string()).await?,
+            emptyresult: Collection::new(helper.clone(), "emptyresult".to_owned(), None, prefix.to_string()).await?,
+            service: Collection::new(helper.clone(), "service".to_owned(), None, prefix.to_string()).await?,
+            service_delta: Collection::new(helper.clone(), "service_delta".to_owned(), None, prefix.to_string()).await?,
+            user: Collection::new(helper.clone(), "user".to_owned(), None, prefix.to_string()).await?,
+            filescore: Collection::new(helper.clone(), "filescore".to_owned(), None, prefix.to_string()).await?,
+            prefix: prefix.to_string(),
         }))
     }
+
+    pub async fn list_indices(&self) -> Result<Vec<String>> {
+        let request = Request::get_indices(&self.es.host, &self.prefix)?;
+        let response = self.es.make_request(&mut 0, &request).await?;
+        let body: HashMap<String, DescribeIndex> = response.json().await?;
+        Ok(body.into_keys().collect())
+    } 
+
+    #[cfg(test)]
+    pub async fn remove_index(&self, name: &str) -> Result<()> {
+        use log::debug;
+        debug!("Removing index: {name}");
+        let request = Request::delete_index(&self.es.host, name)?;
+        self.es.make_request(&mut 0, &request).await?;
+        Ok(())
+    } 
+
+    #[cfg(test)]
+    pub async fn wipe_all(&self) -> Result<()> {
+        for index in self.list_indices().await? {
+            self.remove_index(&index).await?;
+        }
+        Ok(())
+    } 
 
     // pub async fn update_service_delta(&self, name: &str, delta: &JsonMap) -> Result<()> {
     //     todo!();
@@ -1038,8 +1258,8 @@ impl Elastic {
             current_fileinfo.insert("classification".to_owned(), json!(classification));
 
             // write the file
-            let current_fileinfo: File = serde_json::from_value(json!(current_fileinfo))?;
-            let result = self.file.save(sha256, &current_fileinfo, Some(version), None).await;
+            // let current_fileinfo: File = serde_json::from_value(json!(current_fileinfo))?;
+            let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(()),
                 Err(err) if err.is_version_conflict() => {
@@ -1087,7 +1307,8 @@ mod test {
 
     async fn init() -> Arc<Elastic> {
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
-        Elastic::connect("http://elastic:devpass@localhost:9200", false, None, false).await.unwrap()
+        let prefix = rand::thread_rng().r#gen::<u128>().to_string();
+        Elastic::connect("http://elastic:devpass@localhost:9200", false, None, false, &prefix).await.unwrap()
     }
 
     #[tokio::test]

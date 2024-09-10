@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::user::User;
@@ -113,7 +114,7 @@ async fn assert_metrics(metrics: &mut mpsc::Receiver<Option<redis_objects::Msg>>
     let start = std::time::Instant::now();
     let mut values: HashMap<&str, isize> = HashMap::from_iter(values.iter().cloned());
     while !values.is_empty() {
-        if start.elapsed() > std::time::Duration::from_secs(10) {
+        if start.elapsed() > std::time::Duration::from_secs(30) {
             panic!("Metrics failed {:?}", values);
         }
 
@@ -356,17 +357,10 @@ async fn test_ingest_always_create_submission() {
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);
     core.datastore.filescore.save(&key, &filescore_cache, None, None).await.unwrap();
 
-    // from assemblyline.odm.models.filescore import FileScore
-    // from assemblyline.odm.models.submission import Submission
-    // datastore.filescore.get_if_exists = mock.MagicMock(
-    //     return_value=FileScore(dict(psid='000', expiry_ts=0, errors=0, score=10, sid='001', time=time.time()))
-    // )
-
     // Create a submission for cache hit
     let mut old_sub: Submission = thread_rng().r#gen();
     old_sub.sid = "001".parse().unwrap();
     old_sub.params.psid = Some("000".parse().unwrap());
-    // old_sub = old_sub.as_primitives()
     core.datastore.submission.save(&old_sub.sid.to_string(), &old_sub, None, None).await.unwrap();
 
     // Ingest a file
@@ -376,8 +370,6 @@ async fn test_ingest_always_create_submission() {
         .files(json!({"sha256": sha256.to_string()}))
         .metadata(json!({"blah": "blah"}))
         .build();
-    // submission_msg = make_message(message={'sid': '002', 'metadata': })
-    // submission_msg['sid'] = '002'
     ingester.ingest_queue.raw().push(&submission_msg).await.unwrap();
     ingester.ingest_once().await.unwrap();
 
@@ -387,7 +379,15 @@ async fn test_ingest_always_create_submission() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 
     // Check to see if new submission was created
-    let (new_sub, _) = core.datastore.submission.get_if_exists(&sid.to_string(), None).await.unwrap().unwrap();
+    let wait_time = std::time::Instant::now();
+    let new_sub = loop {
+        if let Some(obj) = core.datastore.submission.get(&sid.to_string(), None).await.unwrap() {
+            break obj
+        }
+        if wait_time.elapsed() > Duration::from_secs(10) {
+            panic!();
+        }
+    };
     assert_eq!(new_sub.params.psid.unwrap(), old_sub.sid);
 
     // convert to json

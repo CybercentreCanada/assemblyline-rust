@@ -1,7 +1,6 @@
 
 use chrono::{DateTime, Utc};
 use md5::Digest;
-use rand::prelude::Distribution;
 use serde::{Serialize, Deserialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
@@ -82,11 +81,22 @@ pub struct File {
     pub comments: Vec<Comment>,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<File> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> File {
+        let mut data = vec![];
+        for _ in 0..1000 {
+            data.push(rng.gen());
+        }
+        File::gen_for_sample(&data, rng)
+    }
+}
+
 impl File {
     pub fn gen_for_sample<R: rand::Rng + ?Sized>(data: &[u8], rng: &mut R) -> File {
-        let sha256 = hex::encode(sha2::Sha256::new().chain_update(&data).finalize());
-        let sha1 = hex::encode(sha1::Sha1::new().chain_update(&data).finalize());
-        let md5 = hex::encode(md5::Md5::new().chain_update(&data).finalize());
+        let sha256 = hex::encode(sha2::Sha256::new().chain_update(data).finalize());
+        let sha1 = hex::encode(sha1::Sha1::new().chain_update(data).finalize());
+        let md5 = hex::encode(md5::Md5::new().chain_update(data).finalize());
 
         File {
             ascii: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),

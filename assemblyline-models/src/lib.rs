@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
+use rand::{thread_rng, Rng};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
@@ -138,6 +139,14 @@ impl FromStr for Sha256 {
             return Err(ModelError::InvalidSha256(hex))
         }
         Ok(Sha256{ hex })
+    }
+}
+
+impl TryFrom<&[u8]> for Sha256 {
+    type Error = ModelError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_str(&hex::encode(value))
     }
 }
 
@@ -280,6 +289,11 @@ impl From<&str> for Text {
     }
 }
 
+impl From<String> for Text {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
 
 /// Unvalidated uuid type
 pub type Uuid = String;
@@ -395,6 +409,10 @@ impl ClassificationString {
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
     }
 
+    pub fn unrestricted(parser: &ClassificationParser) -> Self {
+        Self(parser.unrestricted().to_owned())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -482,6 +500,38 @@ pub type UriPath = String;
 /// Unvalidated Email type
 pub type Email = String;
 
+const WORDS: [&str; 187] = ["The", "Cyber", "Centre", "stays", "on", "the", "cutting", "edge", "of", "technology", "by", 
+    "working", "with", "commercial", "vendors", "of", "cyber", "security", "technology", "to", "support", "their", 
+    "development", "of", "enhanced", "cyber", "defence", "tools", "To", "do", "this", "our", "experts", "survey", 
+    "the", "cyber", "security", "market", "evaluate", "emerging", "technologies", "in", "order", "to", "determine", 
+    "their", "potential", "to", "improve", "cyber", "security", "across", "the", "country", "The", "Cyber", "Centre", 
+    "supports", "innovation", "by", "collaborating", "with", "all", "levels", "of", "government", "private", "industry", 
+    "academia", "to", "examine", "complex", "problems", "in", "cyber", "security", "We", "are", "constantly", 
+    "engaging", "partners", "to", "promote", "an", "open", "innovative", "environment", "We", "invite", "partners", 
+    "to", "work", "with", "us", "but", "also", "promote", "other", "Government", "of", "Canada", "innovation", 
+    "programs", "One", "of", "our", "key", "partnerships", "is", "with", "the", "Government", "of", "Canada", "Build", 
+    "in", "Canada", "Innovation", "Program", "BCIP", "The", "BCIP", "helps", "Canadian", "companies", "of", "all", 
+    "sizes", "transition", "their", "state", "of", "the", "art", "goods", "services", "from", "the", "laboratory", 
+    "to", "the", "marketplace", "For", "certain", "cyber", "security", "innovations", "the", "Cyber", "Centre", 
+    "performs", "the", "role", "of", "technical", "authority", "We", "evaluate", "participating", "companies", 
+    "new", "technology", "provide", "feedback", "in", "order", "to", "assist", "them", "in", "bringing", "their", 
+    "product", "to", "market", "To", "learn", "more", "about", "selling", "testing", "an", "innovation", "visit", 
+    "the", "BCIP", "website"];
+
+#[cfg(feature = "rand")]
+pub fn random_word<R: rand::Rng + ?Sized>(prng: &mut R) -> String {
+    WORDS[prng.gen_range(0..WORDS.len())].to_string()
+}
+
+#[cfg(feature = "rand")]
+pub fn random_words<R: rand::Rng + ?Sized>(prng: &mut R, count: usize) -> Vec<String> {
+    let mut output = vec![];
+    while output.len() < count {
+        output.push(WORDS[prng.gen_range(0..WORDS.len())].to_string())
+    }
+    output
+}
+
 
 #[cfg(test)]
 mod test {
@@ -525,3 +575,4 @@ mod test {
         }
     }
 }
+

@@ -19,6 +19,7 @@ use parking_lot::{RwLock, Mutex};
 use redis_objects::RedisObjects;
 use tokio::sync::mpsc;
 
+use crate::constants::{ServiceStage, SERVICE_STAGE_KEY};
 use crate::elastic::Elastic;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
@@ -30,6 +31,7 @@ type ChangeChannel = mpsc::Receiver<Option<ServiceChange>>;
 pub struct ServiceHelper{
     classification: Arc<ClassificationParser>,
     inner: Arc<RwLock<ServiceInfo>>,
+    service_stage_hash: redis_objects::Hashmap<ServiceStage>,
     regex_cache: RegexCache,
     config: Arc<ServiceConfig>,
 }
@@ -59,11 +61,22 @@ impl ServiceHelper {
         tokio::spawn(service_daemon(datastore, changes, inner.clone()));
 
         // return shared reference
-        Ok(Self { inner, classification, regex_cache: RegexCache::new(), config: Arc::new(config.clone()) })
+        Ok(Self { 
+            inner, 
+            classification, 
+            service_stage_hash: redis_volatile.hashmap(SERVICE_STAGE_KEY.to_owned(), None),
+            regex_cache: RegexCache::new(), 
+            config: Arc::new(config.clone()) 
+        })
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<Service>> {
         self.inner.read().services.get(name).cloned()
+    }
+
+    /// A hash from service name to ServiceStage enum values.
+    pub fn get_service_stage_hash(&self) -> &redis_objects::Hashmap<ServiceStage> {
+        &self.service_stage_hash
     }
 
     pub fn list(&self) -> HashMap<String, Arc<Service>> {
@@ -161,7 +174,7 @@ impl ServiceHelper {
             // Alter schedule to remove Safelist, if scheduled to run
             selected.retain(|item| item != &safelist);
         }
-
+        
         // Add all selected, accepted, and not rejected services to the schedule
         let mut schedule = vec![vec![]; self.config.stages.len()];
         selected.sort_unstable();
@@ -303,5 +316,267 @@ impl RegexCache {
             cache.insert(pattern.to_string(), regex);
             Ok(result)
         }
+    }
+}
+
+pub fn get_schedule_names(schedule: &Vec<Vec<Arc<Service>>>) -> Vec<Vec<String>> {
+    let mut names = vec![];
+    for row in schedule {
+        let mut stage = vec![];
+        for service in row {
+            stage.push(service.name.clone());
+        }
+        stage.sort_unstable();
+        names.push(stage);
+    }
+    names
+}
+
+#[cfg(test)]
+pub mod test {
+//     import pytest
+
+// from assemblyline.odm.models.submission import Submission
+// from assemblyline.odm.models.config import Config, DEFAULT_CONFIG
+// from assemblyline.odm.models.service import Service
+// from assemblyline.odm.randomizer import random_model_obj
+
+// from assemblyline_core.dispatching.dispatcher import Scheduler
+// from assemblyline_core.server_base import get_service_stage_hash, ServiceStage
+
+
+// # noinspection PyUnusedLocal,PyMethodMayBeStatic
+// class FakeDatastore:
+//     def __init__(self):
+//         self.service = self
+
+//     def stream_search(self, *args, **kwargs):
+//         return []
+
+// def submission(selected, excluded):
+//     sub = random_model_obj(Submission)
+//     sub.params.services.selected = selected
+//     sub.params.services.excluded = excluded
+//     return sub
+
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use crate::constants::ServiceStage;
+    use crate::services::get_schedule_names;
+    use crate::{Core, TestGuard};
+    use assemblyline_models::datastore::service::Service;
+    use assemblyline_models::datastore::submission::SubmissionParams;
+    use assemblyline_models::messages::changes::ServiceChange;
+    use assemblyline_models::ClassificationString;
+    use serde_json::json;
+
+    pub fn dummy_service(name: &str, stage: &str, category: Option<&str>, accepts: Option<&str>, rejects: Option<&str>, extra_data: Option<bool>) -> Service {
+        return serde_json::from_value(json!({
+            "classification": "",
+            "default_result_classification": "",
+            "name": name,
+            "stage": stage,
+            "category": category.unwrap_or("static"),
+            "accepts": accepts.unwrap_or_default(),
+            "uses_temp_submission_data": extra_data.unwrap_or_default(),
+            "uses_tags": extra_data.unwrap_or_default(),
+            "rejects": rejects,
+            "version": "0",
+            "enabled": true,
+            "timeout": 2,
+            "docker_config": {
+                "image": "somefakedockerimage:latest".to_string(),
+            }
+        })).unwrap()
+    }
+
+    fn test_services() -> HashMap<String, Service> {
+        return [
+            ("extract", dummy_service(
+                "extract",
+                "pre",
+                None,
+                Some("archive/.*"),
+                None,
+                None
+            )),
+            ("AnAV", dummy_service(
+                "AnAV",
+                "core",
+                Some("av"),
+                Some(".*"),
+                None,
+                None
+            )),
+            ("cuckoo", dummy_service(
+                "cuckoo",
+                "core",
+                Some("dynamic"),
+                Some("document/.*|executable/.*"),
+                None,
+                None
+            )),
+            ("polish", dummy_service(
+                "polish",
+                "post",
+                Some("static"),
+                Some(".*"),
+                None,
+                None
+            )),
+            ("not_documents", dummy_service(
+                "not_documents",
+                "post",
+                Some("static"),
+                Some(".*"),
+                Some("document/*"),
+                None
+            )),
+            ("Safelist", dummy_service(
+                "Safelist",
+                "pre",
+                Some("static"),
+                Some(".*"),
+                None,
+                None
+            ))
+        ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
+    }
+
+    pub async fn setup_services(services: HashMap<String, Service>) -> (Core, TestGuard) {
+        println!("start setup");
+        let (core, redis) = Core::test_custom_setup(|config| {
+            config.services.stages = vec!["pre".to_string(), "core".to_string(), "post".to_string()];
+        }).await;
+        let service_count = services.len();
+        println!("setup core");
+
+        for (name, service) in services {
+            core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
+            core.datastore.service_delta.save_json(&name, &mut[("version".to_owned(), json!(service.version))].into_iter().collect(), None, None).await.unwrap();
+            core.services.get_service_stage_hash().set(&name, &ServiceStage::Running).await.unwrap();
+            core.redis_volatile.publish(&("changes.services.".to_owned() + &name), &serde_json::to_vec(&ServiceChange {
+                operation: assemblyline_models::messages::changes::Operation::Added,
+                name,
+            }).unwrap()).await.unwrap();
+        }
+        println!("Services added");
+                
+        for step in 0..1000 {
+            if core.services.list().len() == service_count { break }
+            tokio::time::sleep(Duration::from_micros(step)).await;
+        }
+        println!("Services confirmed");
+        (core, redis)
+    }
+
+    async fn setup() -> (Core, TestGuard) {
+        setup_services(test_services()).await
+    }
+
+    fn make_params(core: &Core, accept: &[&str], reject: &[&str]) -> SubmissionParams {
+        let mut params = SubmissionParams::new(ClassificationString::new(core.classification_parser.unrestricted().to_owned(), &core.classification_parser).unwrap());
+        params.services.selected = accept.iter().map(|item|item.to_string()).collect();
+        params.services.excluded = reject.iter().map(|item|item.to_string()).collect();
+        params
+    }
+
+    #[tokio::test]
+    async fn test_schedule_simple() {
+        let (core, _redis) = setup().await;
+
+        let schedule = core.services.build_schedule(&make_params(&core, 
+            &["static", "av"], &["dynamic"]), "document/word", 0, None, None).unwrap();
+        
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec!["AnAV"],
+            vec!["polish"]
+        ])
+    }
+
+    #[tokio::test]
+    async fn test_schedule_no_excludes() {
+        let (core, _redis) = setup().await;
+        let schedule = core.services.build_schedule(&make_params(&core, 
+            &["static", "av", "dynamic"], &[]), "document/word", 0, None, None).unwrap();
+        
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec!["AnAV", "cuckoo"],
+            vec!["polish"]
+        ])
+    }
+
+    #[tokio::test]
+    async fn test_schedule_all_defaults_word() {
+        let (core, _redis) = setup().await;
+        let schedule = core.services.build_schedule(&make_params(&core, 
+            &[], &[]), "document/word", 0, None, None).unwrap();
+        
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec!["AnAV", "cuckoo"],
+            vec!["polish"]
+        ])
+    }
+
+    #[tokio::test]
+    async fn test_schedule_all_defaults_zip() {
+        let (core, _redis) = setup().await;
+        let schedule = core.services.build_schedule(&make_params(&core, 
+            &[], &[]), "archive/zip", 0, None, None).unwrap();
+        
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist", "extract"],
+            vec!["AnAV"],
+            vec!["not_documents", "polish"]
+        ])
+    }
+
+    #[tokio::test]
+    async fn test_schedule_service_safelist() {
+        let (core, _redis) = setup().await;
+        // Safelist service should still be scheduled
+        let mut params = make_params(&core, &["Safelist"], &[]);
+        let schedule = core.services.build_schedule(&params, "archive/word", 0, None, None).unwrap();
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec![],
+            vec![]
+        ]);
+    
+        // Safelist service should NOT still be scheduled because we're not enforcing Safelist service by default
+        // and deep_scan and ignore_filtering is OFF for this submission
+        params.deep_scan = false;
+        params.ignore_filtering = false;
+        let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
+        assert_eq!(get_schedule_names(&schedule), vec![
+            Vec::<String>::new(),
+            vec![],
+            vec![]
+        ]);
+    
+        // Safelist service should be scheduled because we're enabling deep_scan
+        params.deep_scan = true;
+        params.ignore_filtering = false;
+        let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec![],
+            vec![]
+        ]);
+
+        // Safelist service should be scheduled because we're enabling ignore_filtering
+        params.deep_scan = false;
+        params.ignore_filtering = true;
+        let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
+        assert_eq!(get_schedule_names(&schedule), vec![
+            vec!["Safelist"],
+            vec![],
+            vec![]
+        ]);
     }
 }

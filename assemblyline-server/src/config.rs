@@ -16,8 +16,8 @@ pub struct TLSConfig {
 impl TLSConfig {
     /// Load the TLS information that should be used to serve content
     pub async fn load() -> Result<Option<Self>> {
-        let server_key = load_file("SERVER_KEY", "SERVER_KEY_PATH", "/etc/ssl/key.pem").await?;
-        let server_cert = load_file("SERVER_CERT", "SERVER_CERT_PATH", "/etc/ssl/cert.pem").await?;
+        let server_key = load_file("SERVER_KEY", "SERVER_KEY_PATH").await?; // "/etc/ssl/key.pem"
+        let server_cert = load_file("SERVER_CERT", "SERVER_CERT_PATH").await?; // "/etc/ssl/cert.pem"
         match (server_key, server_cert) {
             (Some(key_pem), Some(certificate_pem)) => Ok(Some(TLSConfig { key_pem, certificate_pem })),
             (None, Some(_)) => bail!("Initialization error, found certificate but no key found"),
@@ -27,7 +27,7 @@ impl TLSConfig {
     }
 }
 
-async fn load_file(direct_key: &str, path_key: &str, default_path: &str) -> Result<Option<String>> {
+async fn load_file(direct_key: &str, path_key: &str) -> Result<Option<String>> {
     // Try to load the certificates directly from env variables
     match std::env::var(direct_key) {
         Ok(key) => return Ok(Some(key)),
@@ -38,13 +38,18 @@ async fn load_file(direct_key: &str, path_key: &str, default_path: &str) -> Resu
     // See if there are env variables defining a path to load certificates from
     let path = match std::env::var(direct_key) {
         Ok(path) => PathBuf::from(path),
-        Err(std::env::VarError::NotPresent) => PathBuf::from(default_path),
+        Err(std::env::VarError::NotPresent) => return Ok(None),
         Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!("Could not parse {path_key} environment variable")
     };
 
     // Load the certificate file
     Ok(Some(tokio::fs::read_to_string(path).await?))
 }
+
+pub async fn get_cluster_ca_cert() -> Result<Option<String>> {
+    load_file("CLUSTER_CA_CERT", "CLUSTER_CA_CERT_PATH").await
+}
+
 
 /// Load the address the server should bind to
 pub fn load_bind_address() -> Result<SocketAddr> {
@@ -54,6 +59,19 @@ pub fn load_bind_address() -> Result<SocketAddr> {
         Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!("Could not parse BIND_ADDRESS environment variable")
     }
 }
+
+pub fn bind_address() -> Result<std::net::TcpListener> {
+    Ok(std::net::TcpListener::bind(load_bind_address()?)?)
+}
+
+pub fn hostname() -> Result<String> {
+    match std::env::var("HOSTNAME") {
+        Ok(address) => Ok(address.to_owned()),
+        Err(std::env::VarError::NotPresent) => Ok("localhost".to_string()),
+        Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!("Could not parse HOSTNAME environment variable")
+    }
+}
+
 
 pub fn generate_certificate() -> Result<poem::listener::OpensslTlsConfig> {
     use openssl::{rsa::Rsa, x509::X509, pkey::PKey, asn1::{Asn1Integer, Asn1Time}, bn::BigNum};

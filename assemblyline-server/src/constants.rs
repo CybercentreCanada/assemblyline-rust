@@ -1,5 +1,6 @@
 use assemblyline_markings::config::{ClassificationConfig, ClassificationGroup, ClassificationLevel, DynamicGroupType};
 use assemblyline_models::Sid;
+use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 
@@ -28,6 +29,47 @@ pub fn make_watcher_list_name(sid: Sid) -> String {
     format!("dispatch-watcher-list-{sid}")
 }
 
+
+/// This table in redis tells us about the current stage of operation a service is in.
+/// This is complementary to the 'enabled' flag in the service spec.
+/// If the service is marked as enabled=true, each component should take steps needed to move it to the 'Running' stage.
+/// If the service is marked as enabled=false, each component should take steps needed to stop it.
+/// If at any time a service is disabled, scaler will stop the dependent containers
+#[derive(strum::FromRepr, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStage {
+    // A service is not running
+    // - if enabled scaler will start dependent containers and move to next stage
+    Off = 0,
+    // A service is not running, but dependencies have been started
+    // - if enabled updater will try to
+    Update = 1,
+    // At this stage scaler will begin
+    Running = 2,
+    Paused = 3,
+}
+
+impl<'de> Deserialize<'de> for ServiceStage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> 
+    {
+        let value = usize::deserialize(deserializer)?;
+        match Self::from_repr(value) {
+            Some(value) => Ok(value),
+            None => Err(serde::de::Error::custom("Invalid service stage")),
+        }
+    }
+}
+
+impl Serialize for ServiceStage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        (*self as usize).serialize(serializer)
+    }
+}
+
+pub const SERVICE_STAGE_KEY: &str = "service-stage";
 
 // # Queue priority values for each bucket in the ingester
 // PRIORITIES = {

@@ -4,6 +4,7 @@ use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
 
+use crate::random_word;
 use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInfo, config::ServiceSafelist};
 
 
@@ -35,7 +36,7 @@ pub struct FileInfo {
 }
 
 /// Tag Item
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TagItem {
     /// Type of tag item
     #[serde(rename="type")]
@@ -48,19 +49,20 @@ pub struct TagItem {
 
 
 /// Data Item
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct DataItem {
     pub name: String,
     pub value: serde_json::Value,
 }
 
 /// Service Task Model
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Task {
     /// A random ID to differentiate this task
     pub task_id: u64,
     /// Id of the dispatcher that issued this task
     pub dispatcher: String,
+    pub dispatcher_address: String,
     /// Submission ID
     pub sid: Sid,
     /// Metadata associated to the submission
@@ -105,6 +107,46 @@ pub struct Task {
     /// Safelisting configuration (as defined in global configuration)
     #[serde(default="task_default_safelist_config")]
     pub safelist_config: ServiceSafelist, // ", default={'enabled': False})
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Task> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Task {
+        Task {
+            task_id: rng.gen(),
+            dispatcher: random_word(rng),
+            dispatcher_address: "localhost:8080".to_string(),
+            sid: rng.gen(),
+            metadata: Default::default(),
+            min_classification: Default::default(),
+            fileinfo: FileInfo { 
+                magic: "".to_string(), 
+                md5: rng.gen(), 
+                mime: None, 
+                sha1: rng.gen(), 
+                sha256: rng.gen(), 
+                size: rng.gen(), 
+                ssdeep: rng.gen(), 
+                tlsh: None, 
+                file_type: "unknown".to_owned(), 
+                uri_info: None 
+            },
+            filename: random_word(rng),
+            service_name: random_word(rng),
+            service_config: Default::default(),
+            depth: rng.gen(),
+            max_files: rng.gen(),
+            ttl: rng.gen(),
+            tags: Default::default(),
+            temporary_submission_data: Default::default(),
+            deep_scan: rng.gen(),
+            ignore_cache: rng.gen(),
+            ignore_recursion_prevention: rng.gen(),
+            ignore_filtering: rng.gen(),
+            priority: rng.gen(),
+            safelist_config: Default::default(),
+        }
+    }
 }
 
 pub fn task_default_safelist_config() -> ServiceSafelist {
@@ -234,7 +276,7 @@ impl ServiceResponse {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagEntry {
     pub score: i32,    
     #[serde(rename="type")]
@@ -249,7 +291,7 @@ pub struct ServiceResult {
     pub sha256: Sha256,
     pub service_name: String,
     pub service_version: String,
-    pub service_tool_version: String,
+    pub service_tool_version: Option<String>,
     pub expiry_ts: Option<chrono::DateTime<chrono::Utc>>,
     pub result_summary: ResultSummary,
     pub tags: HashMap<String, TagEntry>,

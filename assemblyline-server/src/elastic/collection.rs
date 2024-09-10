@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -32,11 +33,11 @@ pub struct Collection<T: Serialize + DeserializeOwned> {
 
 impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
 
-    pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>) -> Result<Self> {
+    pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String) -> Result<Self> {
         let collection = Collection {
             database: es,
-            name,
-            archive_name,
+            name: prefix.clone() + &name,
+            archive_name: archive_name.map(|name| prefix + &name),
             _data: Default::default()
         };
         collection.ensure_collection().await?;
@@ -61,7 +62,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
                     "settings": self.database.get_index_settings(&self.name, self.is_archive_index(&index))
                 });
 
-                if let Err(err) = self.database.make_request_json(&mut 0, &(Method::PUT, self.database.host.join(&index)?).into(), &body).await {
+                if let Err(err) = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &index)?, &body).await {
                     if err.is_resource_already_exists() {
                         warn!("Tried to create an index template that already exists: {}", alias.to_uppercase());    
                     } else {
@@ -73,8 +74,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
             } else if !self.database.does_index_exist(&index).await? && !self.database.does_alias_exist(&alias).await.context("does_alias_exist")? {
                 // Hold a write block for the rest of this section
                 // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_block_settings)
-                let settings_url = self.database.host.join(&format!("{index}/_settings"))?;
-                let settings_request = (Method::PUT, settings_url).into();
+                let settings_request = Request::put_index_settings(&self.database.host, &index)?;
                 self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": true})).await.context("create write block")?;
         
                 // Create a copy on the result index
@@ -82,7 +82,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
 
                 // Make the hot index the new clone
                 // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
-                self.database.make_request_json(&mut 0, &(Method::POST, self.database.host.join("_aliases")?).into(), &json!({
+                self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
                     "actions": [
                         {"add":  {"index": index, "alias": alias}}, 
                         {"remove_index": {"index": alias}}
@@ -215,10 +215,6 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         let mut outstanding = vec![];
 
         for index in index_list {
-            // prepare the url
-            let mut url = self.database.host.join(&format!("{index}/_mget"))?;
-            url.query_pairs_mut().append_pair("_source", "true");
-
             // prepare the request body
             let body = if outstanding.is_empty() {
                 json!({ "ids": ids })
@@ -227,7 +223,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
             };
 
             // fetch all the documents
-            let response = self.make_request_json(&(Method::GET, url).into(), &body).await.context("mget request")?;
+            let response = self.make_request_json(&Request::mget_doc(&self.database.host, &index)?, &body).await.context("mget request")?;
             let response: responses::Multiget<RT, ()> = response.json().await?;
 
             // track which ones we have found
@@ -306,12 +302,9 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         let index_list = self.get_index_list(index_type)?;
 
         for index in index_list {
-            // prepare the url
-            let mut url = self.database.host.join(&format!("{index}/_doc/{key}"))?;
-            url.query_pairs_mut().append_pair("_source", "true");
-
             // fetch all the documents
-            let mut response: responses::Get<RT, ()> = match self.make_request(&(Method::GET, url).into()).await {
+            let request = Request::get_doc(&self.database.host, &index, key)?;
+            let mut response: responses::Get<RT, ()> = match self.make_request(&request).await {
                 Ok(response) => response.json().await?,
                 Err(err) if err.is_document_not_found() => continue,
                 Err(err) => return Err(err)
@@ -386,7 +379,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
                     .append_pair("if_primary_term", &primary_term.to_string());
             }
 
-            self.make_request_json(&Request::with_raise_conflict(Method::PUT, url), &data).await?;
+            self.make_request_json(&Request::with_raise_conflict(Method::PUT, url, index), &data).await?;
         }
 
         Ok(())
@@ -471,12 +464,9 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         let operations = operations.to_script();
 
         for index in self.get_index_list(Some(index_type))? {
-            let mut url = self.database.host.join(&format!("/{index}/_update/{id}"))?;
-            if let Some(retry_on_conflict) = retry_on_conflict {
-                url.query_pairs_mut().append_pair("retry_on_conflict", &retry_on_conflict.to_string());
-            }
+            let request = Request::update_doc(&self.database.host, &index, id, retry_on_conflict)?;
 
-            let result = self.make_request_json(&(Method::POST, url).into(), &operations).await;
+            let result = self.make_request_json(&request, &operations).await;
             let body: responses::Index = match result {
                 Ok(response) => response.json().await?,
                 Err(err) => {
@@ -500,8 +490,8 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
     /// :return: Should return True of the commit was successful on all hosts
     pub async fn commit(&self, index_type: Option<Index>) -> Result<()> {
         for index in self.get_index_list(index_type)? {
-            self.make_request(&(Method::POST, self.database.host.join(&format!("{index}/_refresh"))?).into()).await?;
-            self.make_request(&(Method::POST, self.database.host.join(&format!("{index}/_cache/clear"))?).into()).await?;
+            self.make_request(&Request::post_refresh_index(&self.database.host, &index)?).await?;
+            self.make_request(&Request::post_clear_index_cache(&self.database.host, &index)?).await?;
         }
         Ok(())
     }
@@ -517,8 +507,8 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
 
         let mut deleted = false;
         for index in index_list {
-            let url = self.database.host.join(&format!("/{index}/_doc/{key}"))?;
-            let result = self.make_request(&(Method::DELETE, url).into()).await;
+            let request = Request::delete_doc(&self.database.host, &index, key)?;
+            let result = self.make_request(&request).await;
             match result {
                 Ok(response) => {
                     let response: responses::Delete = response.json().await?;
@@ -927,16 +917,13 @@ struct PitGuard {
 
 impl PitGuard {
     async fn open(helper: Arc<ElasticHelper>, index: &str) -> Result<Self> {
-        let mut url = helper.host.join(&format!("{}/_pit", index))?;
-        url.query_pairs_mut().append_pair("keep_alive", PIT_KEEP_ALIVE);
-        let response = helper.make_request(&mut 0, &(Method::POST, url).into()).await?;
+        let response = helper.make_request(&mut 0, &Request::create_pit(&helper.host, &index, PIT_KEEP_ALIVE)?).await?;
         let pit: responses::OpenPit = response.json().await?;
         Ok(Self { helper, id: pit.id })
     }
 
     async fn close(helper: Arc<ElasticHelper>, id: String) -> Result<()> {
-        let url = helper.host.join("/_pit")?;
-        let response = helper.make_request_json(&mut 0, &(Method::DELETE, url).into(), &json!({
+        let response = helper.make_request_json(&mut 0, &Request::delete_pit(&helper.host)?, &json!({
             "id": id
         })).await?;
         let _body: responses::ClosePit = response.json().await?;
@@ -1017,18 +1004,17 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
         if self.batch.is_empty() {
             let sort = self.sort.iter().map(|(name, direction)|format!("{name}:{direction}")).collect_vec();
 
-            let mut url = self.helper.host.join("/_search")?;
-            url.query_pairs_mut()
-            .append_pair("size", &self.batch_size.to_string())
-            .append_pair("sort", &sort.join(","))
-            .append_pair("_source", &self.source.to_string());
+            let mut params: Vec<(&str, Cow<str>)> = vec![];
+            params.push(("size", self.batch_size.to_string().into()));
+            params.push(("sort", sort.join(",").into()));
+            params.push(("_source", self.source.as_str().into()));
 
             // if let Some(search_after) = &self.search_after {
             //     url.query_pairs_mut().append_pair("search_after", &search_after.to_string());
             // }
 
             if let Some(timeout) = &self.timeout {
-                url.query_pairs_mut().append_pair("timeout", &format!("{}ms", timeout.as_millis()));
+                params.push(("timeout", format!("{}ms", timeout.as_millis()).into()));
             }
 
             let mut body = JsonMap::new();
@@ -1042,7 +1028,7 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
                 body.insert("search_after".to_string(), search_after.clone());
             }
 
-            let response = self.helper.make_request_json(&mut 0, &(Method::GET, url).into(), &body).await?;
+            let response = self.helper.make_request_json(&mut 0, &Request::get_search(&self.helper.host, params)?, &body).await?;
             let mut response: responses::Search<(), T> = response.json().await?;
 
             match response.hits.hits.last() {

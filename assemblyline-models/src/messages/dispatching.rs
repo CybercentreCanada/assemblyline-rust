@@ -36,6 +36,20 @@ impl WatchQueueMessage {
             status: WatchQueueStatus::Stop,
         }
     }
+
+    pub fn fail(cache_key: String) -> Self {
+        Self {
+            cache_key: Some(cache_key),
+            status: WatchQueueStatus::Fail,
+        }
+    }
+
+    pub fn ok(cache_key: String) -> Self {
+        Self {
+            cache_key: Some(cache_key),
+            status: WatchQueueStatus::Ok,
+        }
+    }
 }
 
 impl From<WatchQueueStatus> for WatchQueueMessage {

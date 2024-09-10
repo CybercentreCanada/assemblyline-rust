@@ -15,11 +15,12 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Sha256, ElasticMeta, ClassificationString, ExpandingClassification};
+use crate::messages::task::{generate_conf_key, TagEntry, Task};
+use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256};
 
 use super::tagging::Tagging;
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum BodyFormat {
@@ -39,7 +40,7 @@ pub enum BodyFormat {
 
 // constants = forge.get_constants()
 
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Attack {
@@ -54,7 +55,7 @@ pub struct Attack {
 }
 
 /// Heuristic Signatures
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Signature {
@@ -72,7 +73,7 @@ pub struct Signature {
 fn default_signature_frequency() -> i64 { 1 }
 
 /// Heuristic associated to the Section
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Heuristic {
@@ -89,11 +90,11 @@ pub struct Heuristic {
     #[serde(default)]
     pub signature: Vec<Signature>,
     /// Calculated Heuristic score
-    pub score: i64,
+    pub score: i32,
 }
 
 /// Result Section
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Section {
@@ -129,20 +130,20 @@ pub struct Section {
 }
 
 /// Result Body
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct ResultBody {
     /// Aggregate of the score for all heuristics
     #[serde(default)]
-    pub score: i64,
+    pub score: i32,
     /// List of sections
     #[serde(default)]
     pub sections: Vec<Section>,
 }
 
 /// Service Milestones
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct Milestone {
@@ -152,8 +153,21 @@ pub struct Milestone {
     pub service_completed: DateTime<Utc>,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Milestone> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Milestone {
+        let service_started = chrono::Utc::now() - chrono::TimeDelta::hours(rng.gen_range(1..200));
+        let duration = chrono::TimeDelta::seconds(rng.gen_range(1..900));
+        Milestone {
+            service_started,
+            service_completed: service_started + duration
+        }
+    }
+}
+
+
 /// File related to the Response
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {
@@ -182,7 +196,7 @@ pub struct File {
 fn default_file_parent_relation() -> String { "EXTRACTED".to_owned() }
 
 /// Response Body of Result
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct ResponseBody {
@@ -212,8 +226,25 @@ pub struct ResponseBody {
     pub service_debug_info: Option<String>,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<ResponseBody> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ResponseBody {
+        ResponseBody {
+            milestones: rng.gen(),
+            service_version: random_word(rng),
+            service_name: random_word(rng),
+            service_tool_version: None,
+            supplementary: Default::default(),
+            extracted: Default::default(),
+            service_context: Default::default(),
+            service_debug_info: Default::default(),
+        }
+    }
+}
+
+
 /// Result Model
-#[derive(Serialize, Deserialize, Debug, Described)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Result {
@@ -245,4 +276,81 @@ pub struct Result {
     #[serde(default)]
     #[metadata(index=false)]
     pub from_archive: bool,
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Result> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Result {
+        Result {
+            classification: ExpandingClassification {
+                classification: "".to_string(),
+                __access_lvl__: 0,
+                __access_req__: vec![],
+                __access_grp1__: vec![],
+                __access_grp2__: vec![],
+            },
+            created: chrono::Utc::now(),
+            expiry_ts: None,
+            response: rng.gen(),
+            result: Default::default(),
+            sha256: rng.gen(),
+            result_type: None,
+            size: rng.gen(),
+            drop_file: Default::default(),
+            from_archive: Default::default(),
+        }
+    }
+}
+
+impl Readable for Result {
+    fn set_from_archive(&mut self, from_archive: bool) {
+        self.from_archive = from_archive;
+    }
+}
+
+impl Result {
+    pub fn build_key(&self, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
+        Self::help_build_key(
+            &self.sha256,
+            &self.response.service_name,
+            &self.response.service_version,
+            self.is_empty(),
+            self.response.service_tool_version.as_deref(),
+            task
+        )
+    }
+
+    pub fn help_build_key(sha256: &Sha256, service_name: &str, service_version: &str, is_empty: bool, service_tool_version: Option<&str>, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
+        let mut key_list = vec![
+            sha256.to_string(),
+            service_name.replace('.', "_"),
+            format!("v{}", service_version.replace('.', "_")),
+            format!("c{}", generate_conf_key(service_tool_version, task)?),
+        ];
+
+        if is_empty {
+            key_list.push("e".to_owned())
+        }
+
+        Ok(key_list.join("."))
+    }
+
+    pub fn scored_tag_dict(&self) -> std::result::Result<HashMap<String, TagEntry>, serde_json::Error> {
+        let mut tags: HashMap<String, TagEntry> = Default::default();
+        // Save the tags and their score
+        for section in &self.result.sections {
+            for tag in section.tags.to_list(None)? {
+                let key = format!("{}:{}", tag.tag_type, tag.value);
+                let entry = tags.entry(key).or_insert(tag);
+                if let Some(heuristic) = &section.heuristic {
+                    entry.score += heuristic.score;
+                }
+            }
+        }
+        Ok(tags)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.response.extracted.is_empty() && self.response.supplementary.is_empty() && self.result.sections.is_empty() && self.result.score == 0
+    }
 }

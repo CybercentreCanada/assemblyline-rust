@@ -1,10 +1,12 @@
 use chrono::{DateTime, Utc};
+use rand::seq::IteratorRandom;
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
+use strum::IntoEnumIterator;
 
 use crate::messages::task::{generate_conf_key, Task};
-use crate::{ElasticMeta, Readable, Sha256};
+use crate::{random_word, random_words, ElasticMeta, Readable, Sha256};
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
 #[metadata_type(ElasticMeta)]
@@ -15,7 +17,28 @@ pub enum Status {
     FailRecoverable,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Status> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Status {
+        if rng.gen() {
+            Status::FailNonrecoverable
+        } else {
+            Status::FailRecoverable
+        }
+    }
+}
+
+impl Status {
+    pub fn is_recoverable(&self) -> bool {
+        matches!(self, Status::FailRecoverable)
+    }
+    pub fn is_nonrecoverable(&self) -> bool {
+        matches!(self, Status::FailNonrecoverable)
+    }
+}
+
+
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 pub enum ErrorTypes {
     #[strum(serialize = "UNKNOWN")]
@@ -34,6 +57,16 @@ pub enum ErrorTypes {
     ServiceDown = 21,
     #[strum(serialize = "TASK PRE-EMPTED")]
     TaskPreempted = 30
+}
+
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<ErrorTypes> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ErrorTypes {
+        match ErrorTypes::iter().choose(rng) {
+            Some(value) => value,
+            None => ErrorTypes::Unknown,
+        }
+    }
 }
 
 /// Error Response from a Service
@@ -58,6 +91,22 @@ pub struct Response {
     pub status: Status,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Response> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Response {
+        let word_count = rng.gen_range(5..25);
+        Response {
+            message: random_words(rng, word_count).join(" "),
+            service_debug_info: None,
+            service_name: random_word(rng),
+            service_tool_version: None,
+            service_version: "0.0".to_string(),
+            status: rng.r#gen(),
+        }
+    }
+}
+
+
 /// Error Model used by Error Viewer
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
@@ -78,6 +127,19 @@ pub struct Error {
     pub error_type: ErrorTypes,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distributions::Distribution<Error> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Error {
+        Error {
+            created: chrono::Utc::now(),
+            expiry_ts: None,
+            response: rng.r#gen(),
+            sha256: rng.r#gen(),
+            error_type: rng.r#gen(),
+        }
+    }
+}
+
 impl Error {
     pub fn build_key(&self, service_tool_version: Option<&str>, task: Option<&Task>) -> Result<String, serde_json::Error> {
         let key_list = [
@@ -95,5 +157,5 @@ impl Error {
 fn default_error_type() -> ErrorTypes { ErrorTypes::Exception }
 
 impl Readable for Error {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }

@@ -24,6 +24,7 @@ use crate::logging::configure_logging;
 
 mod ingester;
 mod submit;
+mod http;
 mod core_dispatcher;
 mod core_metrics;
 mod archive;
@@ -36,6 +37,9 @@ mod tls;
 mod error;
 mod constants;
 mod config;
+
+#[cfg(test)]
+mod tests;
 
 
 #[derive(Debug, Parser)]
@@ -52,6 +56,9 @@ struct Args {
 enum Commands {
     Ingester {
         
+    },
+    Dispatcher {
+
     }
 }
 
@@ -69,7 +76,7 @@ async fn main() -> ExitCode {
     let _log_manager = configure_logging(&config).expect("Could not configure logging");
 
     // Connect to all the supporting components
-    let core = match Core::setup(config).await {
+    let core = match Core::setup(config, "").await {
         Ok(core) => core,
         Err(err) => {
             error!("Startup error: {err}");
@@ -82,6 +89,9 @@ async fn main() -> ExitCode {
         Commands::Ingester {  } => {
             crate::ingester::main(core).await
         },
+        Commands::Dispatcher {  } => {
+            crate::dispatcher::main(core).await
+        }
     };
 
     // log if the module failed
@@ -135,7 +145,7 @@ struct Core {
 
 impl Core {
     /// Initialize connections to resources that everything uses
-    pub async fn setup(config: Arc<Config>) -> Result<Self> {
+    pub async fn setup(config: Arc<Config>, elastic_prefix: &str) -> Result<Self> {
         // connect to redis one
         let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?;
 
@@ -147,7 +157,7 @@ impl Core {
 
         // connect to elastic
         // TODO Fill in ca parameter
-        let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false).await?;
+        let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false, elastic_prefix).await?;
 
         // load classification from given config blob or file
         let mut classification_config = config.classification.config.clone();
@@ -164,7 +174,7 @@ impl Core {
 
         Ok(Core {
             // start a daemon that keeps an up-to-date local cache of service info
-            services: ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), config.services.clone()).await?,
+            services: ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), &config.services).await?,
             config,
             datastore,
             redis_persistant,
@@ -177,9 +187,12 @@ impl Core {
     }
     
     #[cfg(test)]
-    pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, RedisGuard) {
+    pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, TestGuard) {
+        use rand::Rng;
         use std::sync::LazyLock;
         use parking_lot::Mutex;
+        let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
+
 
         static USED_DB: LazyLock<Arc<Mutex<Vec<i64>>>> = LazyLock::new(|| {
             let out = Vec::from_iter(1..16);
@@ -194,7 +207,7 @@ impl Core {
                     break value
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         };
 
         let host = "localhost";
@@ -227,15 +240,18 @@ impl Core {
         })).unwrap();
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
+        let prefix = rand::thread_rng().r#gen::<u128>().to_string();
+        let core = Self::setup(Arc::new(config), &prefix).await.unwrap();
+        let elastic = core.datastore.clone();
         (
-            Self::setup(Arc::new(config)).await.unwrap(),
-            RedisGuard { used: db, table }
+            core,
+            TestGuard { used: db, table, elastic }
         )
     }
     
     /// Produce a set of core resources suitable for testing
     #[cfg(test)]
-    pub async fn test_setup() -> (Self, RedisGuard) {
+    pub async fn test_setup() -> (Self, TestGuard) {
         Self::test_custom_setup(|_| {}).await
     }
 
@@ -259,18 +275,26 @@ impl Core {
     }
 }
 
-/// While this struct is held prevent 
+/// While this struct is held prevent temporary core resources from being collected
 #[cfg(test)]
-struct RedisGuard {
+struct TestGuard {
     used: i64,
+    elastic: Arc<Elastic>,
     table: Arc<parking_lot::Mutex<Vec<i64>>>,
 }
 
 #[cfg(test)]
-impl Drop for RedisGuard {
+impl Drop for TestGuard {
     fn drop(&mut self) {
         let mut table = self.table.lock();
         table.push(self.used);
+
+        let elastic = self.elastic.clone();
+        tokio::spawn(async move {
+            if let Err(err) = elastic.wipe_all().await {
+                error!("Could not clear test data: {err}");
+            }
+        });
     }
 }
 

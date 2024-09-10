@@ -26,5 +26,5 @@ pub struct FileScore {
 }
 
 impl Readable for FileScore {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }

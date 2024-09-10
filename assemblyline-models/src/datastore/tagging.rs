@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
+use serde::de::Error;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{Sha1, Sha256, MD5, Domain, IP, Uri, Platform, Processor, SSDeepHash, PhoneNumber, UpperString, UNCPath, UriPath, Email, Mac, ElasticMeta};
+use crate::messages::task::TagEntry;
+use crate::{Domain, ElasticMeta, Email, JsonMap, Mac, PhoneNumber, Platform, Processor, SSDeepHash, Sha1, Sha256, UNCPath, UpperString, Uri, UriPath, IP, MD5};
 
 /// Attribution Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Attribution {
     /// Attribution Actor
@@ -26,7 +28,7 @@ pub struct Attribution {
 }
 
 /// Antivirus Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct AV {
     /// List of heuristics
@@ -36,7 +38,7 @@ pub struct AV {
 }
 
 /// Valid Certificate Period
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct CertValid {
     /// Start date of certificate validity
@@ -46,7 +48,7 @@ pub struct CertValid {
 }
 
 /// Certificate Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Cert {
     /// Extended Key Usage
@@ -74,7 +76,7 @@ pub struct Cert {
 }
 
 /// Dynamic Process
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct DynamicProcess {
     /// Commandline
@@ -86,7 +88,7 @@ pub struct DynamicProcess {
 }
 
 /// Signatures
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct DynamicSignature {
     /// Signature Category
@@ -98,7 +100,7 @@ pub struct DynamicSignature {
 }
 
 /// SSDeep
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct DynamicSSDeep {
     /// CLSIDs
@@ -110,7 +112,7 @@ pub struct DynamicSSDeep {
 }
 
 /// Windows
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct DynamicWindow {
     /// CLSIDs
@@ -122,7 +124,7 @@ pub struct DynamicWindow {
 }
 
 /// Operating System
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct DynamicOperatingSystem {
     /// Platform
@@ -134,7 +136,7 @@ pub struct DynamicOperatingSystem {
 }
 
 /// Dynamic Tag Model. Commonly Used by Dynamic Analysis
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Dynamic {
     /// Autorun location
@@ -160,7 +162,7 @@ pub struct Dynamic {
 }
 
 /// General Information Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct TaggingInfo {
     pub phone_number: Option<Vec<PhoneNumber>>,
@@ -169,7 +171,7 @@ pub struct TaggingInfo {
 }
 
 /// APK Application Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileAPKApp {
     /// Label
@@ -179,7 +181,7 @@ pub struct FileAPKApp {
 }
 
 /// APK SDK Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileAPKSDK {
     /// Minimum OS required
@@ -189,7 +191,7 @@ pub struct FileAPKSDK {
 }
 
 /// APK File Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileAPK {
     /// Activity
@@ -213,7 +215,7 @@ pub struct FileAPK {
 }
 
 /// File Date Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileDate {
     /// File Creation Date
@@ -223,7 +225,7 @@ pub struct FileDate {
 }
 
 /// ELF Sections
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileELFSections {
     /// Section Name
@@ -231,7 +233,7 @@ pub struct FileELFSections {
 }
 
 /// ELF Segments
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileELFSegments {
     /// Segment Type
@@ -240,7 +242,7 @@ pub struct FileELFSegments {
 }
 
 /// ELF Notes
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileELFNotes {
     /// Note Name
@@ -253,7 +255,7 @@ pub struct FileELFNotes {
 }
 
 /// ELF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileELF {
     /// Libraries
@@ -269,7 +271,7 @@ pub struct FileELF {
 }
 
 /// Exiftool Information Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileIMGExiftool {
     /// Image Creation Tool
@@ -285,7 +287,7 @@ pub struct FileIMGExiftool {
 }
 
 /// Image File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileIMG {
     /// Exiftool Information
@@ -301,7 +303,7 @@ pub struct FileIMG {
 }
 
 /// JAR File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileJAR {
     /// Main Class
@@ -311,7 +313,7 @@ pub struct FileJAR {
 }
 
 /// File Name Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileName {
     /// Name of Anomaly
@@ -321,7 +323,7 @@ pub struct FileName {
 }
 
 /// OLE Macro Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileOLEMacro {
     /// SHA256 of Macro
@@ -331,7 +333,7 @@ pub struct FileOLEMacro {
 }
 
 /// OLE Summary Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileOLESummary {
     /// Author
@@ -359,7 +361,7 @@ pub struct FileOLESummary {
 }
 
 /// OLE File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileOLE {
     /// OLE Macro
@@ -376,7 +378,7 @@ pub struct FileOLE {
 }
 
 /// PDF Date Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePDFDate {
     /// Date Modified
@@ -388,7 +390,7 @@ pub struct FilePDFDate {
 }
 
 /// PDF Javascript Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePDFJavascript {
     /// SHA1 of Javascript
@@ -396,7 +398,7 @@ pub struct FilePDFJavascript {
 }
 
 /// PDF Statistics Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePDFStats {
     /// SHA1 of Statistics
@@ -404,7 +406,7 @@ pub struct FilePDFStats {
 }
 
 /// PDF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePDF {
     /// PDF Date Information
@@ -416,7 +418,7 @@ pub struct FilePDF {
 }
 
 /// PE Debug Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEDebug {
     /// GUID
@@ -424,7 +426,7 @@ pub struct FilePEDebug {
 }
 
 /// PE Exports Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEExports {
     /// Function Name
@@ -434,7 +436,7 @@ pub struct FilePEExports {
 }
 
 /// PE Imports Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEImports {
     /// Fuzzy
@@ -454,7 +456,7 @@ pub struct FilePEImports {
 }
 
 /// PE Linker Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePELinker {
     /// Timestamp
@@ -462,7 +464,7 @@ pub struct FilePELinker {
 }
 
 /// PE OEP Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEOEP {
     /// Bytes
@@ -472,7 +474,7 @@ pub struct FilePEOEP {
 }
 
 /// PE Resources Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEResources {
     /// Language
@@ -482,7 +484,7 @@ pub struct FilePEResources {
 }
 
 /// PE Rich Header Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePERichHeader {
     /// Hash
@@ -490,7 +492,7 @@ pub struct FilePERichHeader {
 }
 
 /// PE Sections Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePESections {
     /// Hash
@@ -500,7 +502,7 @@ pub struct FilePESections {
 }
 
 /// PE Versions Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePEVersions {
     /// Description
@@ -510,7 +512,7 @@ pub struct FilePEVersions {
 }
 
 /// PE File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePE {
     /// API Vector
@@ -538,7 +540,7 @@ pub struct FilePE {
 }
 
 /// PList Build Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListBuild {
     /// Machine OS
@@ -546,7 +548,7 @@ pub struct FilePListBuild {
 }
 
 /// PList CF Bundle Version Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListCFBundleVersion {
     /// Long Version
@@ -556,7 +558,7 @@ pub struct FilePListCFBundleVersion {
 }
 
 /// PList CF Bundle Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListCFBundle {
     /// Development Region
@@ -580,7 +582,7 @@ pub struct FilePListCFBundle {
 }
 
 /// PList DT Platform Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListDTPlatform {
     /// Build
@@ -592,7 +594,7 @@ pub struct FilePListDTPlatform {
 }
 
 /// PList DT Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListDT {
     /// Compiler
@@ -602,7 +604,7 @@ pub struct FilePListDT {
 }
 
 /// PList LS Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListLS {
     /// Background Only
@@ -612,7 +614,7 @@ pub struct FilePListLS {
 }
 
 /// PList NS Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListNS {
     /// Apple Script Enabled
@@ -622,7 +624,7 @@ pub struct FilePListNS {
 }
 
 /// PList UI Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListUI {
     /// Background Modes
@@ -632,7 +634,7 @@ pub struct FilePListUI {
 }
 
 /// PList WK Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePListWK {
     /// App Bundle ID
@@ -640,7 +642,7 @@ pub struct FilePListWK {
 }
 
 /// PList File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePList {
     /// Installer URL
@@ -666,7 +668,7 @@ pub struct FilePList {
 }
 
 /// PowerShell File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FilePowerShell {
     /// Cmdlet
@@ -674,7 +676,7 @@ pub struct FilePowerShell {
 }
 
 /// Shortcut File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileShortcut {
     /// Command Line
@@ -688,7 +690,7 @@ pub struct FileShortcut {
 }
 
 /// Strings File Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileStrings {
     /// API
@@ -702,7 +704,7 @@ pub struct FileStrings {
 }
 
 /// SWF Header Frame
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileSWFHeaderFrame {
     /// Number of Frames
@@ -714,7 +716,7 @@ pub struct FileSWFHeaderFrame {
 }
 
 /// SWF Header Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileSWFHeader {
     /// Header Frame Information
@@ -724,7 +726,7 @@ pub struct FileSWFHeader {
 }
 
 /// SWF File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct FileSWF {
     /// Header Information
@@ -734,7 +736,7 @@ pub struct FileSWF {
 }
 
 /// Network IOC Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct NetworkIOCs {
     /// Domain
@@ -750,7 +752,7 @@ pub struct NetworkIOCs {
 }
 
 /// Network Email Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct NetworkEmail {
     /// Email Address
@@ -764,7 +766,7 @@ pub struct NetworkEmail {
 }
 
 /// Network Signature Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct NetworkSignature {
     /// Signature ID
@@ -774,7 +776,7 @@ pub struct NetworkSignature {
 }
 
 /// Network TLS Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct NetworkTLS {
     /// JA3 Hash
@@ -786,7 +788,7 @@ pub struct NetworkTLS {
 }
 
 /// Network Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Network {
     /// Attack
@@ -813,7 +815,7 @@ pub struct Network {
 }
 
 /// Technique Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct Technique {
     /// Communication Routine
@@ -842,7 +844,7 @@ pub struct Technique {
 }
 
 /// File Tag Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 pub struct TaggingFile {
     /// File Genealogy
@@ -892,7 +894,7 @@ pub struct TaggingFile {
 }
 
 /// Tagging Model
-#[derive(Serialize, Deserialize, Debug, Default, Described)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(copyto="__text__")]
 pub struct Tagging {
@@ -917,3 +919,53 @@ pub struct Tagging {
     /// Vector Tagging
     pub vector: Option<Box<Vec<String>>>,
 }
+
+pub fn flatten(data: JsonMap, parent_key: Option<&str>) -> JsonMap {
+    let mut items = vec![];
+    for (k, v) in data {
+        let cur_key = match parent_key {
+            Some(parent_key) => format!("{parent_key}.{k}"),
+            None => k,
+        };
+
+        if let serde_json::Value::Object(obj) = v {
+            items.extend(flatten(obj, Some(&cur_key)).into_iter())
+        } else {
+            items.push((cur_key, v));
+        }
+    }
+
+    return items.into_iter().collect()
+}
+
+impl Tagging {
+
+    // pub fn to_dict(&self, safelisted: Option<bool>) -> HashMap<String, TagEntry> {
+
+    // }
+
+    pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
+        let safelisted = safelisted.unwrap_or(false);
+        let mut out = vec![];
+        
+        let tag_dict = if let serde_json::Value::Object(obj) = serde_json::to_value(&self)? {
+            flatten(obj, None)
+        } else {
+            return Err(serde_json::Error::custom("tags couldn't fold to json"));
+        };
+
+        for (k, v) in tag_dict {
+            if let serde_json::Value::Array(v) = v {
+                for t in v {
+                    out.push(TagEntry { 
+                        score: 0, 
+                        tag_type: k.clone(), 
+                        value: t.as_str().unwrap_or_default().to_string(), 
+                    }); // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+

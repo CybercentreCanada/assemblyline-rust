@@ -1,456 +1,562 @@
-import logging
-import time
-from unittest import mock
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 
-import json
-import pytest
+use anyhow::bail;
+use assemblyline_models::datastore::user::User;
+use assemblyline_models::datastore::{result, submission, Error, File, Service, Submission};
+use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
+use assemblyline_models::messages::task::{DataItem, ServiceResult, Task};
+use assemblyline_models::{ClassificationString, Sha256};
+use log::{debug, info};
+use poem::listener::Acceptor;
+use poem::EndpointExt;
+use rand::{thread_rng, Rng};
+use serde_json::json;
+use tokio::sync::{mpsc, oneshot};
 
-from assemblyline.common.forge import get_service_queue, get_classification
-from assemblyline.odm.models.error import Error
-from assemblyline.odm.models.file import File
-from assemblyline.odm.models.result import Result
-from assemblyline.odm.models.user import User
-from assemblyline.odm.randomizer import random_model_obj, random_minimal_obj, get_random_hash
-from assemblyline.odm import models
-from assemblyline.common.metrics import MetricsFactory
-
-from assemblyline_core.dispatching.client import DispatchClient, DISPATCH_RESULT_QUEUE
-from assemblyline_core.dispatching.dispatcher import Dispatcher, ServiceTask, Submission
-from assemblyline_core.dispatching.schedules import Scheduler as RealScheduler
-
-# noinspection PyUnresolvedReferences
-from assemblyline_core.dispatching.timeout import TimeoutTable
-from mocking import ToggleTrue
-from test_scheduler import dummy_service
+use crate::dispatcher::client::DispatchClient;
+use crate::dispatcher::{Dispatcher, SubmissionTask};
+use crate::services::test::{dummy_service, setup_services};
+use crate::{Core, TestGuard};
 
 
-logger = logging.getLogger('assemblyline.test')
+// import logging
+// import time
+// from unittest import mock
 
+// import json
+// import pytest
 
-class DRPScheduler(RealScheduler):
-    def __init__(self, *args, **kwargs):
-        pass
+// from assemblyline.common.forge import get_service_queue, get_classification
+// from assemblyline.odm.models.error import Error
+// from assemblyline.odm.models.file import File
+// from assemblyline.odm.models.result import Result
+// from assemblyline.odm.models.user import User
+// from assemblyline.odm.randomizer import random_model_obj, random_minimal_obj, get_random_hash
+// from assemblyline.odm import models
+// from assemblyline.common.metrics import MetricsFactory
 
-    def build_schedule(self, *args):
-        return [
-            {'extract': ''},
-            {'sandbox': ''},
-        ]
+// from assemblyline_core.dispatching.client import DispatchClient, DISPATCH_RESULT_QUEUE
+// from assemblyline_core.dispatching.dispatcher import Dispatcher, ServiceTask, Submission
+// from assemblyline_core.dispatching.schedules import Scheduler as RealScheduler
 
-    @property
-    def services(self):
-        return {
-            'extract': dummy_service('extract', 'pre', extra_data=True),
-            'sandbox': dummy_service('sandbox', 'core', 'Dynamic Analysis')
-        }
+// # noinspection PyUnresolvedReferences
+// from assemblyline_core.dispatching.timeout import TimeoutTable
+// from mocking import ToggleTrue
+// from test_scheduler import dummy_service
 
+fn test_services() -> HashMap<String, Service> {
+    let mut sandbox = dummy_service("sandbox", "core", Some("Dynamic Analysis"), None, Some("unknown"), Some(true));
+    sandbox.recursion_prevention.push("Dynamic Analysis".to_string());
+    return [
+        ("extract", dummy_service("extract", "pre", None, None, None, Some(true))),
+        ("sandbox", sandbox),
+        ("wrench", dummy_service("wrench", "pre", None, None, None, None)),
+        ("av-a", dummy_service("av-a", "core", None, None, None, None)),
+        ("av-b", dummy_service("av-b", "core", None, None, None, None)),
+        ("frankenstrings", dummy_service("frankenstrings", "core", None, None, None, None)),
+        ("xerox", dummy_service("xerox", "post", None, None, None, None)),
+    ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
+}
 
-class Scheduler(RealScheduler):
-    def __init__(self, *args, **kwargs):
-        pass
+pub async fn setup() -> (Core, TestGuard) {
+    setup_services(test_services()).await
+}
 
-    def build_schedule(self, *args):
-        return [
-            {'extract': '', 'wrench': ''},
-            {'av-a': '', 'av-b': '', 'frankenstrings': ''},
-            {'xerox': ''}
-        ]
+fn make_result(file_hash: Sha256, service: String) -> result::Result {
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = file_hash;
+    new_result.response.service_name = service;
+    new_result
+}
 
-    @property
-    def services(self):
-        return {
-            'extract': dummy_service('extract', 'pre', extra_data=True),
-            'wrench': dummy_service('wrench', 'pre'),
-            'av-a': dummy_service('av-a', 'core'),
-            'av-b': dummy_service('av-b', 'core'),
-            'frankenstrings': dummy_service('frankenstrings', 'core'),
-            'xerox': dummy_service('xerox', 'post'),
-        }
-
-
-def make_result(file_hash, service):
-    new_result: Result = random_minimal_obj(Result)
-    new_result.sha256 = file_hash
-    new_result.response.service_name = service
-    return new_result
-
-
-def make_error(file_hash, service, recoverable=True):
-    new_error: Error = random_model_obj(Error)
-    new_error.response.service_name = service
-    new_error.sha256 = file_hash
-    if recoverable:
-        new_error.response.status = 'FAIL_RECOVERABLE'
-    else:
-        new_error.response.status = 'FAIL_NONRECOVERABLE'
+// recoverable=true
+fn make_error(file_hash: Sha256, service: &str, recoverable: bool) -> Error {
+    use assemblyline_models::datastore::error::Status;
+    let mut new_error: Error = thread_rng().gen();
+    new_error.response.service_name = service.to_string();
+    new_error.sha256 = file_hash;
+    if recoverable {
+        new_error.response.status = Status::FailRecoverable;
+    } else {
+        new_error.response.status = Status::FailNonrecoverable;
+    }
     return new_error
-
-
-def wait_result(task, file_hash, service):
-    for _ in range(10):
-        if (file_hash, service) in task.service_results:
-            return True
-        time.sleep(0.05)
-
-
-def wait_error(task, file_hash, service):
-    for _ in range(10):
-        if (file_hash, service) in task.service_errors:
-            return True
-        time.sleep(0.05)
-
-
-@pytest.fixture(autouse=True)
-def log_config(caplog):
-    caplog.set_level(logging.INFO, logger='assemblyline')
-    from assemblyline.common import log as al_log
-    al_log.init_logging = lambda *args: None
-
-
-@mock.patch('assemblyline_core.dispatching.dispatcher.Scheduler', Scheduler)
-@mock.patch('assemblyline_core.dispatching.dispatcher.MetricsFactory', new=mock.MagicMock(spec=MetricsFactory))
-def test_simple(clean_redis, clean_datastore):
-    ds = clean_datastore
-    redis = clean_redis
-
-    def service_queue(name): return get_service_queue(name, redis)
-
-    file: File = random_model_obj(File)
-    file_hash = file.sha256
-    file.type = 'unknown'
-    ds.file.save(file_hash, file)
-
-    user: User = random_model_obj(User)
-    ds.user.save(user.uname, user)
-
-    sub: Submission = random_model_obj(Submission)
-    sub.sid = sid = 'first-submission'
-    sub.params.ignore_cache = False
-    sub.params.max_extracted = 5
-    sub.to_be_deleted = False
-    sub.params.classification = get_classification().UNRESTRICTED
-    sub.params.initial_data = json.dumps({'cats': 'big'})
-    sub.params.submitter = user.uname
-    sub.files = [dict(sha256=file_hash, name='file')]
-
-    disp = Dispatcher(ds, redis, redis)
-    disp.running = ToggleTrue()
-    client = DispatchClient(ds, redis, redis)
-    client.dispatcher_data_age = time.time()
-    client.dispatcher_data.append(disp.instance_id)
-
-    # Submit a problem, and check that it gets added to the dispatch hash
-    # and the right service queues
-    logger.info('==== first dispatch')
-    # task = SubmissionTask(sub.as_primitives(), 'some-completion-queue')
-    client.dispatch_submission(sub)
-    disp.pull_submissions()
-    disp.service_worker(disp.process_queue_index(sid))
-    task = disp.tasks.get(sid)
-
-    assert task.queue_keys[(file_hash, 'extract')] is not None
-    assert task.queue_keys[(file_hash, 'wrench')] is not None
-    assert service_queue('extract').length() == 1
-    assert service_queue('wrench').length() == 1
-
-    # Making the same call again will queue it up again
-    logger.info('==== second dispatch')
-    disp.dispatch_file(task, file_hash)
-
-    assert task.queue_keys[(file_hash, 'extract')] is not None
-    assert task.queue_keys[(file_hash, 'wrench')] is not None
-    assert service_queue('extract').length() == 1  # the queue doesn't pile up
-    assert service_queue('wrench').length() == 1
-
-    logger.info('==== third dispatch')
-    job = client.request_work('0', 'extract', '0')
-    assert job.temporary_submission_data == [
-        {'name': 'cats', 'value': 'big'},
-        {"name": "ancestry", "value": [[{"type": "unknown", "parent_relation": "ROOT", "sha256": file.sha256}]]}
-    ]
-    client.service_failed(sid, 'abc123', make_error(file_hash, 'extract'))
-    # Deliberately do in the wrong order to make sure that works
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-
-    assert task.queue_keys[(file_hash, 'extract')] is not None
-    assert task.queue_keys[(file_hash, 'wrench')] is not None
-    assert service_queue('extract').length() == 1
-
-    # Mark extract as finished, wrench as failed
-    logger.info('==== fourth dispatch')
-    client.request_work('0', 'extract', '0')
-    client.request_work('0', 'wrench', '0')
-    client.service_finished(sid, 'extract-result', make_result(file_hash, 'extract'))
-    client.service_failed(sid, 'wrench-error', make_error(file_hash, 'wrench', False))
-    for _ in range(2):
-        disp.pull_service_results()
-        disp.service_worker(disp.process_queue_index(sid))
-
-    assert wait_error(task, file_hash, 'wrench')
-    assert wait_result(task, file_hash, 'extract')
-    assert service_queue('av-a').length() == 1
-    assert service_queue('av-b').length() == 1
-    assert service_queue('frankenstrings').length() == 1
-
-    # Have the AVs fail, frankenstrings finishes
-    logger.info('==== fifth dispatch')
-    client.request_work('0', 'av-a', '0')
-    client.request_work('0', 'av-b', '0')
-    client.request_work('0', 'frankenstrings', '0')
-    client.service_failed(sid, 'av-a-error', make_error(file_hash, 'av-a', False))
-    client.service_failed(sid, 'av-b-error', make_error(file_hash, 'av-b', False))
-    client.service_finished(sid, 'f-result', make_result(file_hash, 'frankenstrings'))
-    for _ in range(3):
-        disp.pull_service_results()
-        disp.service_worker(disp.process_queue_index(sid))
-
-    assert wait_result(task, file_hash, 'frankenstrings')
-    assert wait_error(task, file_hash, 'av-a')
-    assert wait_error(task, file_hash, 'av-b')
-    assert service_queue('xerox').length() == 1
-
-    # Finish the xerox service and check if the submission completion got checked
-    logger.info('==== sixth dispatch')
-    client.request_work('0', 'xerox', '0')
-    client.service_finished(sid, 'xerox-result-key', make_result(file_hash, 'xerox'))
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-    disp.save_submission()
-
-    assert wait_result(task, file_hash, 'xerox')
-    assert disp.tasks.get(sid) is None
-
-
-@mock.patch('assemblyline_core.dispatching.dispatcher.MetricsFactory', mock.MagicMock())
-@mock.patch('assemblyline_core.dispatching.dispatcher.Scheduler', Scheduler)
-def test_dispatch_extracted(clean_redis, clean_datastore):
-    redis = clean_redis
-    ds = clean_datastore
-
-    # def service_queue(name): return get_service_queue(name, redis)
-
-    # Setup the fake datastore
-    file_hash = get_random_hash(64)
-    second_file_hash = get_random_hash(64)
-    user: User = random_model_obj(User)
-    ds.user.save(user.uname, user)
-
-    for fh in [file_hash, second_file_hash]:
-        obj = random_model_obj(models.file.File)
-        obj.sha256 = fh
-        ds.file.save(fh, obj)
-
-    # Inject the fake submission
-    submission = random_model_obj(Submission)
-    submission.to_be_deleted = False
-    submission.files = [dict(name='./file', sha256=file_hash)]
-    submission.params.submitter = user.uname
-    sid = submission.sid = 'first-submission'
-
-    disp = Dispatcher(ds, redis, redis)
-    disp.running = ToggleTrue()
-    client = DispatchClient(ds, redis, redis)
-    client.dispatcher_data_age = time.time()
-    client.dispatcher_data.append(disp.instance_id)
-
-    # Launch the submission
-    client.dispatch_submission(submission)
-    disp.pull_submissions()
-    disp.service_worker(disp.process_queue_index(sid))
-
-    # Finish one service extracting a file
-    job = client.request_work('0', 'extract', '0')
-    assert job.fileinfo.sha256 == file_hash
-    assert job.filename == './file'
-    new_result: Result = random_minimal_obj(Result)
-    new_result.sha256 = file_hash
-    new_result.response.service_name = 'extract'
-    new_result.response.extracted = [dict(sha256=second_file_hash, name='second-*',
-                                          description='abc', classification='U')]
-    client.service_finished(sid, 'extracted-done', new_result)
-
-    # process the result
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-    disp.service_worker(disp.process_queue_index(sid))
-
-    #
-    job = client.request_work('0', 'extract', '0')
-    assert job.fileinfo.sha256 == second_file_hash
-    assert job.filename == 'second-*'
-
-
-@mock.patch('assemblyline_core.dispatching.dispatcher.MetricsFactory', mock.MagicMock())
-@mock.patch('assemblyline_core.dispatching.dispatcher.Scheduler', DRPScheduler)
-def test_dispatch_extracted_bypass_drp(clean_redis, clean_datastore):
-    # Dynamic Recursion Prevention is to prevent services belonging to the 'Dynamic Analysis'
-    # from analyzing the children of files they've analyzed.
-
-    # The bypass should allow services to specify files to run through Dynamic Analysis regardless of the
-    # Dynamic Recursion Prevention parameter.
-
-    redis = clean_redis
-    ds = clean_datastore
-
-    # def service_queue(name): return get_service_queue(name, redis)
-
-    # Setup the fake datastore
-    file_hash = get_random_hash(64)
-    second_file_hash = get_random_hash(64)
-
-    user: User = random_model_obj(User)
-    ds.user.save(user.uname, user)
-
-    for fh in [file_hash, second_file_hash]:
-        obj = random_model_obj(models.file.File)
-        obj.sha256 = fh
-        ds.file.save(fh, obj)
-
-    # Inject the fake submission
-    submission = random_model_obj(Submission)
-    submission.to_be_deleted = False
-
-    # the following 1 line can be removed after assemblyline upgrade to version 4.6+
-    submission.params.ignore_dynamic_recursion_prevention = False
-    submission.params.ignore_recursion_prevention = False
-    submission.params.services.selected = ['extract', 'sandbox']
-    submission.files = [dict(name='./file', sha256=file_hash)]
-    sid = submission.sid = 'first-submission'
-
-    disp = Dispatcher(ds, redis, redis)
-    disp.running = ToggleTrue()
-    client = DispatchClient(ds, redis, redis)
-    client.dispatcher_data_age = time.time()
-    client.dispatcher_data.append(disp.instance_id)
-
-    # Launch the submission
-    client.dispatch_submission(submission)
-    disp.pull_submissions()
-    disp.service_worker(disp.process_queue_index(sid))
-
-    # 'extract' service extracts a file and yields a result
-    job = client.request_work('0', 'extract', '0')
-    assert job.fileinfo.sha256 == file_hash
-    assert job.filename == './file'
-    new_result: Result = random_minimal_obj(Result)
-    new_result.sha256 = file_hash
-    new_result.response.service_name = 'extract'
-    # This extracted file should be able to bypass Dynamic Recursion Prevention
-    new_result.response.extracted = [dict(sha256=second_file_hash, name='second-*',
-                                          description='abc', classification='U', allow_dynamic_recursion=True)]
-    client.service_finished(sid, 'extract-done', new_result)
-
-    # process the result
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-    disp.service_worker(disp.process_queue_index(sid))
-
-    # Then 'sandbox' service will analyze the same file, give result
-    job = client.request_work('0', 'sandbox', '0')
-    assert job.fileinfo.sha256 == file_hash
-    assert job.filename == './file'
-    new_result: Result = random_minimal_obj(Result)
-    new_result.sha256 = file_hash
-    new_result.response.service_name = 'sandbox'
-    client.service_finished(sid, 'sandbox-done', new_result)
-
-    # process the result
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-    disp.service_worker(disp.process_queue_index(sid))
-
-    # 'extract' service should have a task for the extracted file, give results to move onto next stage
-    job = client.request_work('0', 'extract', '0')
-    assert job.fileinfo.sha256 == second_file_hash
-    assert job.filename == 'second-*'
-    new_result: Result = random_minimal_obj(Result)
-    new_result.sha256 = second_file_hash
-    new_result.response.service_name = 'extract'
-    client.service_finished(sid, 'extract-done', new_result)
-
-    # process the result
-    disp.pull_service_results()
-    disp.service_worker(disp.process_queue_index(sid))
-    disp.service_worker(disp.process_queue_index(sid))
-
-    # 'sandbox' should have a task for the extracted file
-    # disp.dispatch_file(disp.tasks.get(sid), second_file_hash)
-    job = client.request_work('0', 'sandbox', '0')
-    assert job.fileinfo.sha256 == second_file_hash
-    assert job.filename == 'second-*'
-
-
-mock_time = mock.Mock()
-mock_time.return_value = 0
-
-
-@mock.patch('time.time', mock_time)
-def test_timeout():
-    table = TimeoutTable()
-    table.set('first', 5, 1)
-    table.set('second', 10, 2)
-    table.set('third', 15, 3)
-    table.set('fourth', 20, 4)
-
-    # Expire one thing
-    mock_time.return_value = 6
-    items = table.timeouts()
-    assert len(items) == 1
-    assert items['first'] == 1
-
-    # Replace the data and expiry
-    table.set('second', 20, 5)  # second now expires at 26
-
-    # Expire two things
-    mock_time.return_value = 21
-    items = table.timeouts()
-    assert len(items) == 2
-    assert items['third'] == 3
-    assert items['fourth'] == 4
-
-    # Expire nothing
-    assert len(table.timeouts()) == 0
-
-    # Expire the final thing
-    mock_time.return_value = 30
-    items = table.timeouts()
-    assert len(items) == 1
-    assert items['second'] == 5
-
-    # Expire nothing
-    assert len(table.timeouts()) == 0
-
-
-def test_prevent_result_overwrite(clean_redis, clean_datastore):
-    client = DispatchClient(clean_datastore, clean_redis, clean_redis)
-    dispatcher_name = "test"
-    result_queue = client._get_queue_from_cache(DISPATCH_RESULT_QUEUE + dispatcher_name)
-
-    # Create a task and add it to set of running tasks
-    task = random_model_obj(ServiceTask)
-    task.metadata['dispatcher__'] = dispatcher_name
-
-    # Create a result that's not "empty"
-    result = random_model_obj(Result)
-    result.response.service_name = task.service_name
-    result.sha256 = task.fileinfo.sha256
-    result.result.score = 1
-    result_key = result.build_key()
-
-    # Submit result to be saved
-    client.running_tasks.add(task.key(), task.as_primitives())
-    client.service_finished(task.sid, result_key, result)
-
-    # Pop result from queue, we expect to get the same result key as earlier
-    message = result_queue.pop(blocking=False)
-    msg_result_key = message['result_summary']['key']
-    assert msg_result_key == result_key
-
-    # Save the same result again but we expect to be saved under another key
-    client.running_tasks.add(task.key(), task.as_primitives())
-    client.service_finished(task.sid, result_key, result)
-    message = result_queue.pop(blocking=False)
-    msg_result_key = message['result_summary']['key']
-
-    assert msg_result_key != result_key
+}
+
+// def wait_result(task, file_hash, service):
+//     for _ in range(10):
+//         if (file_hash, service) in task.service_results:
+//             return True
+//         time.sleep(0.05)
+
+
+// def wait_error(task, file_hash, service):
+//     for _ in range(10):
+//         if (file_hash, service) in task.service_errors:
+//             return True
+//         time.sleep(0.05)
+
+
+// @pytest.fixture(autouse=True)
+// def log_config(caplog):
+//     caplog.set_level(logging.INFO, logger='assemblyline')
+//     from assemblyline.common import log as al_log
+//     al_log.init_logging = lambda *args: None
+
+async fn start_test_dispatcher(core: Core) -> anyhow::Result<Arc<Dispatcher>> {
+    // Bind the HTTP interface
+    let bind_address: SocketAddr = "0.0.0.0:0".parse()?;
+    let tls_config = crate::config::TLSConfig::load().await?;
+    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
+    
+    // Initialize Internal state
+    let dispatcher = Dispatcher::new(core, tcp).await?;
+
+    // launch components that we need running in test
+    tokio::spawn({ let dispatcher = dispatcher.clone(); async move { dispatcher.work_guard().await }} );
+    Ok(dispatcher)
+}
+
+#[tokio::test]
+async fn test_simple() {
+    let (core, _guard) = setup().await;
+    debug!("Core setup");
+
+    // create a test file to dispatch
+    let mut file: File = rand::thread_rng().gen();
+    let file_hash = file.sha256.clone();
+    file.file_type = "unknown".to_string();
+    core.datastore.file.save(&file_hash, &file, None, None).await.unwrap();
+    debug!("File created");
+
+    // create a user who will submit the file
+    let user: User = Default::default();
+    core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
+    debug!("User created");
+
+    // create the submission to dispatch
+    let mut sub: Submission = rand::thread_rng().gen();
+    let sid = sub.sid;
+    sub.params.ignore_cache = false;
+    sub.params.max_extracted = 5;
+    sub.to_be_deleted = false;
+    sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
+    sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
+    sub.params.submitter = user.uname.clone();
+    sub.files = vec![submission::File{ sha256: file_hash.clone(), name: "file".to_string(), size: None }];
+
+    // start up dispatcher
+    let disp = start_test_dispatcher(core.clone()).await.unwrap();
+    let client = DispatchClient::new_from_core(&core).await.unwrap();
+    // client.add_dispatcher(disp.instance_id.clone());
+    debug!("Dispatcher ready");
+
+    // Submit a problem, and check that it gets added to the dispatch hash
+    // and the right service queues
+    info!("==== first dispatch");
+    let task = SubmissionDispatchMessage {
+        submission: sub.clone(),
+        completed_queue: Some("some-completion-queue".to_string()),
+    };
+    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+    // client.dispatch_bundle(&task).await.unwrap();
+    // disp.pull_submissions();
+    let task = disp.get_test_report(sid).await.unwrap();
+
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
+    assert_eq!(core.get_service_queue("wrench").length().await.unwrap(), 1);
+
+    // Making the same call again will queue it up again
+    info!("==== second dispatch");
+    disp.send_dispatch_action(crate::dispatcher::DispatchAction::DispatchFile(sid, file_hash.clone())).await;
+    let task = disp.get_test_report(sid).await.unwrap();
+
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    // note that the queue doesn't pile up
+    assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
+    assert_eq!(core.get_service_queue("wrench").length().await.unwrap(), 1);
+
+    info!("==== third dispatch");
+    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    assert_eq!(job.temporary_submission_data, &[
+        DataItem{ name: "cats".to_string(), value: json!("big") },
+        DataItem{ name: "ancestry".to_string(), value: json!([[{"type": "unknown", "parent_relation": "ROOT", "sha256": file.sha256}]]) }
+    ]);
+    let service_task = task.queue_keys.get(&(file_hash.clone(), "extract".to_string())).unwrap().0.clone();
+    client.service_failed(service_task, "abc123", make_error(file_hash.clone(), "extract", true)).await.unwrap();
+    
+    let task = disp.get_test_report(sid).await.unwrap();
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
+
+    // Mark extract as finished, wrench as failed
+    info!("==== fourth dispatch");
+    let task_extract = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let task_wrench = client.request_work("0", "wrench", "0", None, true, None).await.unwrap().unwrap();
+    client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".to_owned()), None, None).await.unwrap();
+    client.service_failed(task_wrench, "wrench-error", make_error(file_hash.clone(), "wrench", false)).await.unwrap();
+    
+    let task = disp.get_test_report(sid).await.unwrap();
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "wrench".to_string())));
+    assert!(task.service_results.contains_key(&(file_hash.clone(), "extract".to_string())));
+    assert_eq!(core.get_service_queue("av-a").length().await.unwrap(), 1);
+    assert_eq!(core.get_service_queue("av-b").length().await.unwrap(), 1);
+    assert_eq!(core.get_service_queue("frankenstrings").length().await.unwrap(), 1);
+
+    // Have the AVs fail, frankenstrings finishes
+    info!("==== fifth dispatch");
+    let task_av_a = client.request_work("0", "av-a", "0", None, true, None).await.unwrap().unwrap();
+    let task_av_b = client.request_work("0", "av-b", "0", None, true, None).await.unwrap().unwrap();
+    let task_frankenstrings = client.request_work("0", "frankenstrings", "0", None, true, None).await.unwrap().unwrap();
+    client.service_failed(task_av_a, "av-a-error", make_error(file_hash.clone(), "av-a", false)).await.unwrap();
+    client.service_failed(task_av_b, "av-b-error", make_error(file_hash.clone(), "av-b", false)).await.unwrap();
+    client.service_finished(task_frankenstrings, "f-result".to_owned(), make_result(file_hash.clone(), "frankenstrings".to_owned()), None, None).await.unwrap();
+
+    let task = disp.get_test_report(sid).await.unwrap();
+    assert!(task.service_results.contains_key(&(file_hash.clone(), "frankenstrings".to_owned())));
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-a".to_owned())));
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-b".to_owned())));
+    assert_eq!(core.get_service_queue("xerox").length().await.unwrap(), 1);
+
+    // Finish the xerox service and check if the submission completion got checked
+    info!("==== sixth dispatch");
+    let task_xerox = client.request_work("0", "xerox", "0", None, true, None).await.unwrap().unwrap();
+    client.service_finished(task_xerox, "xerox-result-key".to_owned(), make_result(file_hash, "xerox".to_owned()), None, None).await.unwrap();
+    // disp.pull_service_results()
+    // disp.service_worker(disp.process_queue_index(sid))
+    // disp.save_submission()
+
+    // assert!(wait_result(task, file_hash, "xerox"));
+    assert!(disp.get_test_report(sid).await.is_err());
+}
+
+#[tokio::test]
+async fn test_dispatch_extracted() {
+    let (core, _guard) = setup().await;
+    debug!("Core setup");
+
+    // create a test file to dispatch
+    let mut file_one: File = rand::thread_rng().gen();
+    let mut file_two: File = rand::thread_rng().gen();
+    for file in [&mut file_one, &mut file_two] {
+        let file_hash = file.sha256.clone();
+        file.file_type = "exe".to_string();
+        core.datastore.file.save(&file_hash, file, None, None).await.unwrap();
+    }
+    let file_hash = file_one.sha256.clone();
+    let second_file_hash = file_two.sha256.clone();
+    debug!("File created");
+
+    // create a user who will submit the file
+    let user: User = Default::default();
+    core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
+    debug!("User created");
+
+    // create the submission to dispatch
+    let mut sub: Submission = rand::thread_rng().gen();
+    // let sid = sub.sid;
+    sub.params.ignore_cache = false;
+    sub.params.max_extracted = 5;
+    sub.params.ignore_recursion_prevention = false;
+    sub.to_be_deleted = false;
+    sub.params.services.selected = vec!["extract".to_string(), "sandbox".to_string()];
+    sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
+    // sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
+    sub.params.submitter = user.uname.clone();
+    sub.files = vec![submission::File{ sha256: file_hash.clone(), name: "./file".to_string(), size: None }];
+
+    // start up dispatcher
+    let disp = start_test_dispatcher(core.clone()).await.unwrap();
+    let client = DispatchClient::new_from_core(&core).await.unwrap();
+    // client.add_dispatcher(disp.instance_id.clone());
+    debug!("Dispatcher ready");
+
+    // Launch the submission
+    let task = SubmissionDispatchMessage {
+        submission: sub.clone(),
+        completed_queue: Some("some-completion-queue".to_string()),
+    };
+    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+
+    // Finish one service extracting a file
+    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "./file");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = file_hash.clone();
+    new_result.response.service_name = "extract".to_string();
+    new_result.response.extracted = vec![result::File{
+        sha256: second_file_hash.clone(), 
+        name: "second-*".to_owned(),
+        description: "abc".to_owned(), 
+        classification: ClassificationString::unrestricted(&core.classification_parser),
+        allow_dynamic_recursion: false,
+        is_section_image: false,
+        parent_relation: "EXTRACTED".to_owned(),
+    }];
+    client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();
+
+    // see that the job has reached 
+    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "./file");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = file_hash;
+    new_result.response.service_name = "sandbox".to_string();
+    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
+
+    // 
+    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, second_file_hash);
+    assert_eq!(job.filename, "second-*");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = second_file_hash;
+    new_result.response.service_name = "extract".to_string();
+    client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None).await.unwrap();
+
+    // see that the job doesn't reach sandbox
+    assert!(client.request_work("0", "sandbox", "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
+}
+
+/// Dynamic Recursion Prevention is to prevent services belonging to the 'Dynamic Analysis'
+/// from analyzing the children of files they've analyzed.
+///
+/// The bypass should allow services to specify files to run through Dynamic Analysis regardless of the
+/// Dynamic Recursion Prevention parameter.
+#[tokio::test]
+async fn test_dispatch_extracted_bypass_drp()  {
+    let (core, _guard) = setup().await;
+    debug!("Core setup");
+
+    // create a test file to dispatch
+    let mut file_one: File = rand::thread_rng().gen();
+    let mut file_two: File = rand::thread_rng().gen();
+    for file in [&mut file_one, &mut file_two] {
+        let file_hash = file.sha256.clone();
+        file.file_type = "exe".to_string();
+        core.datastore.file.save(&file_hash, file, None, None).await.unwrap();
+    }
+    let file_hash = file_one.sha256.clone();
+    let second_file_hash = file_two.sha256.clone();
+    debug!("File created");
+
+    // create a user who will submit the file
+    let user: User = Default::default();
+    core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
+    debug!("User created");
+
+    // create the submission to dispatch
+    let mut sub: Submission = rand::thread_rng().gen();
+    // let sid = sub.sid;
+    sub.params.ignore_cache = false;
+    sub.params.ignore_recursion_prevention = true;
+    sub.params.services.selected = vec!["extract".to_string(), "sandbox".to_string()];
+    sub.params.max_extracted = 5;
+    sub.to_be_deleted = false;
+    sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
+    // sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
+    sub.params.submitter = user.uname.clone();
+    sub.files = vec![submission::File{ sha256: file_hash.clone(), name: "./file".to_string(), size: None }];
+
+
+    // start up dispatcher
+    let disp = start_test_dispatcher(core.clone()).await.unwrap();
+    let client = DispatchClient::new_from_core(&core).await.unwrap();
+    // client.add_dispatcher(disp.instance_id.clone());
+    debug!("Dispatcher ready");
+
+    // Launch the submission
+    let task = SubmissionDispatchMessage {
+        submission: sub.clone(),
+        completed_queue: Some("some-completion-queue".to_string()),
+    };
+    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+
+    // Finish one service extracting a file
+    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "./file");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = file_hash.clone();
+    new_result.response.service_name = "extract".to_string();
+    // This extracted file should be able to bypass Dynamic Recursion Prevention
+    new_result.response.extracted = vec![result::File{
+        sha256: second_file_hash.clone(), 
+        name: "second-*".to_owned(),
+        description: "abc".to_owned(), 
+        classification: ClassificationString::unrestricted(&core.classification_parser),
+        allow_dynamic_recursion: true,
+        is_section_image: false,
+        parent_relation: "EXTRACTED".to_owned(),
+    }];
+    client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();  
+
+    // Then 'sandbox' service will analyze the same file, give result
+    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "./file");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = file_hash;
+    new_result.response.service_name = "sandbox".to_string();
+    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
+
+    // "extract" service should have a task for the extracted file, give results to move onto next stage
+    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, second_file_hash);
+    assert_eq!(job.filename, "second-*");
+    let mut new_result: result::Result = thread_rng().gen();
+    new_result.sha256 = second_file_hash.clone();
+    new_result.response.service_name = "extract".to_string();
+    client.service_finished(job, "extract-done".to_string(), new_result, None, None).await.unwrap();
+
+    // "sandbox" should have a task for the extracted file
+    // disp.dispatch_file(disp.tasks.get(sid), second_file_hash)
+    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, second_file_hash);
+    assert_eq!(job.filename, "second-*");
+}
+
+
+// mock_time = mock.Mock()
+// mock_time.return_value = 0
+
+
+// @mock.patch('time.time', mock_time)
+#[tokio::test]
+async fn test_timeout() {
+    let (core, _guard) = setup().await;
+    debug!("Core setup");
+
+    // create a test file to dispatch
+    let mut file: File = rand::thread_rng().gen();
+    let file_hash = file.sha256.clone();
+    file.file_type = "unknown".to_string();
+    core.datastore.file.save(&file_hash, &file, None, None).await.unwrap();
+    debug!("File created");
+
+    // create a user who will submit the file
+    let user: User = Default::default();
+    core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
+    debug!("User created");
+
+    // create the submission to dispatch
+    let mut sub: Submission = rand::thread_rng().gen();
+    let sid = sub.sid;
+    sub.params.ignore_cache = false;
+    sub.params.max_extracted = 5;
+    sub.to_be_deleted = false;
+    sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
+    sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
+    sub.params.submitter = user.uname.clone();
+    sub.files = vec![submission::File{ sha256: file_hash.clone(), name: "file".to_string(), size: None }];
+
+    // start up dispatcher
+    let disp = start_test_dispatcher(core.clone()).await.unwrap();
+    let client = DispatchClient::new_from_core(&core).await.unwrap();
+    // client.add_dispatcher(disp.instance_id.clone());
+    debug!("Dispatcher ready");
+
+    // Submit a problem, and check that it gets added to the dispatch hash
+    // and the right service queues
+    let task = SubmissionDispatchMessage {
+        submission: sub.clone(),
+        completed_queue: Some("some-completion-queue".to_string()),
+    };
+    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+
+    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "file");
+
+    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "file");
+
+    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    assert_eq!(job.fileinfo.sha256, file_hash);
+    assert_eq!(job.filename, "file");
+
+    let key = (file_hash, "extract".to_string());
+    for _ in 0..10 {
+        let task = disp.get_test_report(sid).await.unwrap();
+        if task.service_errors.contains_key(&key) {
+            return
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    panic!();    
+}
+
+#[poem::handler]
+async fn handle_task_result(poem::web::Json(request): poem::web::Json<ServiceResult>, channel: poem::web::Data<&mpsc::Sender<ServiceResult>>) {
+    channel.send(request).await.unwrap();
+}
+
+pub async fn fake_dispatcher(port: oneshot::Sender<u16>, channel: mpsc::Sender<ServiceResult>) {
+    let app = poem::Route::new()
+    // .at("/alive", poem::get(get_status))
+    // .at("/start", poem::post(start_task))
+    // .at("/error", poem::post(handle_task_error))
+    .at("/result", poem::post(handle_task_result))
+    .data(channel);
+
+    let tcp = crate::http::create_tls_binding("0.0.0.0:0".parse().unwrap(), None).await.unwrap();
+    port.send(tcp.local_addr()[0].as_socket_addr().unwrap().port()).unwrap();
+
+    let result = poem::Server::new_with_acceptor(tcp)
+        .run(app)
+        .await;
+    if let Err(err) = result {
+        panic!("http interface failed: {err}");
+    }
+}
+
+
+
+#[tokio::test]
+async fn test_prevent_result_overwrite() {
+    let (core, _guard) = setup().await;
+    let client = DispatchClient::new_from_core(&core).await.unwrap();
+    let dispatcher_name = "test";
+
+    let mut pool = tokio::task::JoinSet::new();
+    let (send_port, recv_port) = oneshot::channel();
+    let (send_data, mut result_queue) = mpsc::channel(6);
+    pool.spawn(fake_dispatcher(send_port, send_data));
+    let port = recv_port.await.unwrap();
+    // result_queue = client._get_queue_from_cache(DISPATCH_RESULT_QUEUE + dispatcher_name)
+
+    // Create a task and add it to set of running tasks
+    let mut task: Task = thread_rng().gen();
+    task.dispatcher = dispatcher_name.to_owned();
+    task.dispatcher_address = format!("localhost:{port}");
+
+    // Create a result that's not "empty"
+    let mut result: result::Result = thread_rng().gen();
+    result.response.service_name = task.service_name.clone();
+    result.sha256 = task.fileinfo.sha256.clone();
+    result.result.score = 1;
+    let result_key = result.build_key(None).unwrap();
+
+    // Submit result to be saved
+    // client.running_tasks.add(task.key(), task.as_primitives())
+    client.service_finished(task.clone(), result_key.clone(), result.clone(), None, None).await.unwrap();
+
+    // Pop result from queue, we expect to get the same result key as earlier
+    let message = result_queue.recv().await.unwrap();
+    assert_eq!(message.result_summary.key, result_key);
+
+    // Save the same result again but we expect to be saved under another key
+    // client.running_tasks.add(task.key(), task.as_primitives())
+    client.service_finished(task, result_key.clone(), result, None, None).await.unwrap();
+    let message = result_queue.recv().await.unwrap();
+    assert_ne!(message.result_summary.key, result_key);
+
+}

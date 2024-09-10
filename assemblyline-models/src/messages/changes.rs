@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, strum::FromRepr, strum::EnumIs, PartialEq, Eq, Deserialize, Clone, Copy)]
+#[derive(Debug, strum::FromRepr, strum::EnumIs, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum Operation {
     Added = 1,
@@ -19,6 +19,14 @@ impl Serialize for Operation {
     }
 }
 
+impl<'de> Deserialize<'de> for Operation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+        let value = u8::deserialize(deserializer)?;
+        Self::from_repr(value).ok_or(serde::de::Error::custom("could not read service change operation"))
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServiceChange {

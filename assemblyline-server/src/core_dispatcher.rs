@@ -17,8 +17,12 @@ pub const DISPATCH_TASK_ASSIGNMENT: &str = "dispatcher-tasks-assigned-to-";
 
 impl Core {
 
+    pub fn dispatcher_instances_table(&self) -> redis_objects::Hashmap<i64> {
+        self.redis_persistant.hashmap::<i64>(DISPATCH_DIRECTORY.to_owned(), None)
+    }
+
     pub async fn dispatcher_instances(&self) -> Result<Vec<String>, redis_objects::ErrorTypes> {
-        self.redis_persistant.hashmap::<i64>(DISPATCH_DIRECTORY.to_owned(), None).keys().await
+        self.dispatcher_instances_table().keys().await
     }
 
     pub async fn dispatcher_assignment_size(&self, instance_id: &str) -> Result<u64, redis_objects::ErrorTypes> {

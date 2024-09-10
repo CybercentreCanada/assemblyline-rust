@@ -40,6 +40,7 @@ return nil
 
 
 /// Hashmap opened by `RedisObjects::hashmap`
+#[derive(Clone)]
 pub struct Hashmap<T> {
     name: String,
     store: Arc<RedisObjects>,
@@ -47,7 +48,7 @@ pub struct Hashmap<T> {
 //     self._limited_add = self.c.register_script(_limited_add)
     conditional_remove_script: redis::Script,
     ttl: Option<Duration>,
-    last_expire_time: Mutex<Option<std::time::Instant>>,
+    last_expire_time: Arc<Mutex<Option<std::time::Instant>>>,
     _data: PhantomData<T>
 }
 
@@ -60,7 +61,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     //     self._limited_add = self.c.register_script(_limited_add)
             conditional_remove_script: redis::Script::new(CONDITIONAL_REMOVE_SCRIPT),
             ttl,
-            last_expire_time: Mutex::new(None),
+            last_expire_time: Arc::new(Mutex::new(None)),
             _data: PhantomData,
         }
     }
@@ -165,6 +166,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
         Ok(out)
     }
 
+    /// Remove an item, but only if its value is as given
     pub async fn conditional_remove(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(value)?;
         retry_call!(method, self.store.pool, self.conditional_remove_script.key(&self.name).arg(key).arg(&data), invoke_async)

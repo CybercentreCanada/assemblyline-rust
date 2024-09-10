@@ -120,7 +120,7 @@ struct GroupCache {
     cache: HashMap<String, Vec<UpperString>>
 }
 
-struct Ingester {
+pub struct Ingester {
     core: Core,
 
     // Internal. Unique requests are placed in and processed from this queue.
@@ -201,41 +201,9 @@ pub async fn main(core: Core) -> Result<()> {
     let ingester = Arc::new(Ingester::new(core).await?);
     ingester.core.running.install_terminate_handler();
 
+    // launch the assorted daemons within the ingester
     let mut components = tokio::task::JoinSet::new();
-
-    // Launch the http interface
-    let bind_address = crate::config::load_bind_address()?;
-    let tls_config = crate::config::TLSConfig::load().await?;
-    components.spawn(http::start(bind_address, tls_config, ingester.clone()));
-
-    // Launch the redis interface to pull in new submissions
-    for n in 0..ingest_threads()? {
-        components.spawn(retry!(format!("Ingest {n}"), ingester, handle_ingest));
-    }
-
-    // Launch the redis interface to pull in complete submissions
-    for n in 0..complete_threads()? {
-        components.spawn(retry!(format!("Complete {n}"), ingester, handle_complete));
-    }
-
-    // Launch the submission agents
-    let submitters = submit_threads()?;
-    let redis_only = (submitters/4).max(1);
-    for n in 0..redis_only {
-        components.spawn(retry!(format!("Submit {n}"), ingester, handle_submit_redis));
-    }
-    for n in redis_only..submitters {
-        components.spawn(retry!(format!("Submit {n}"), ingester, handle_submit_internal));
-    }
-
-    // Launch the retry handler
-    components.spawn(retry!(format!("Retry Handler"), ingester, handle_retries));
-
-    // launch the timeout handler
-    components.spawn(retry!(format!("Timeout Handler"), ingester, handle_timeouts));
-
-    // Launch missing handler
-    components.spawn(retry!(format!("Missing Handler"), ingester, handle_missing));
+    ingester.start(&mut components).await?;
 
     // Wait for all of these components to terminate
     while components.join_next().await.is_some() {}
@@ -269,6 +237,43 @@ impl Ingester {
                 .set_timeout(chrono::Duration::days(1).to_std().unwrap()),
             core,
         })
+    }
+
+    pub async fn start(self: &Arc<Self>, components: &mut tokio::task::JoinSet<()>) -> Result<()> {
+        // Launch the http interface
+        let bind_address = crate::config::load_bind_address()?;
+        let tls_config = crate::config::TLSConfig::load().await?;
+        components.spawn(http::start(bind_address, tls_config, self.clone()));
+
+        // Launch the redis interface to pull in new submissions
+        for n in 0..ingest_threads()? {
+            components.spawn(retry!(format!("Ingest {n}"), self, handle_ingest));
+        }
+
+        // Launch the redis interface to pull in complete submissions
+        for n in 0..complete_threads()? {
+            components.spawn(retry!(format!("Complete {n}"), self, handle_complete));
+        }
+
+        // Launch the submission agents
+        let submitters = submit_threads()?;
+        let redis_only = (submitters/4).max(1);
+        for n in 0..redis_only {
+            components.spawn(retry!(format!("Submit {n}"), self, handle_submit_redis));
+        }
+        for n in redis_only..submitters {
+            components.spawn(retry!(format!("Submit {n}"), self, handle_submit_internal));
+        }
+
+        // Launch the retry handler
+        components.spawn(retry!(format!("Retry Handler"), self, handle_retries));
+
+        // launch the timeout handler
+        components.spawn(retry!(format!("Timeout Handler"), self, handle_timeouts));
+
+        // Launch missing handler
+        components.spawn(retry!(format!("Missing Handler"), self, handle_missing));
+        Ok(())
     }
 
     async fn handle_ingest(self: Arc<Self>) -> Result<()> {
@@ -610,7 +615,7 @@ impl Ingester {
         if task.file_size() > max_file_size && !task.params().ignore_size && !task.params().never_drop {
             task.failure = format!("File too large ({} > {max_file_size})", task.file_size());
             self._notify_drop(&mut task).await?;
-            increment!(self.counter, skipped);
+            increment!(self.counter, error);
             error!("[{} :: {}] {}", task.ingest_id, task.sha256(), task.failure);
             return Ok(())
         }
@@ -659,12 +664,12 @@ impl Ingester {
         // Do this after priority has been assigned.
         // (So we don't end up dropping the resubmission).
         if let Some(FileScore { psid: mut pprevious, score, sid: mut previous, .. }) = cache_entry {
-            increment!(self.counter, duplicates);
-
+            debug!("cache hit on {}", task.submission.files[0].sha256);
+            // Create a submission record based on the cache hit if enabled
             if self.core.config.core.ingester.always_create_submission {
-                // Create a submission record based on the cache hit
+                println!("should create submission");
                 if let Ok(Some(mut submission)) = self.core.datastore.submission.get(&previous.to_string(), None).await {
-
+                    println!("Create new submission: {}", task.ingest_id);
                     // Assign the current submission as the PSID for the new submission
                     pprevious = Some(previous);
                     previous = task.ingest_id;
@@ -685,7 +690,8 @@ impl Ingester {
                 }
             }
 
-
+            // process the duplicate
+            increment!(self.counter, duplicates);
             self.finalize(pprevious, previous, score, &mut task, true).await?;
 
             // On cache hits of any kind we want to send out a completed message

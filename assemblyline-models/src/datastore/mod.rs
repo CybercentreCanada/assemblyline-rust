@@ -11,6 +11,7 @@ pub mod service_delta;
 pub mod retrohunt;
 pub mod user;
 pub mod filescore;
+pub mod emptyresult;
 
 pub use submission::Submission;
 pub use error::Error;
@@ -22,6 +23,7 @@ pub use file::File;
 pub use service::Service;
 pub use service_delta::ServiceDelta;
 pub use retrohunt::{Retrohunt, RetrohuntHit};
+pub use emptyresult::EmptyResult;
 
 
 // #[cfg(test)]

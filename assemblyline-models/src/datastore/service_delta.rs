@@ -25,7 +25,7 @@ use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, ParamKinds, 
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct DockerConfigDelta {
+pub struct DockerConfigDelta {
     /// REF_DOCKER_CONFIG
     pub allow_internet_access: Option<bool>,
     /// REF_DOCKER_CONFIG
@@ -56,7 +56,7 @@ struct DockerConfigDelta {
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct UpdateSourceDelta {
+pub struct UpdateSourceDelta {
     /// REF_UPDATE_SOURCE
     pub name: Option<String>,
     /// REF_UPDATE_SOURCE
@@ -88,7 +88,7 @@ struct UpdateSourceDelta {
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct PersistentVolumeDelta {
+pub struct PersistentVolumeDelta {
     /// REF_PV
     pub mount_path: Option<String>,
     /// REF_PV
@@ -102,7 +102,7 @@ struct PersistentVolumeDelta {
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct DependencyConfigDelta {
+pub struct DependencyConfigDelta {
     /// REF_DEPENDENCY_CONFIG
     pub container: Option<DockerConfigDelta>,
     /// REF_DEPENDENCY_CONFIG
@@ -114,7 +114,7 @@ struct DependencyConfigDelta {
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct UpdateConfigDelta {
+pub struct UpdateConfigDelta {
     /// REF_UPDATE_CONFIG
     #[metadata[index=true]]
     pub generates_signatures: Option<bool>,
@@ -133,7 +133,7 @@ struct UpdateConfigDelta {
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
-struct SubmissionParamsDelta {
+pub struct SubmissionParamsDelta {
     /// REF_SUBMISSION_PARAMS
     pub default: Option<serde_json::Value>,
     /// REF_SUBMISSION_PARAMS

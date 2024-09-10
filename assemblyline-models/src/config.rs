@@ -481,7 +481,7 @@ impl Default for Classification {
 /// Dispatcher Configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
-struct Dispatcher {
+pub struct Dispatcher {
     /// Time between re-dispatching attempts, as long as some action (submission or any task completion) happens before this timeout ends, the timeout resets.
     pub timeout: f64,
     /// Maximum submissions allowed to be in-flight
@@ -1570,6 +1570,8 @@ pub struct Submission {
     // pub default_max_supplementary: u32,
     // /// Number of days submissions will remain in the system by default
     // pub dtl: u32,
+    /// Number of days emptyresult will remain in the system
+    pub emptyresult_dtl: u32,
     /// Maximum number of days submissions will remain in the system
     pub max_dtl: u32,
     /// Maximum files extraction depth
@@ -1597,6 +1599,7 @@ impl Default for Submission {
             // default_max_extracted: 500,
             // default_max_supplementary: 500,
             // dtl: 30,
+            emptyresult_dtl: 5,
             max_dtl: 0,
             max_extraction_depth: 6,
             max_file_size: 104857600,

@@ -1,6 +1,7 @@
 mod http;
 #[cfg(test)]
 mod tests;
+pub mod client;
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::AtomicU32;
@@ -16,72 +17,22 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
-use assemblyline_models::{ExpandingClassification, JsonMap, Sha256, Sid, UpperString};
+use assemblyline_models::{ExpandingClassification, JsonMap, Sha256, Sid};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
+use poem::listener::Acceptor;
 use redis_objects::quota::UserQuotaTracker;
-use redis_objects::{increment, RedisObjects};
+use redis_objects::increment;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
 
+use crate::config::hostname;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_RUNNING_TASK_HASH, DISPATCH_TASK_HASH, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
+use crate::http::TlsAcceptor;
 use crate::postprocessing::ActionWorker;
+use crate::services::get_schedule_names;
 use crate::{Core, Flag};
-
-// from __future__ import annotations
-// import uuid
-// import os
-// import threading
-// import time
-// from collections import defaultdict
-// from contextlib import contextmanager
-// import typing
-// from typing import Optional, Any, TYPE_CHECKING, Iterable
-// import json
-// import enum
-// from queue import PriorityQueue, Empty, Queue
-// import dataclasses
-
-// import elasticapm
-
-// from assemblyline.common import isotime
-// from assemblyline.common.constants import make_watcher_list_name, SUBMISSION_QUEUE, \
-//     DISPATCH_RUNNING_TASK_HASH, SCALER_TIMEOUT_QUEUE, DISPATCH_TASK_HASH
-// from assemblyline.common.forge import get_service_queue, get_apm_client, get_classification
-// from assemblyline.common.isotime import now_as_iso
-// from assemblyline.common.metrics import MetricsFactory
-// from assemblyline.common.postprocess import ActionWorker
-// from assemblyline.datastore.helper import AssemblylineDatastore
-// from assemblyline.odm.messages.changes import ServiceChange, Operation
-// from assemblyline.odm.messages.service_heartbeat import Metrics as ServiceMetrics
-// from assemblyline.odm.messages.dispatching import WatchQueueMessage, CreateWatch, DispatcherCommandMessage, \
-//     CREATE_WATCH, LIST_OUTSTANDING, UPDATE_BAD_SID, ListOutstanding
-// from assemblyline.odm.messages.submission import SubmissionMessage, from_datastore_submission
-// from assemblyline.odm.messages.task import FileInfo, Task as ServiceTask
-// from assemblyline.odm.models.error import Error
-// from assemblyline.odm.models.result import Result
-// from assemblyline.odm.models.service import Service
-// from assemblyline.odm.models.submission import Submission
-// from assemblyline.odm.models.user import User
-// from assemblyline.remote.datatypes.exporting_counter import export_metrics_once
-// from assemblyline.remote.datatypes.events import EventWatcher
-// from assemblyline.remote.datatypes.hash import Hash
-// from assemblyline.remote.datatypes.queues.comms import CommsQueue
-// from assemblyline.remote.datatypes.queues.named import NamedQueue
-// from assemblyline.remote.datatypes.set import ExpiringSet, Set
-// from assemblyline.remote.datatypes.user_quota_tracker import UserQuotaTracker
-// from assemblyline_core.server_base import ThreadedCoreBase
-// from assemblyline_core.alerter.run_alerter import ALERT_QUEUE_NAME
-
-
-// if TYPE_CHECKING:
-//     from assemblyline.odm.models.file import File
-
-
-// from .schedules import Scheduler
-// from .timeout import TimeoutTable
-// from ..ingester.constants import COMPLETE_QUEUE_NAME
 
 // APM_SPAN_TYPE = 'handle_message'
 
@@ -93,9 +44,6 @@ const ONE_DAY: Duration = Duration::from_secs(ONE_HOUR.as_secs() * 24);
 const DEFAULT_RESULT_BATCH_SIZE: usize = 50;
 
 // ERROR_BATCH_SIZE = int(os.environ.get('DISPATCHER_ERROR_BATCH_SIZE', '50'))
-
-// # TODO: DYNAMIC_ANALYSIS_CATEGORY can be removed after assemblyline version 4.6+
-// DYNAMIC_ANALYSIS_CATEGORY = 'Dynamic Analysis'
 
 
 pub const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
@@ -142,7 +90,7 @@ macro_rules! retry {
 }
 
 enum DispatchAction {
-    Start(ServiceStartMessage),
+    Start(ServiceStartMessage, Option<oneshot::Sender<()>>),
     Result(ServiceResponse),
     Check(Sid),
     BadSid(Sid),
@@ -150,12 +98,19 @@ enum DispatchAction {
     ListOutstanding(Sid, oneshot::Sender<HashMap<String, u64>>),
     Terminate(Sid, oneshot::Sender<()>),
     DispatchFile(Sid, Sha256),
+    TestReport(Sid, oneshot::Sender<TestReport>),
+}
+
+pub struct TestReport {
+    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
+    service_results: HashMap<(Sha256, String), ResultSummary>,
+    service_errors: HashMap<(Sha256, String), String>,
 }
 
 impl DispatchAction {
     fn sid(&self) -> Sid {
         match self {
-            DispatchAction::Start(message) => message.sid,
+            DispatchAction::Start(message, _) => message.sid,
             DispatchAction::Result(message) => message.sid(),
             DispatchAction::Check(sid) => *sid,
             DispatchAction::BadSid(sid) => *sid,
@@ -163,6 +118,7 @@ impl DispatchAction {
             DispatchAction::ListOutstanding(sid, _) => *sid,
             DispatchAction::Terminate(sid, _) => *sid,
             DispatchAction::DispatchFile(sid, _) => *sid,
+            DispatchAction::TestReport(sid, _) => *sid,
         }
     }
 }
@@ -174,6 +130,7 @@ struct ServiceStartMessage {
     sha: Sha256,
     service_name: String,
     worker_id: String,
+    task_id: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -213,8 +170,8 @@ struct SubmissionTask {
     service_results: HashMap<(Sha256, String), ResultSummary>,
     service_errors: HashMap<(Sha256, String), String>,
     service_attempts: HashMap<(Sha256, String), u32>, //] = defaultdict(int),
-    queue_keys: HashMap<(Sha256, String), Vec<u8>>,
-    running_services: HashSet<(Sha256, String)>,
+    running_services: HashMap<(Sha256, String), ServiceTask>,
+    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
 
     // mapping from file hash to a set of services that shouldn't be run on
     // any children (recursively) of that file
@@ -403,36 +360,18 @@ impl SubmissionTask {
 }
 
 
-async fn main(core: Core) -> Result<()> {
+pub async fn main(core: Core) -> Result<()> {
+    // Bind the HTTP interface
+    let bind_address = crate::config::load_bind_address()?;
+    let tls_config = crate::config::TLSConfig::load().await?;
+    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
+
     // Initialize Internal state
-    let dispatcher = Arc::new(Dispatcher::new(core).await?);
+    let dispatcher = Dispatcher::new(core, tcp).await?;
     dispatcher.finalizing.install_terminate_handler();
 
     let mut components = tokio::task::JoinSet::new();
-
-    // Launch the http interface
-    let bind_address = crate::config::load_bind_address()?;
-    let tls_config = crate::config::TLSConfig::load().await?;
-    components.spawn(http::start(bind_address, tls_config, dispatcher.clone()));
-
-    // Pull in new submissions
-    components.spawn(retry!("Pull Submissions", dispatcher, pull_submissions));
-
-    // pull start messages
-    components.spawn(retry!("Pull Service Start", dispatcher, pull_service_starts));
-
-    // pull result messages
-    components.spawn(retry!("Pull Service Result", dispatcher, pull_service_results));
-
-    // Work guard/thief
-    components.spawn(retry!("Guard Work", dispatcher, work_guard));
-    components.spawn(retry!("Work Thief", dispatcher, work_thief));
-
-    // Handle RPC commands
-    components.spawn(retry!("Commands", dispatcher, handle_commands));
-
-    // Process to protect against old dead tasks timing out
-    components.spawn(retry!("Global Timeout Backstop", dispatcher, timeout_backstop));
+    dispatcher.start(&mut components);
     
     // Wait for all of these components to terminate
     while components.join_next().await.is_some() {}
@@ -443,19 +382,21 @@ async fn main(core: Core) -> Result<()> {
         let queues = dispatcher.process_queues.read().await;
         for (key, queue) in queues.iter() {
             let (send, recv) = oneshot::channel();
-            queue.send(DispatchAction::Terminate(*key, send));
-            completions.push(recv);
+            if queue.send(DispatchAction::Terminate(*key, send)).is_ok() {
+                completions.push(recv);
+            }
         }
     }
     for channel in completions {
-        channel.await;
+        _ = channel.await;
     }
     Ok(())
 }
 
-struct Dispatcher {
+pub struct Dispatcher {
     core: Core,
     instance_id: String,
+    instance_address: String,
 
     finalizing: Arc<Flag>,
     finalizing_start: Mutex<Option<std::time::Instant>>,
@@ -486,7 +427,7 @@ struct Dispatcher {
     running_dispatchers_estimate: std::sync::atomic::AtomicU32,
 
     // Build some utility classes
-    running_tasks: redis_objects::Hashmap<ServiceTask>,
+    // running_tasks: redis_objects::Hashmap<ServiceTask>,
     scaler_timeout_queue: redis_objects::Queue<KillContainerCommand>,
 
     // Publish counters to the metrics sink.
@@ -516,7 +457,7 @@ struct Dispatcher {
 
 
 impl Dispatcher {
-    pub async fn new(core: Core) -> Result<Self> {
+    pub async fn new(core: Core, tcp: TlsAcceptor) -> Result<Arc<Self>> {
         // generate an id for this instance
         let instance_id = format!("{:x}", rand::thread_rng().gen::<u128>());
         info!("Using dispatcher id {instance_id}");
@@ -534,7 +475,14 @@ impl Dispatcher {
 
         let redis_bad_sids = core.redis_persistant.set(BAD_SID_HASH.to_owned());
 
-        Ok(Self {
+        // figure out the address we will present to the world
+        let addr = tcp.local_addr();
+        let port = match addr.first().and_then(|addr|addr.as_socket_addr()).map(|sock| sock.port()) {
+            Some(port) => port,
+            None => bail!("Could not determine own bound port")
+        };
+
+        let disp = Arc::new(Self {
             shutdown_grace,
             result_batch_size,
             finalizing: Arc::new(Flag::new(false)),
@@ -559,12 +507,12 @@ impl Dispatcher {
             process_queues: RwLock::new(Default::default()),
 
             // Table to track the running dispatchers
-            dispatchers_directory: core.redis_persistant.hashmap(DISPATCH_DIRECTORY.to_string(), None),
+            dispatchers_directory: core.dispatcher_instances_table(),
             dispatchers_directory_finalize: core.redis_persistant.hashmap(DISPATCH_DIRECTORY_FINALIZE.to_string(), None),
             running_dispatchers_estimate: AtomicU32::new(1),
 
             // Track the tasks that should be running right now
-            running_tasks: core.redis_volatile.hashmap(DISPATCH_RUNNING_TASK_HASH.to_string(), None),
+            // running_tasks: core.redis_volatile.hashmap(DISPATCH_RUNNING_TASK_HASH.to_string(), None),
 
             // message queue to tell scaler to kill a container
             scaler_timeout_queue: core.redis_persistant.queue(SCALER_TIMEOUT_QUEUE.to_string(), None),
@@ -581,14 +529,48 @@ impl Dispatcher {
 
             core,
             instance_id,
-        })
+            instance_address: format!("{}:{port}", crate::config::hostname()?),
+        });
+
+        tokio::spawn(http::start(tcp, disp.clone()));
+        Ok(disp)
     }
 
+    pub fn start(self: &Arc<Self>, components: &mut tokio::task::JoinSet<()>) {
+        // Pull in new submissions
+        components.spawn(retry!("Pull Submissions", self, pull_submissions));
+    
+        // pull start messages
+        components.spawn(retry!("Pull Service Start", self, pull_service_starts));
+    
+        // pull result messages
+        components.spawn(retry!("Pull Service Result", self, pull_service_results));
+    
+        // Work guard/thief
+        components.spawn(retry!("Guard Work", self, work_guard));
+        components.spawn(retry!("Work Thief", self, work_thief));
+    
+        // Handle RPC commands
+        components.spawn(retry!("Commands", self, handle_commands));
+    
+        // Process to protect against old dead tasks timing out
+        components.spawn(retry!("Global Timeout Backstop", self, timeout_backstop));
+    }
+
+    async fn get_test_report(&self, sid: Sid) -> Result<TestReport> {
+        let (send, resp) = oneshot::channel();
+        self.send_dispatch_action(DispatchAction::TestReport(sid, send)).await;
+        Ok(resp.await?)
+    }
+
+    /// get how long it has been since finalization started
+    /// if the counter hasn't started calling this method starts it
     fn get_finalizing_start(&self) -> Duration {
         let mut start = self.finalizing_start.lock();
         start.get_or_insert_with(std::time::Instant::now).elapsed()
     }
     
+    /// get how long we will wait after getting a termination signal to allow for clean shutdown
     fn get_finalizing_window(&self) -> Duration {
         Duration::from_secs(self.shutdown_grace.saturating_sub(AL_SHUTDOWN_QUIT))
     }
@@ -643,13 +625,7 @@ impl Dispatcher {
                 };
 
                 // This is probably a complete task
-                let mut task = SubmissionTask::new(message);
-
-                // Check the sid table
-                if self.bad_sids.read().await.contains(&task.submission.sid) {
-                    task.submission.to_be_deleted = true;
-                }
-
+                let task = SubmissionTask::new(message);
                 self.dispatch_submission(task).await?;
             }
         }
@@ -672,7 +648,7 @@ impl Dispatcher {
 
             // process all the messages we found
             for message in messages {
-                self.send_dispatch_action(DispatchAction::Start(message)).await;
+                self.send_dispatch_action(DispatchAction::Start(message, None)).await;
             }
         }
         Ok(())
@@ -809,8 +785,8 @@ impl Dispatcher {
         }
 
         info!("Finished stealing work from {target}");
-        self.dispatchers_directory.pop(&target).await?;
-        self.dispatchers_directory_finalize.pop(&target).await?;
+        self.dispatchers_directory.pop(target).await?;
+        self.dispatchers_directory_finalize.pop(target).await?;
         Ok(())
     }
 
@@ -859,7 +835,7 @@ impl Dispatcher {
         self._watcher_list(sid).add(&queue_name).await?;
 
         // Push all current keys to the newly created queue (Queue should have a TTL of about 30 sec to 1 minute)
-        inner_queue.send(DispatchAction::DescribeStatus(sid, watch_queue));
+        _ = inner_queue.send(DispatchAction::DescribeStatus(sid, watch_queue));
         Ok(())
     }
 
@@ -871,7 +847,7 @@ impl Dispatcher {
             let queues = self.process_queues.read().await;
             match queues.get(&sid) {
                 Some(queue) => {
-                    queue.send(DispatchAction::ListOutstanding(sid, send));
+                    _ = queue.send(DispatchAction::ListOutstanding(sid, send));
                 },
                 None => {
                     response_queue.push(&Default::default()).await?;
@@ -905,7 +881,7 @@ impl Dispatcher {
         let queue_table = self.process_queues.read().await;
         for sid in new_sids {
             if let Some(queue) = queue_table.get(&sid) {
-                queue.send(DispatchAction::BadSid(sid));
+                _ = queue.send(DispatchAction::BadSid(sid));
             }
         }
         Ok(())
@@ -913,62 +889,62 @@ impl Dispatcher {
 
     async fn timeout_backstop(self: Arc<Self>) -> Result<()> {
         while self.core.is_running() {
-            { // timeout_backstop
-                let dispatcher_instances = self.core.dispatcher_instances().await?;
-                let mut error_tasks = vec![];
+            // { // timeout_backstop
+            //     let dispatcher_instances = self.core.dispatcher_instances().await?;
+            //     let mut error_tasks = vec![];
 
-                // iterate running tasks
-                let tasks: HashSet<Sid> = self.process_queues.read().await.keys().cloned().collect();
-                for (_task_key, task) in self.running_tasks.items().await? {
-                    // Its a bad task if it's dispatcher isn't running
-                    if !dispatcher_instances.contains(&task.dispatcher) {
-                        error_tasks.push(task);
-                        continue
-                    }
-                    // Its a bad task if its OUR task, but we aren't tracking that submission anymore
-                    if task.dispatcher == self.instance_id && !tasks.contains(&task.sid) {
-                        error_tasks.push(task)
-                    }
-                }
+            //     // iterate running tasks
+            //     let tasks: HashSet<Sid> = self.process_queues.read().await.keys().cloned().collect();
+            //     for (_task_key, task) in self.running_tasks.items().await? {
+            //         // Its a bad task if it's dispatcher isn't running
+            //         if !dispatcher_instances.contains(&task.dispatcher) {
+            //             error_tasks.push(task);
+            //             continue
+            //         }
+            //         // Its a bad task if its OUR task, but we aren't tracking that submission anymore
+            //         if task.dispatcher == self.instance_id && !tasks.contains(&task.sid) {
+            //             error_tasks.push(task)
+            //         }
+            //     }
 
-                // Refresh our dispatcher list.
-                let dispatcher_instances = self.core.dispatcher_instances().await?;
-                let mut other_dispatcher_instances: HashSet<String> = dispatcher_instances.iter().cloned().collect();
-                other_dispatcher_instances.remove(&self.instance_id);
+            //     // Refresh our dispatcher list.
+            //     let dispatcher_instances = self.core.dispatcher_instances().await?;
+            //     let mut other_dispatcher_instances: HashSet<String> = dispatcher_instances.iter().cloned().collect();
+            //     other_dispatcher_instances.remove(&self.instance_id);
 
-                // The remaining running tasks (probably) belong to dead dispatchers and can be killed
-                for task in error_tasks {
-                    // Check against our refreshed dispatcher list in case it changed during the previous scan
-                    if other_dispatcher_instances.contains(&task.dispatcher) {
-                        continue
-                    }
+            //     // The remaining running tasks (probably) belong to dead dispatchers and can be killed
+            //     for task in error_tasks {
+            //         // Check against our refreshed dispatcher list in case it changed during the previous scan
+            //         if other_dispatcher_instances.contains(&task.dispatcher) {
+            //             continue
+            //         }
 
-                    // If its already been handled, we don't need to
-                    if self.running_tasks.pop(&task.key()).await?.is_none() {
-                        continue
-                    }
+            //         // If its already been handled, we don't need to
+            //         if self.running_tasks.pop(&task.key()).await?.is_none() {
+            //             continue
+            //         }
 
-                    let worker = match task.metadata.get("worker__") {
-                        Some(serde_json::Value::String(worker)) => worker,
-                        _ => continue
-                    };
+            //         let worker = match task.metadata.get("worker__") {
+            //             Some(serde_json::Value::String(worker)) => worker,
+            //             _ => continue
+            //         };
 
-                    // Kill the task that would report to a dead dispatcher
-                    warn!("[{}]Task killed by backstop {} {}", task.sid, task.service_name, task.fileinfo.sha256);
-                    self.scaler_timeout_queue.push(&KillContainerCommand {
-                        service: task.service_name.clone(),
-                        container: worker.to_owned()
-                    }).await?;
+            //         // Kill the task that would report to a dead dispatcher
+            //         warn!("[{}]Task killed by backstop {} {}", task.sid, task.service_name, task.fileinfo.sha256);
+            //         self.scaler_timeout_queue.push(&KillContainerCommand {
+            //             service: task.service_name.clone(),
+            //             container: worker.to_owned()
+            //         }).await?;
                     
-                    // Report to the metrics system that a recoverable error has occurred for that service
-                    self.core.export_metrics_once(
-                        &task.service_name, 
-                        &ServiceMetrics {fail_recoverable: 1, ..Default::default()},
-                        Some(worker.as_str()), 
-                        Some("service")
-                    ).await?;
-                }
-            }
+            //         // Report to the metrics system that a recoverable error has occurred for that service
+            //         self.core.export_metrics_once(
+            //             &task.service_name, 
+            //             &ServiceMetrics {fail_recoverable: 1, ..Default::default()},
+            //             Some(worker.as_str()), 
+            //             Some("service")
+            //         ).await?;
+            //     }
+            // }
 
             #[derive(Debug, Deserialize)]
             struct FieldList {
@@ -1063,11 +1039,16 @@ impl Dispatcher {
     // Preconditions:
     //     - File exists in the filestore and file collection in the datastore
     //     - Submission is stored in the datastore
-    async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
+    pub async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
         // let submission = &task.submission;
         let sid = task.submission.sid.to_string();
         let sha256 = task.submission.files[0].sha256.clone();
 
+        // Check the sid table
+        if self.bad_sids.read().await.contains(&task.submission.sid) {
+            task.submission.to_be_deleted = true;
+        }
+        
         if !self.submissions_assignments.add(&sid, &self.instance_id).await? {
             warn!("[{sid}] Received an assigned submission dropping");
             return Ok(())
@@ -1221,23 +1202,39 @@ impl Dispatcher {
 
             // process the message
             match message {
-                DispatchAction::Start(message) => {
+                DispatchAction::Start(message, started) => {
                     let key = (message.sha, message.service_name.clone());
-                    if let Some(_) = task.queue_keys.remove(&key) {
+                    if let Some((service_task, queue_key)) = task.queue_keys.remove(&key) {
                         // If this task is already finished (result message processed before start
                         // message) we can skip setting a timeout
                         if task.service_errors.contains_key(&key) || task.service_results.contains_key(&key) {
                             continue
                         }
+
+                        // check if someone is trying to start an out of date task
+                        if let Some(request_id) = message.task_id {
+                            if request_id != service_task.task_id {
+                                // trying to start the wrong task, put the queue key back and ignore this message
+                                task.queue_keys.insert(key, (service_task, queue_key));
+                                continue
+                            }
+                        }
+
                         if let Some(service) = self.core.services.get(&message.service_name) {
                             timeouts.insert(key.clone(), (Instant::now(), Duration::from_secs(service.timeout as u64), message.worker_id.clone()));
-                            task.service_logs.entry(key).or_default().push(format!("Popped from queue and running at {} on worker {}", chrono::Utc::now(), message.worker_id));
+                            task.service_logs.entry(key.clone()).or_default().push(format!("Popped from queue and running at {} on worker {}", chrono::Utc::now(), message.worker_id));
+                            task.running_services.insert(key, service_task);
+                            if let Some(started) = started {
+                                _ = started.send(());
+                            }
                         }
                     }
                 },   
                 DispatchAction::Result(message) => {
                     submission_timeout = Instant::now();
-                    timeouts.remove(&(message.sha256(), message.service_name().to_owned()));
+                    let key = (message.sha256(), message.service_name().to_owned());
+                    timeouts.remove(&key);
+                    task.running_services.remove(&key);
 
                     match message {
                         ServiceResponse::Result(data) => self.process_service_result(task, data).await?,
@@ -1247,13 +1244,13 @@ impl Dispatcher {
                 DispatchAction::DescribeStatus(_, watch_queue) => {
                     // Push all current keys to the newly created queue (Queue should have a TTL of about 30 sec to 1 minute)
                     for result_data in task.service_results.values() {
-                        watch_queue.push(&WatchQueueMessage {
+                        let _ = watch_queue.push(&WatchQueueMessage {
                             status: WatchQueueStatus::Ok,
                             cache_key: Some(result_data.key.clone())
                         }).await;
                     }
                     for error_key in task.service_errors.values() {
-                        watch_queue.push(&WatchQueueMessage {
+                        let _ = watch_queue.push(&WatchQueueMessage {
                             status: WatchQueueStatus::Fail, 
                             cache_key: Some(error_key.clone())
                         }).await;
@@ -1264,17 +1261,17 @@ impl Dispatcher {
                     for (_sha, service_name) in task.queue_keys.keys() {
                         *outstanding.entry(service_name.clone()).or_default() += 1;
                     }
-                    for (_sha, service_name) in task.running_services.iter() {
+                    for (_sha, service_name) in task.running_services.keys() {
                         *outstanding.entry(service_name.clone()).or_default() += 1;
                     }
-                    channel.send(outstanding);
+                    _ = channel.send(outstanding);
                 },
                 DispatchAction::BadSid(_) => {
                     task.submission.to_be_deleted = true;
                     self.active_submissions.set(&sid.to_string(), &SubmissionDispatchMessage{
                         completed_queue: task.completed_queue.clone(),
                         submission: task.submission.clone()
-                    }).await;
+                    }).await?;
                 },
                 DispatchAction::Check(_) => {
                     info!("[{sid}] submission timeout, checking dispatch status...");
@@ -1284,15 +1281,22 @@ impl Dispatcher {
                     submission_timeout = Instant::now();
                 },
                 DispatchAction::Terminate(_, respond) => {
-                    for ((_, service_name), key) in &task.queue_keys {
-                        let service_queue = self.core.get_service_queue(&service_name);
-                        service_queue.remove(&key).await?;
+                    for ((_, service_name), (_, key)) in &task.queue_keys {
+                        let service_queue = self.core.get_service_queue(service_name);
+                        service_queue.remove(key).await?;
                     }
-                    respond.send(());
+                    _ = respond.send(());
                     finished = true;
                 },
                 DispatchAction::DispatchFile(_, sha256) => {
                     self.dispatch_file(task, &sha256).await?;
+                },
+                DispatchAction::TestReport(_, respond) => {
+                    _ = respond.send(TestReport { 
+                        queue_keys: task.queue_keys.clone(), 
+                        service_results: task.service_results.clone(),
+                        service_errors: task.service_errors.clone(),
+                    });
                 }
             }
         }
@@ -1347,12 +1351,13 @@ impl Dispatcher {
 
         let deep_scan = task.submission.params.deep_scan;
         let ignore_filtering = task.submission.params.ignore_filtering;
+        // debug!("[{sid}::{sha256}] schedule: {:?}", get_schedule_names(&schedule));
 
         // Go through each round of the schedule removing complete/failed services
         // Break when we find a stage that still needs processing
         let mut outstanding: HashMap<String, Arc<Service>> = Default::default();
         let mut started_stages = vec![];
-        while !schedule.is_empty() && !outstanding.is_empty() {
+        while !schedule.is_empty() && outstanding.is_empty() {
             let stage = schedule.remove(0);
             started_stages.push(stage.clone());
 
@@ -1381,6 +1386,7 @@ impl Dispatcher {
                 }
             }
         }
+        // debug!("[{sid}::{sha256}] outstanding services: {outstanding:?}");
 
         // Try to retry/dispatch any outstanding services
         if !outstanding.is_empty() {
@@ -1394,13 +1400,13 @@ impl Dispatcher {
 
                 let key = (sha256.clone(), service_name.clone());
                 // Check if the task is already running
-                if task.running_services.contains(&key) {
+                if task.running_services.contains_key(&key) {
                     running.push(service_name);
                     continue
                 }
 
                 // Check if this task is already sitting in queue
-                if let Some(dispatch_key) = task.queue_keys.get(&key) {
+                if let Some((_, dispatch_key)) = task.queue_keys.get(&key) {
                     if service_queue.rank(dispatch_key).await?.is_some() {
                         enqueued.push(service_name);
                         continue
@@ -1480,6 +1486,7 @@ impl Dispatcher {
                     sid,
                     task_id: rand::thread_rng().gen(),
                     dispatcher: self.instance_id.clone(),
+                    dispatcher_address: self.instance_address.clone(),
                     metadata,
                     min_classification: task.submission.classification.classification.clone(),
                     service_name: service_name.clone(),
@@ -1502,7 +1509,7 @@ impl Dispatcher {
 
                 // Its a new task, send it to the service
                 let queue_key = service_queue.push(service_task.priority as f64, &service_task).await?;
-                task.queue_keys.insert(key.clone(), queue_key);
+                task.queue_keys.insert(key.clone(), (service_task, queue_key));
                 sent.push(service_name);
                 task.service_logs.entry(key).or_default().push(format!("Submitted to queue at {}", chrono::Utc::now()));
             }
@@ -1515,6 +1522,7 @@ impl Dispatcher {
                 // Not waiting for anything, and have started skipping what is left over
                 // because this submission is terminated. Drop through to the base
                 // case where the file is complete
+                info!("[{sid}] File {sha256} skipping {skipped:?}");
             } else {
                 // If we are not waiting, and have not taken an action, we must have hit the
                 // retry limit on the only service running. In that case, we can move directly
@@ -1525,12 +1533,12 @@ impl Dispatcher {
         }
 
         increment!(self.counter, files_completed);
-        if task.queue_keys.len() > 0 || task.running_services.len() > 0 {
-            info!("[{sid}] Finished processing file '{sha256}', submission incomplete (queued: {} running: {})", 
-                task.queue_keys.len(), task.running_services.len())
-        } else {
+        if task.queue_keys.is_empty() && task.running_services.is_empty() {
             info!("[{sid}] Finished processing file '{sha256}', checking if submission complete");
             task.send_dispatch_action(DispatchAction::Check(sid));
+        } else {
+            info!("[{sid}] Finished processing file '{sha256}', submission incomplete (queued: {} running: {})", 
+                task.queue_keys.len(), task.running_services.len())
         }
         Ok(())
     }
@@ -1647,7 +1655,7 @@ impl Dispatcher {
                         // Collect information about the result
                         *file_scores.entry(sha256.clone()).or_default() += result.score;
                         for (child, _) in &result.children {
-                            if !checked.contains(&child) {
+                            if !checked.contains(child) {
                                 unchecked.insert(child.clone());
                             }
                         }
@@ -1656,7 +1664,7 @@ impl Dispatcher {
 
                     // If the file is in process, we may not need to dispatch it, but we aren't finished
                     // with the submission.
-                    if task.running_services.contains(&key) {
+                    if task.running_services.contains_key(&key) {
                         processing_files.push(sha256.clone());
                         // another service may require us to dispatch it though so continue rather than break
                         continue
@@ -1665,7 +1673,7 @@ impl Dispatcher {
                     // Check if the service is in queue, and handle it the same as being in progress.
                     // Check this one last, since it can require a remote call to redis rather than checking a dict.
                     let service_queue = self.core.get_service_queue(&service.name);
-                    if let Some(queue_key) = task.queue_keys.get(&key) {
+                    if let Some((_, queue_key)) = task.queue_keys.get(&key) {
                         if task.queue_keys.contains_key(&key) && service_queue.rank(queue_key).await?.is_some() {
                             processing_files.push(sha256.clone());
                             continue
@@ -1679,6 +1687,7 @@ impl Dispatcher {
                     }
 
                     // Since the service is not finished or in progress, it must still need to start
+                    debug!("[{sid}] Not complete on account of {sha256} needing {}", service.name);
                     pending_files.push(sha256.clone());
                     break
                 }
@@ -1693,7 +1702,7 @@ impl Dispatcher {
         // file isn't done yet, and hasn't been filtered by any of the previous few steps
         // poke those files.
         if !pending_files.is_empty() {
-            debug!("[{sid}] Dispatching {} files: {}", pending_files.len(), pending_files.len());
+            debug!("[{sid}] Dispatching {} files: {:?}", pending_files.len(), pending_files);
             for file_hash in pending_files {
                 task.send_dispatch_action(DispatchAction::DispatchFile(sid, file_hash));
             }
@@ -1942,8 +1951,8 @@ impl Dispatcher {
         let new_depth = file_depth + 1;
         for (extracted_sha256, _) in &summary.children {
             task.file_depth.entry(extracted_sha256.clone()).or_insert(new_depth);
-            if let Some(extracted_name) = extracted_names.get(&extracted_sha256) {
-                if !task.file_names.contains_key(&extracted_sha256) {
+            if let Some(extracted_name) = extracted_names.get(extracted_sha256) {
+                if !task.file_names.contains_key(extracted_sha256) {
                     task.file_names.insert(extracted_sha256.clone(), extracted_name.clone());
                 }
             }
@@ -1966,7 +1975,7 @@ impl Dispatcher {
                         response: error::Response {
                             message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped"),
                             service_name: service_name.clone(),
-                            service_tool_version: Some(service_tool_version.clone()),
+                            service_tool_version: service_tool_version.clone(),
                             service_version: service_version.clone(),
                             status: error::Status::FailNonrecoverable,
                             service_debug_info: None
@@ -2011,7 +2020,7 @@ impl Dispatcher {
                     response: error::Response {
                         message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits"),
                         service_name: service_name.clone(),
-                        service_tool_version: Some(service_tool_version.clone()),
+                        service_tool_version: service_tool_version.clone(),
                         service_version: service_version.clone(),
                         status: error::Status::FailNonrecoverable,
                         service_debug_info: None,
@@ -2024,7 +2033,7 @@ impl Dispatcher {
 
         // Check if its worth trying to run the next stage
         // Not worth running if we know we are waiting for another service
-        if task.running_services.iter().any(|(_s, _)| *_s == sha256) {
+        if task.running_services.keys().any(|(_s, _)| *_s == sha256) {
             return Ok(())
         }
         // Not worth running if we know we have services in queue
@@ -2044,7 +2053,7 @@ impl Dispatcher {
             cache_key: Some(error_key)
         };
         for w in self._watcher_list(task.submission.sid).members().await? {
-            self.core.redis_volatile.queue(w, None).push(&msg).await;
+            self.core.redis_volatile.queue(w, None).push(&msg).await?;
         }
         Ok(())
     }
@@ -2067,17 +2076,25 @@ impl Dispatcher {
         // If we can't find the task in running tasks, it finished JUST before timing out, let it go
         let sid = task.submission.sid;
         let key = (sha256.clone(), service_name.to_string());
-        task.queue_keys.remove(&key);
-        let task_key = ServiceTask::make_key(sid, service_name, sha256);
-        let service_task = self.running_tasks.pop(&task_key).await?;
-        
-        if service_task.is_none() && !task.running_services.contains(&key) {
+        let mut service_task = None;
+        if let Some((_t, _)) = task.queue_keys.remove(&key) {
+            service_task = Some(_t);
+        }
+        if let Some(_t) = task.running_services.remove(&key) {
+            service_task = Some(_t);
+        }
+
+        // let task_key = ServiceTask::make_key(sid, service_name, sha256);
+        // task.running_services
+        // let service_task = self.running_tasks.pop(&task_key).await?;
+        // && !task.running_services.contains(&key)
+
+        if service_task.is_none() {
             debug!("[{sid}] Service {service_name} timed out on {sha256} but task isn't running.");
             return Ok(())
         }
 
         // We can confirm that the task is ours now, even if the worker finished, the result will be ignored
-        task.running_services.remove(&key);
         info!("[{sid}] Service {service_name} running on {worker_id} timed out on {sha256}.");
         task.send_dispatch_action(DispatchAction::DispatchFile(sid, sha256.clone()));
 
@@ -2087,7 +2104,7 @@ impl Dispatcher {
         self.scaler_timeout_queue.push(&KillContainerCommand{
             service: service_name.to_string(),
             container: worker_id.to_string()
-        }).await;
+        }).await?;
 
         // Report to the metrics system that a recoverable error has occurred for that service
         self.core.export_metrics_once(
