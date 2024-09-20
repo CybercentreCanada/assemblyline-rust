@@ -62,7 +62,7 @@ use log::{debug, error, info};
 use serde_json::json;
 use tokio::sync::Mutex;
 
-use crate::constants::{make_watcher_list_name, service_queue_name, DISPATCH_RUNNING_TASK_HASH, SUBMISSION_QUEUE};
+use crate::constants::{make_watcher_list_name, service_queue_name, SUBMISSION_QUEUE};
 use crate::elastic::{Elastic, Version};
 use crate::Core;
 

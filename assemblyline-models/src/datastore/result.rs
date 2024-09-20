@@ -252,6 +252,7 @@ pub struct Result {
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Date at which the result object got created
+    #[serde(default="chrono::Utc::now")]
     pub created: DateTime<Utc>,
     /// Expiry timestamp
     #[metadata(store=false)]

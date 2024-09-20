@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use assemblyline_models::datastore::submission::SubmissionState;
 use assemblyline_models::datastore::{Service, Submission, error};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
@@ -27,8 +27,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
 
-use crate::config::hostname;
-use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_RUNNING_TASK_HASH, DISPATCH_TASK_HASH, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
+use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
 use crate::http::TlsAcceptor;
 use crate::postprocessing::ActionWorker;
 use crate::services::get_schedule_names;
@@ -61,7 +60,7 @@ const QUOTA_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 // SERVICE_VERSION_EXPIRY_TIME = 30 * 60  # How old service version info can be before we ignore it
 const GUARD_TIMEOUT: i64 = 60 * 2;
 const GLOBAL_TASK_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 10);
-// TIMEOUT_EXTRA_TIME = 5
+const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
 // TIMEOUT_TEST_INTERVAL = 5
 // MAX_RESULT_BUFFER = 64
 // RESULT_THREADS = max(1, int(os.getenv('DISPATCHER_RESULT_THREADS', '2')))
@@ -81,7 +80,7 @@ macro_rules! retry {
             let dispatcher: Arc<Dispatcher> = $dispatcher.clone();
             async move {
                 while let Err(err) = dispatcher.clone().$method().await {
-                    error!("Error in {name}: {err}");
+                    error!("Error in {name}: {err:?}");
                     dispatcher.core.sleep(ERROR_BACKOFF).await;
                 }        
             }
@@ -140,6 +139,17 @@ struct AncestoryEntry {
     parent_relation: String, 
     sha256: Sha256,
 }
+
+// struct ActiveFileInfo {
+//     info: Option<Arc<FileInfo>>,
+//     name: String,
+//     schedule: Vec<Vec<Arc<Service>>>,
+//     tags: HashMap<String, TagEntry>, // = defaultdict(dict,
+//     depth: u32,
+//     ancestry: Vec<Vec<AncestoryEntry>>,
+//     temporary_data: JsonMap, // = defaultdict(dict,
+// }
+
 
 /// Dispatcher internal model for submissions
 struct SubmissionTask {
@@ -518,7 +528,10 @@ impl Dispatcher {
             scaler_timeout_queue: core.redis_persistant.queue(SCALER_TIMEOUT_QUEUE.to_string(), None),
 
             // Publish counters to the metrics sink.
-            counter: core.redis_metrics.auto_exporting_metrics("dispatcher".to_string(), "dispatcher".to_string()).start(),
+            counter: core.redis_metrics.auto_exporting_metrics(METRICS_CHANNEL.to_owned(), "dispatcher".to_owned())
+                .counter_name("dispatcher".to_owned())
+                .export_interval(Duration::from_secs(core.config.core.metrics.export_interval as u64))
+                .start(),
 
             // Update bad sid list
             bad_sids: RwLock::new(redis_bad_sids.members().await?.into_iter().collect()),
@@ -626,7 +639,7 @@ impl Dispatcher {
 
                 // This is probably a complete task
                 let task = SubmissionTask::new(message);
-                self.dispatch_submission(task).await?;
+                self.dispatch_submission(task).await.context("dispatch_submission")?;
             }
         }
         Ok(())
@@ -739,7 +752,7 @@ impl Dispatcher {
                     active_ids += 1;
                 }
             }
-            self.running_dispatchers_estimate.store(active_ids, std::sync::atomic::Ordering::Relaxed);
+            self.running_dispatchers_estimate.store(active_ids.max(1), std::sync::atomic::Ordering::Relaxed);
 
             // get the dispatcher that has gone the longest without reporting
             let oldest = last_seen.iter().reduce(|row, acc| {
@@ -1039,7 +1052,7 @@ impl Dispatcher {
     // Preconditions:
     //     - File exists in the filestore and file collection in the datastore
     //     - Submission is stored in the datastore
-    pub async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
+    async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
         // let submission = &task.submission;
         let sid = task.submission.sid.to_string();
         let sha256 = task.submission.files[0].sha256.clone();
@@ -1089,7 +1102,7 @@ impl Dispatcher {
         task.active_files.insert(sha256.clone());
 
         // Initialize ancestry chain by identifying the root file
-        let file_info = self.get_fileinfo(&mut task, &sha256).await?;
+        let file_info = self.get_fileinfo(&mut task, &sha256).await.context("get_fileinfo")?;
         let file_type = match file_info {
             Some(info) => info.file_type.clone(),
             None => "NOT_FOUND".to_owned(),
@@ -1221,7 +1234,7 @@ impl Dispatcher {
                         }
 
                         if let Some(service) = self.core.services.get(&message.service_name) {
-                            timeouts.insert(key.clone(), (Instant::now(), Duration::from_secs(service.timeout as u64), message.worker_id.clone()));
+                            timeouts.insert(key.clone(), (Instant::now(), Duration::from_secs(service.timeout as u64) + TIMEOUT_GRACE, message.worker_id.clone()));
                             task.service_logs.entry(key.clone()).or_default().push(format!("Popped from queue and running at {} on worker {}", chrono::Utc::now(), message.worker_id));
                             task.running_services.insert(key, service_task);
                             if let Some(started) = started {
@@ -1345,13 +1358,13 @@ impl Dispatcher {
                     task.service_access_control.clone()
                 )?;
                 task.file_schedules.insert(sha256.clone(), schedule.clone());
+                debug!("[{sid}::{sha256}] schedule: {:?}", get_schedule_names(&schedule));
                 schedule
             }
         };
 
         let deep_scan = task.submission.params.deep_scan;
         let ignore_filtering = task.submission.params.ignore_filtering;
-        // debug!("[{sid}::{sha256}] schedule: {:?}", get_schedule_names(&schedule));
 
         // Go through each round of the schedule removing complete/failed services
         // Break when we find a stage that still needs processing
@@ -1905,6 +1918,11 @@ impl Dispatcher {
             return self.dispatch_file(task, &sha256).await;
         }
 
+        // remove pending messages related to this task
+        if let Some((_, queue_key)) = task.queue_keys.remove(&key) {
+            self.core.get_service_queue(&service_name).remove(&queue_key).await?;
+        }
+
         // Let the logs know we have received a result for this task
         if summary.drop {
             debug!("[{sid}/{sha256}] {service_name} succeeded. Result will be stored in {} but processing will stop after this service.", summary.key);
@@ -2034,10 +2052,14 @@ impl Dispatcher {
         // Check if its worth trying to run the next stage
         // Not worth running if we know we are waiting for another service
         if task.running_services.keys().any(|(_s, _)| *_s == sha256) {
+            let services: Vec<&String> = task.running_services.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
+            debug!("[{sid} :: {sha256}] Delaying dispatching, already being processed by {services:?}");
             return Ok(())
         }
         // Not worth running if we know we have services in queue
         if task.queue_keys.keys().any(|(_s, _)| *_s == sha256) {
+            let services: Vec<&String> = task.queue_keys.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
+            debug!("[{sid} :: {sha256}] Delaying dispatching, already queued for {services:?}");
             return Ok(())
         }
         // Try to run the next stage

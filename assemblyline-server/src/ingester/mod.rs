@@ -40,7 +40,6 @@ mod http;
 mod tests;
 
 const _DUP_PREFIX: &str = "w-m-";
-const _NOTIFICATION_QUEUE_PREFIX: &str = "nq-";
 const _MIN_PRIORITY: u16 = 1;
 const _MAX_RETRIES: u32 = 10;
 const _RETRY_DELAY: chrono::Duration = chrono::Duration::minutes(4); // Wait 4 minutes to retry
@@ -64,9 +63,9 @@ fn submit_threads() -> Result<usize> {read_env_size("INGESTER_SUBMIT_THREADS", 8
 
 
 #[derive(Serialize, Deserialize, Debug)]
-struct IngestTask {
+pub struct IngestTask {
     // Submission Parameters
-    submission: MessageSubmission,
+    pub submission: MessageSubmission,
 
     // Information about the ingestion itself, parameters irrelevant
     retries: u32,
@@ -590,6 +589,7 @@ impl Ingester {
 
         // Write all input to the traffic queue
         self.traffic_queue.publish(&SubmissionMessage::ingested(task.submission.clone())).await?;
+        debug!("[{} :: {}] posted to traffic channel", task.ingest_id, task.sha256());
 
         // Load a snapshot of ingest parameters as of right now.
         let max_file_size = self.core.config.submission.max_file_size;
@@ -604,6 +604,7 @@ impl Ingester {
         //     return
 
         // Clean up metadata strings, since we may delete some, iterate on a copy of the keys
+        debug!("[{} :: {}] checking metadata", task.ingest_id, task.sha256());
         for (key, value) in task.submission.metadata.clone() {
             let encoded_value = serde_json::to_string(&value)?;
             if encoded_value.len() > self.core.config.submission.max_metadata_length as usize {
@@ -631,6 +632,7 @@ impl Ingester {
         }
 
         // Check if this file is already being processed
+        debug!("[{} :: {}] checking cache? {}", task.ingest_id, task.sha256(), !task.params().ignore_cache);
         Self::stamp_filescore_key(&mut task, None);
         let (cache_entry, _) = if !task.params().ignore_cache {
             self.check(&mut task, false).await?
@@ -709,7 +711,9 @@ impl Ingester {
         //     return Ok(())
         // }
 
+        debug!("[{} :: {}] Task being queued (local)", task.ingest_id, task.sha256());
         if let Some(task) = self.push_internal_unique_queue(task).await {
+            debug!("[{} :: {}] Task being queued (redis)", task.ingest_id, task.sha256());
             self.unique_queue.push(priority as f64, &task).await?;
         }
         Ok(())
@@ -1001,7 +1005,6 @@ impl Ingester {
             None => return Ok(()),
         };
 
-        let queue_name = _NOTIFICATION_QUEUE_PREFIX.to_owned() + queue_name;
         if let Some(threshold) = task.submission.notification.threshold {
             if let Some(score) = task.score {
                 if score < threshold {
@@ -1010,7 +1013,7 @@ impl Ingester {
             }    
         };
 
-        let queue = self.core.redis_persistant.queue::<IngestTask>(queue_name, None);
+        let queue = self.core.notification_queue(queue_name);
 
         // Mark at which time an item was queued
         task.notify_time = Some(Utc::now());

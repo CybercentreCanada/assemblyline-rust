@@ -5,8 +5,15 @@
     unused_lifetimes, nonstandard_style, variant_size_differences)]
 #![deny(keyword_idents)]
 // #![warn(clippy::missing_docs_in_private_items)]
-#![allow(clippy::needless_return)]
-// #![allow(clippy::needless_return, clippy::while_let_on_iterator, clippy::collapsible_else_if)]
+#![allow(
+    // allow these as they sometimes improve clarity
+    clippy::needless_return,
+    clippy::collapsible_else_if
+)]
+#![allow(
+    // remove after development, allow now so more important warnings can be seen
+    dead_code 
+)]
 
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
@@ -14,8 +21,11 @@ use anyhow::Result;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ClassificationConfig;
 use assemblyline_models::config::Config;
+use cachestore::CacheStore;
 use clap::{Parser, Subcommand};
 use elastic::Elastic;
+use filestore::FileStore;
+use identify::Identify;
 use redis_objects::RedisObjects;
 use log::error;
 use services::ServiceHelper;
@@ -37,6 +47,10 @@ mod tls;
 mod error;
 mod constants;
 mod config;
+mod filestore;
+mod identify;
+mod cachestore;
+mod string_utils;
 
 #[cfg(test)]
 mod tests;
@@ -138,6 +152,8 @@ struct Core {
     pub redis_persistant: Arc<RedisObjects>,
     pub redis_volatile: Arc<RedisObjects>,
     pub redis_metrics: Arc<RedisObjects>,
+    pub filestore: Arc<FileStore>,
+    pub identify: Arc<Identify>,
 
     // interface to request service information
     pub services: ServiceHelper,
@@ -158,6 +174,14 @@ impl Core {
         // connect to elastic
         // TODO Fill in ca parameter
         let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false, elastic_prefix).await?;
+
+        // connect to filestore
+        let filestore = FileStore::open(&config.filestore.storage).await?;
+
+        //
+        let file_cache = FileStore::open(&config.filestore.cache).await?;
+        let cachestore = CacheStore::new("system".to_owned(), datastore.clone(), file_cache)?;
+        let identify = Identify::new(Some(cachestore), redis_volatile.clone()).await?;
 
         // load classification from given config blob or file
         let mut classification_config = config.classification.config.clone();
@@ -182,7 +206,9 @@ impl Core {
             redis_metrics,
             running: Arc::new(Flag::new(true)),
             enabled: Arc::new(Flag::new(true)),
+            filestore,
             classification_parser,
+            identify,
         })
     }
     
@@ -215,6 +241,8 @@ impl Core {
         let redis = RedisObjects::open_host(host, port, db).unwrap();
         redis.wipe().await.unwrap();
 
+        let filestore = tempfile::TempDir::new().unwrap();
+
         let mut config: Config = serde_json::from_value(serde_json::json!({
             "core": {
                 "redis": {
@@ -236,6 +264,11 @@ impl Core {
                         "db": db,
                     }
                 }
+            },
+            "filestore": {
+                "storage": vec![format!("file://{}", filestore.path().to_string_lossy())],
+                "cache": vec![format!("file://{}", filestore.path().to_string_lossy())],
+                "archive": vec![format!("file://{}", filestore.path().to_string_lossy())],
             }
         })).unwrap();
         callback(&mut config);
@@ -243,10 +276,8 @@ impl Core {
         let prefix = rand::thread_rng().r#gen::<u128>().to_string();
         let core = Self::setup(Arc::new(config), &prefix).await.unwrap();
         let elastic = core.datastore.clone();
-        (
-            core,
-            TestGuard { used: db, table, elastic }
-        )
+        let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone() };
+        (core, guard)
     }
     
     /// Produce a set of core resources suitable for testing
@@ -278,14 +309,18 @@ impl Core {
 /// While this struct is held prevent temporary core resources from being collected
 #[cfg(test)]
 struct TestGuard {
+    running: Arc<Flag>,
     used: i64,
     elastic: Arc<Elastic>,
+    filestore: tempfile::TempDir,
     table: Arc<parking_lot::Mutex<Vec<i64>>>,
 }
 
 #[cfg(test)]
 impl Drop for TestGuard {
     fn drop(&mut self) {
+        self.running.set(false);
+
         let mut table = self.table.lock();
         table.push(self.used);
 
@@ -328,3 +363,7 @@ impl Flag {
         todo!()
     }
 }
+
+/// A convenience trait that lets you pass true, false, or None for boolean arguments
+pub trait IBool: Into<Option<bool>> + Copy + Send {}
+impl<T: Into<Option<bool>> + Copy + Send> IBool for T {}

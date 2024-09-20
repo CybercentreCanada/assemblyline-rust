@@ -1,7 +1,8 @@
 use serde::Serialize;
 use serde_json::json;
 
-use crate::constants::METRICS_CHANNEL;
+use crate::constants::{METRICS_CHANNEL, NOTIFICATION_QUEUE_PREFIX};
+use crate::ingester::IngestTask;
 use crate::Core;
 
 
@@ -27,4 +28,8 @@ impl Core {
         self.redis_metrics.publish(METRICS_CHANNEL, &serde_json::to_vec(&counts)?).await
     }
 
+    pub fn notification_queue(&self, name: &str) -> redis_objects::Queue<IngestTask> {
+        let queue_name = NOTIFICATION_QUEUE_PREFIX.to_owned() + name;
+        self.redis_persistant.queue::<IngestTask>(queue_name, None)
+    }
 }

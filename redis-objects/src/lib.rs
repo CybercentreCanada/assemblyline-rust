@@ -75,6 +75,7 @@ impl RedisObjects {
         Queue::new(name, self.clone(), ttl)
     }
 
+    /// an object that represents a set of queues with a common prefix
     pub fn multiqueue<T: Serialize + DeserializeOwned>(self: &Arc<Self>, prefix: String) -> MultiQueue<T> {
         MultiQueue::new(prefix, self.clone())
     }
@@ -84,14 +85,17 @@ impl RedisObjects {
         Hashmap::new(name, self.clone(), ttl)
     }
 
+    /// Create a sink to publish messages to a named channel
     pub fn publisher(self: &Arc<Self>, channel: String) -> Publisher {
         Publisher::new(self.clone(), channel)
     }
 
+    /// Write a message directly to the channel given
     pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
         retry_call!(self.pool, publish, channel, data)
     }
 
+    /// Start building a metrics exporter
     pub fn auto_exporting_metrics<T: MetricMessage>(self: &Arc<Self>, name: String, counter_type: String) -> AutoExportingMetricsBuilder<T> {
         AutoExportingMetricsBuilder::new(self.clone(), name, counter_type)
     }

@@ -14,7 +14,7 @@ pub mod error;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::{JsonMap, Sha256};
+use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, Utc};
 use collection::{Collection, OperationBatch};
@@ -1255,11 +1255,22 @@ impl Elastic {
             seen.insert("first".to_owned(), seen.get("first").unwrap_or(&json!(now)).clone());
 
             // Update Classification
-            current_fileinfo.insert("classification".to_owned(), json!(classification));
+            // current_fileinfo.insert("classification".to_owned(), json!(classification));
+            ExpandingClassification::<false>::insert(cl_engine, &mut current_fileinfo, &classification)?;
 
             // write the file
             // let current_fileinfo: File = serde_json::from_value(json!(current_fileinfo))?;
-            let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
+            // let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
+            // match result {
+            //     Ok(_) => return Ok(()),
+            //     Err(err) if err.is_version_conflict() => {
+            //         info!("Retrying save or freshen due to version conflict: {err}");
+            //         continue
+            //     },
+            //     Err(err) => return Err(err)
+            // }
+            let file: File = serde_json::from_value(serde_json::Value::Object(current_fileinfo))?;
+            let result = self.file.save(sha256, &file, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(()),
                 Err(err) if err.is_version_conflict() => {

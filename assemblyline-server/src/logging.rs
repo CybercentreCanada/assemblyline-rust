@@ -40,6 +40,7 @@ impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
     async fn call(&self, req: Request) -> poem::Result<Self::Output> {
         let start = Instant::now();
         let uri = req.uri().clone();
+        debug!("starting request for {uri}");
         match self.ep.call(req).await {
             Ok(resp) => {
                 debug!("request for {uri} handled ({} ms)", start.elapsed().as_millis());

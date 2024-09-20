@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{Display, EnumIter};
 
 
+pub(crate) const NOTIFICATION_QUEUE_PREFIX: &str = "nq-";
 pub(crate) const INGEST_INTERNAL_QUEUE_NAME: &str = "m-unique";
 pub(crate) const ALERT_QUEUE_NAME: &str = "m-alert";
 pub(crate) const CONFIG_HASH_NAME: &str = "config-data";
@@ -15,7 +16,7 @@ pub(crate) const INGEST_QUEUE_NAME: &str = "m-ingest";
 pub(crate) const SUBMISSION_QUEUE: &str = "dispatch-submission-queue";
 pub(crate) const ARCHIVE_QUEUE_NAME: &str = "m-archive";
 pub(crate) const DISPATCH_TASK_HASH: &str = "dispatch-active-submissions";
-pub(crate) const DISPATCH_RUNNING_TASK_HASH: &str = "dispatch-active-tasks";
+// pub(crate) const DISPATCH_RUNNING_TASK_HASH: &str = "dispatch-active-tasks";
 pub(crate) const SCALER_TIMEOUT_QUEUE: &str = "scaler-timeout-queue";
 
 

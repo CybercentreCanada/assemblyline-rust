@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::bail;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{result, submission, Error, File, Service, Submission};
 use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;

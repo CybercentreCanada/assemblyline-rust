@@ -1025,18 +1025,27 @@ impl Default for Datastore {
 // }
 
 
-// @odm.model(index=False, store=False, description="Filestore Configuration")
-// class Filestore(odm.Model):
-//     archive: List[str] = odm.List(odm.Keyword(), description="List of filestores used for malware archive")
-//     cache: List[str] = odm.List(odm.Keyword(), description="List of filestores used for caching")
-//     storage: List[str] = odm.List(odm.Keyword(), description="List of filestores used for storage")
+/// Filestore Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Filestore {
+    /// List of filestores used for malware archive
+    pub archive: Vec<String>,
+    /// List of filestores used for caching
+    pub cache: Vec<String>,
+    /// List of filestores used for storage
+    pub storage: Vec<String>,
+}
 
-
-// DEFAULT_FILESTORE = {
-//     "archive": ["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-archive&use_ssl=False"],
-//     "cache": ["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-cache&use_ssl=False"],
-//     "storage": ["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False"]
-// }
+impl Default for Filestore {
+    fn default() -> Self {
+        Self { 
+            archive: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-archive&use_ssl=False".to_string()], 
+            cache: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-cache&use_ssl=False".to_string()], 
+            storage: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False".to_string()] 
+        }
+    }
+}
 
 #[derive(Debug, strum::Display, SerializeDisplay, strum::EnumString, DeserializeFromStr)]
 #[strum(serialize_all="UPPERCASE", ascii_case_insensitive)]
@@ -1643,8 +1652,8 @@ pub struct Config {
     // /// Datasources configuration
     // #[serde(default = "default_datasources")]
     // pub datasources: HashMap<String, Datasource>,
-    // /// Filestore configuration
-    // pub filestore: Filestore,
+    /// Filestore configuration
+    pub filestore: Filestore,
     /// Logging configuration
     pub logging: Logging,
     /// Service configuration

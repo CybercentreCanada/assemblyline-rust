@@ -25,6 +25,16 @@ strum = { version = "0.26", features = ["derive"] }
 strum_macros = "0.26"
 environment_template = "0.1"
 clap = { version = "4.5", features = ["derive"] }
+hex = "*"
+uuid = "1.10"
+async-trait = "0.1"
+safe-path = "0.1"
+
+zip = "2.2"
+cart_container = "1.0"
+
+yara = { version = "0.28", features = ["serde", "vendored"] }
+magic = "0.16"
 
 # Core framework
 tokio = { version = "1", features = ["full"] }
@@ -37,7 +47,7 @@ url = "*"
 tokio-tungstenite = "0.20"
 http = "*"
 
-# Crypto libraries
+# Crypto/hash libraries
 openssl = { version = "0.10" }
 native-tls = "0.2"
 hyper-rustls = { version = "0.23", features = [] }
@@ -45,6 +55,9 @@ rustls = "0.20"
 sha1 = "*"
 sha2 = "*"
 md-5 = "*"
+tlsh2 = "*"
+# ssdeep = "0.6"
+ffuzzy = "0.3"
 
 # Database tools
 # elasticsearch = "8.5.0-alpha.1"
@@ -62,6 +75,11 @@ serde_with = "*"
 # data parsing
 nom = "*"
 regex = "*"
+
+[dependencies.magic-sys]
+version = "0.3"
+default-features = false
+features = ["v5-40"]
 
 [dev-dependencies]
 

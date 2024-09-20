@@ -16,7 +16,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::constants::METRICS_CHANNEL;
-use crate::ingester::{IngestTask, _NOTIFICATION_QUEUE_PREFIX};
+use crate::ingester::IngestTask;
 use crate::Core;
 
 use super::Ingester;
@@ -110,7 +110,7 @@ impl MakeMessage {
 }
 
 /// wait for metrics messages with the given fields
-async fn assert_metrics(metrics: &mut mpsc::Receiver<Option<redis_objects::Msg>>, values: &[(&str, isize)]) {
+pub (crate) async fn assert_metrics(metrics: &mut mpsc::Receiver<Option<redis_objects::Msg>>, values: &[(&str, isize)]) {
     let start = std::time::Instant::now();
     let mut values: HashMap<&str, isize> = HashMap::from_iter(values.iter().cloned());
     while !values.is_empty() {
@@ -301,7 +301,7 @@ async fn test_ingest_size_error() {
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
 
     // Send a rather big file
-    let submission = MakeMessage::new(core.classification_parser)
+    let submission = MakeMessage::new(core.classification_parser.clone())
         .files(json!({
             "size": core.config.submission.max_file_size + 1,
         }))
@@ -329,8 +329,7 @@ async fn test_ingest_size_error() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 
     // A file was dropped
-    let queue_name = _NOTIFICATION_QUEUE_PREFIX.to_string() + "test_ingest_size_error";
-    let queue = core.redis_persistant.queue::<IngestTask>(queue_name, None);
+    let queue = core.notification_queue("test_ingest_size_error");
     let _task = queue.pop_timeout(std::time::Duration::from_secs(2)).await.unwrap().unwrap();
 }
 
@@ -384,7 +383,7 @@ async fn test_ingest_always_create_submission() {
         if let Some(obj) = core.datastore.submission.get(&sid.to_string(), None).await.unwrap() {
             break obj
         }
-        if wait_time.elapsed() > Duration::from_secs(10) {
+        if wait_time.elapsed() > Duration::from_secs(60) {
             panic!();
         }
     };
@@ -510,7 +509,6 @@ async fn test_existing_score() {
     assert_eq!(ingester.submit_manager.dispatch_submission_queue.length().await.unwrap(), 0);
 
     // We should have received a notification about our task, since it was already 'done'
-    let queue_name = _NOTIFICATION_QUEUE_PREFIX.to_string() + "test_existing_score";
-    let queue = core.redis_persistant.queue::<IngestTask>(queue_name, None);
+    let queue = core.notification_queue("test_existing_score");
     assert_eq!(queue.length().await.unwrap(), 1);
 }

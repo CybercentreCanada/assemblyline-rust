@@ -146,18 +146,18 @@ pub struct URIInfo {
     pub uri: String,
 
     // https://www.rfc-editor.org/rfc/rfc1808.html#section-2.1
-    scheme: String,
-    netloc: String,
-    path: Option<String>,
-    params: Option<String>,
-    query: Option<String>,
-    fragment: Option<String>,
+    pub scheme: String,
+    pub netloc: String,
+    pub path: Option<String>,
+    pub params: Option<String>,
+    pub query: Option<String>,
+    pub fragment: Option<String>,
 
     // Ease-of-use elements
-    username: Option<String>,
-    password: Option<String>,
-    hostname: String,
-    port: Option<u16>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub hostname: String,
+    pub port: Option<u16>,
 }
 
 /// File Seen Model

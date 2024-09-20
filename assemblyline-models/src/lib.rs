@@ -13,8 +13,11 @@ pub mod config;
 pub mod messages;
 pub mod serialize;
 pub mod meta;
+pub mod types;
 
 pub use meta::ElasticMeta;
+pub use types::MD5;
+pub use types::Sha1;
 
 pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
@@ -116,6 +119,12 @@ pub struct Sha256 {
     hex: String
 }
 
+// impl Described<ElasticMeta> for internment::ArcIntern<String> {
+//     fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
+//         String::metadata()
+//     }
+// }
+
 impl std::fmt::Display for Sha256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.hex)
@@ -163,85 +172,7 @@ pub fn random_hex<R: rand::prelude::Rng + ?Sized>(rng: &mut R, size: usize) -> S
 #[cfg(feature = "rand")]
 impl rand::distributions::Distribution<Sha256> for rand::distributions::Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha256 {
-        Sha256{hex: random_hex(rng, 64)}
-    }
-}
-
-/// MD5 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
-#[metadata_type(ElasticMeta)]
-#[metadata(normalizer="lowercase_normalizer")]
-pub struct MD5(String);
-
-impl std::fmt::Display for MD5 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::ops::Deref for MD5 {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::str::FromStr for MD5 {
-    type Err = ModelError;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let hex = s.trim().to_ascii_lowercase();
-        if hex.len() != 32 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
-            return Err(ModelError::InvalidMd5(hex))
-        }
-        Ok(MD5(hex))
-    }
-}
-
-#[cfg(feature = "rand")]
-impl rand::distributions::Distribution<MD5> for rand::distributions::Standard {
-    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> MD5 {
-        MD5(random_hex(rng, 32))
-    }
-}
-
-/// Sha1 hash of a file
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
-#[metadata_type(ElasticMeta)]
-#[metadata(normalizer="lowercase_normalizer")]
-pub struct Sha1(String);
-
-impl std::fmt::Display for Sha1 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::ops::Deref for Sha1 {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::str::FromStr for Sha1 {
-    type Err = ModelError;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let hex = s.trim().to_ascii_lowercase();
-        if hex.len() != 40 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
-            return Err(ModelError::InvalidSha1(hex))
-        }
-        Ok(Sha1(hex))
-    }
-}
-
-#[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Sha1> for rand::distributions::Standard {
-    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha1 {
-        Sha1(random_hex(rng, 40))
+        Sha256{hex: random_hex(rng, 64) }
     }
 }
 
@@ -343,6 +274,28 @@ impl<const USER: bool> ExpandingClassification<USER> {
 
     pub fn as_str(&self) -> &str {
         &self.classification
+    }
+
+    pub fn insert(parser: &ClassificationParser, output: &mut JsonMap, classification: &str) -> Result<(), ModelError> {
+        use serde_json::json;
+        if parser.original_definition.enforce {
+            let parts = parser.get_classification_parts(classification, false, true, !USER)?;
+            let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
+
+            output.insert("classification".to_string(), json!(classification));
+            output.insert("__access_lvl__".to_string(), json!(parts.level));
+            output.insert("__access_req__".to_string(), json!(parts.required));
+            output.insert("__access_grp1__".to_string(), json!(if parts.groups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.groups }));
+            output.insert("__access_grp2__".to_string(), json!(if parts.subgroups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.subgroups }));
+            Ok(())
+        } else {
+            output.insert("classification".to_string(), json!(classification));
+            output.insert("__access_lvl__".to_string(), json!(0));
+            output.insert("__access_req__".to_string(), serde_json::Value::Array(Default::default()));
+            output.insert("__access_grp1__".to_string(), json!(&["__EMPTY__"]));
+            output.insert("__access_grp2__".to_string(), json!(&["__EMPTY__"]));
+            Ok(())
+        }
     }
 }
 

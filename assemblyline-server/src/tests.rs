@@ -4,20 +4,32 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::datastore::Service;
-use assemblyline_models::Sha256;
+use assemblyline_models::datastore::{Service, Submission};
+use assemblyline_models::messages::task::Task;
+use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
+use log::{error, info};
+use parking_lot::Mutex;
 use sha2::Digest;
 use rand::{thread_rng, Rng};
-use serde_json::json;
-use tokio::sync::mpsc;
+use serde_json::{from_value, json};
+use tokio::sync::{mpsc, Notify};
 
-use crate::constants::METRICS_CHANNEL;
+use assemblyline_models::messages::submission::{File, Notification, Submission as MessageSubmission};
+
+use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
+use crate::dispatcher::client::DispatchClient;
 use crate::dispatcher::Dispatcher;
+
+use crate::elastic::Elastic;
+use crate::filestore::FileStore;
 use crate::ingester::Ingester;
 use crate::services::test::{dummy_service, setup_services};
-use crate::{Core, TestGuard};
+use crate::{Core, Flag, TestGuard};
 
 // from __future__ import annotations
 // import hashlib
@@ -59,91 +71,146 @@ use crate::{Core, TestGuard};
 // if TYPE_CHECKING:
 //     from redis import Redis
 
-// RESPONSE_TIMEOUT = 60
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 
-// @pytest.fixture(scope='module')
-// def redis(redis_connection: Redis[Any]):
-//     redis_connection.flushdb()
-//     yield redis_connection
-//     redis_connection.flushdb()
+/// Replaces everything past the dispatcher.
+///
+/// Including service API, in the future probably include that in this test.
+struct MockService {
+    service_name: String,
+    service_queue: redis_objects::PriorityQueue<Task>,
+    classification_engine: Arc<ClassificationParser>,
+    // self.datastore = datastore
+    filestore: Arc<FileStore>,
+    // self.queue = get_service_queue(name, redis)
+    
+    hits: Mutex<HashMap<String, u64>>,
+    drops: Mutex<HashMap<String, u64>>,
 
+    running: Arc<Flag>,
+    dispatch_client: DispatchClient,
+    signal: Arc<Notify>,
+}
 
-// _global_semaphore = threading.Semaphore(value=1)
+impl MockService {
+    async fn new(name: &str, signal: Arc<Notify>, core: &Core) -> Arc<Self> {
+        // self.service_name = name
+        // self.datastore = datastore
+        // self.filestore = filestore
+        // self.queue = get_service_queue(name, redis)
+        // self.dispatch_client = DispatchClient(self.datastore, redis)
+        Arc::new(Self {
+            service_name: name.to_string(),
+            service_queue: core.get_service_queue(name),
+            running: core.running.clone(),
+            classification_engine: core.classification_parser.clone(),
+            filestore: core.filestore.clone(),
+            dispatch_client: DispatchClient::new_from_core(core).await.unwrap(),
+            hits: Mutex::new(Default::default()),
+            drops: Mutex::new(Default::default()),
+            signal,
+        })
+    }
 
+    async fn run(self: Arc<Self>) {
+        while self.running.read() {
+            let task = self.dispatch_client.request_work("worker", &self.service_name, "0", Some(Duration::from_secs(3)), true, None).await.unwrap();
+            let task = match task {
+                Some(task) => task,
+                None => continue,
+            };
+            info!("{} has received a job {}", self.service_name, task.sid);
 
-// class MockService(ServerBase):
-//     """Replaces everything past the dispatcher.
+            let file = self.filestore.get(&task.fileinfo.sha256).await.unwrap();
 
-//     Including service API, in the future probably include that in this test.
-//     """
+            let mut instructions: JsonMap = serde_json::from_slice(&file).unwrap();
+            let mut instructions: JsonMap = match instructions.remove(&self.service_name) {
+                Some(serde_json::Value::Object(value)) => value,
+                _ => Default::default()
+            };
 
-//     def __init__(self, name, datastore, redis, filestore):
-//         super().__init__('assemblyline.service.'+name)
-//         self.service_name = name
-//         self.datastore = datastore
-//         self.filestore = filestore
-//         self.queue = get_service_queue(name, redis)
-//         self.dispatch_client = DispatchClient(self.datastore, redis)
-//         self.hits = dict()
-//         self.drops = dict()
+            info!("{} following instruction: {instructions:?}", self.service_name);
+            let hits = {
+                let mut hit_table = self.hits.lock();
+                let hits = hit_table.entry(task.fileinfo.sha256.to_string()).or_default();
+                *hits += 1;
+                *hits
+            };
 
-//     def try_run(self):
-//         while self.running:
-//             task = self.dispatch_client.request_work('worker', self.service_name, '0', timeout=3)
-//             if not task:
-//                 continue
-//             self.log.info(f"{self.service_name} has received a job {task.sid}")
+            if let Some(hold) = instructions.get("hold") {
+                if let Some(hold) = hold.as_i64() {
+                    self.service_queue.push(0.0, &task).await.unwrap();
+                    info!("{} Requeued task, holding for {hold}", self.service_name);
+                    _ = tokio::time::timeout(Duration::from_secs(hold as u64), self.signal.notified()).await;
+                    continue
+                }
+            }
 
-//             file = self.filestore.get(task.fileinfo.sha256)
+            if let Some(lock) = instructions.get("lock") {
+                if let Some(lock) = lock.as_i64() {
+                    _ = tokio::time::timeout(Duration::from_secs(lock as u64), self.signal.notified()).await;
+                }
+            }
 
-//             instructions = json.loads(file)
-//             instructions = instructions.get(self.service_name, {})
-//             self.log.info(f"{self.service_name} following instruction: {instructions}")
-//             hits = self.hits[task.fileinfo.sha256] = self.hits.get(task.fileinfo.sha256, 0) + 1
+            if let Some(drop) = instructions.get("drop") {
+                if let Some(drop) = drop.as_i64() {
+                    if drop >= hits as i64 {
+                        *self.drops.lock().entry(task.fileinfo.sha256.to_string()).or_default() += 1;
+                        continue
+                    }
+                }
+            }
 
-//             if instructions.get('hold', False):
-//                 queue = get_service_queue(self.service_name, self.dispatch_client.redis)
-//                 queue.push(0, task.as_primitives())
-//                 self.log.info(f"{self.service_name} Requeued task to {queue.name} holding for {instructions['hold']}")
-//                 _global_semaphore.acquire(blocking=True, timeout=instructions['hold'])
-//                 continue
+            if instructions.get("failure").and_then(|x|x.as_bool()).unwrap_or(false) {
+                let mut error: assemblyline_models::datastore::Error = serde_json::from_value(instructions.get("error").unwrap().clone()).unwrap();
+                error.sha256 = task.fileinfo.sha256.clone();
+                let key = thread_rng().gen::<u128>().to_string();
+                self.dispatch_client.service_failed(task, &key, error).await.unwrap();
+                continue
+            }
 
-//             if instructions.get('lock', False):
-//                 _global_semaphore.acquire(blocking=True, timeout=instructions['lock'])
+            let mut result_data = json!({
+                "response": {
+                    "service_version": "0",
+                    "service_tool_version": "0",
+                    "service_name": self.service_name,
+                },
+                "result": {},
+                "sha256": task.fileinfo.sha256,
+                "expiry_ts": chrono::Utc::now() + chrono::TimeDelta::seconds(600)
+            });
 
-//             if 'drop' in instructions:
-//                 if instructions['drop'] >= hits:
-//                     self.drops[task.fileinfo.sha256] = self.drops.get(task.fileinfo.sha256, 0) + 1
-//                     continue
+            if let Some(result_data) = result_data.as_object_mut() {
+                ExpandingClassification::<false>::insert(&self.classification_engine, result_data, self.classification_engine.unrestricted()).unwrap();    
 
-//             if instructions.get('failure', False):
-//                 error = Error(instructions['error'])
-//                 error.sha256 = task.fileinfo.sha256
-//                 self.dispatch_client.service_failed(task.sid, error=error, error_key=get_random_id())
-//                 continue
+                if let Some(result) = instructions.get_mut("result") {
+                    if let Some(result) = result.as_object_mut() {
+                        if let Some(serde_json::Value::String(cl)) = result.get("classification") {
+                            ExpandingClassification::<false>::insert(&self.classification_engine, result_data, cl).unwrap();
+                        }
+                        result_data.append(result)
+                    }
+                }
+                if let Some(response) = instructions.get_mut("response") {
+                    if let Some(response) = response.as_object_mut() {
+                        if let Some(serde_json::Value::Object(result_data)) = result_data.get_mut("response") {
+                            result_data.append(response);
+                        }
+                    }
+                }
+            }
 
-//             result_data = {
-//                 'archive_ts': None,
-//                 'classification': 'U',
-//                 'response': {
-//                     'service_version': '0',
-//                     'service_tool_version': '0',
-//                     'service_name': self.service_name,
-//                 },
-//                 'result': {
-//                 },
-//                 'sha256': task.fileinfo.sha256,
-//                 'expiry_ts': time.time() + 600
-//             }
-
-//             result_data.update(instructions.get('result', {}))
-//             result_data['response'].update(instructions.get('response', {}))
-
-//             result = Result(result_data)
-//             result_key = instructions.get('result_key', get_random_id())
-//             self.dispatch_client.service_finished(task.sid, result_key, result)
-
+            let result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
+            let result_key: String = instructions
+                .get("result_key")
+                .and_then(|x|x.as_str())
+                .map(|x|x.to_string())
+                .unwrap_or_else(|| thread_rng().gen::<u64>().to_string());
+            self.dispatch_client.service_finished(task, result_key, result, None, None).await.unwrap();
+        }
+    }
+}
 
 // class CoreSession:
 //     def __init__(self, config, ingest):
@@ -232,23 +299,29 @@ use crate::{Core, TestGuard};
 
 fn test_services() -> HashMap<String, Service> {
     return [
-        ("pre", dummy_service("pre", "EXTRACT", None, None, None, None)),
-        ("core-a", dummy_service("core-a", "CORE", None, None, None, None)),
-        ("core-b", dummy_service("core-b", "CORE", None, None, None, None)),
-        ("finish", dummy_service("finish", "POST", None, None, None, None)),
+        ("pre", dummy_service("pre", "pre", None, None, None, None)),
+        ("core-a", dummy_service("core-a", "core", None, None, None, None)),
+        ("core-b", dummy_service("core-b", "core", None, None, None, None)),
+        ("finish", dummy_service("finish", "post", None, None, None, None)),
     ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
 }
 
 struct TestContext {
     core: Core,
     guard: TestGuard,
-    metrics: mpsc::Receiver<Option<redis_objects::Msg>>,
+    metrics: MetricsWatcher,
     dispatcher: Arc<Dispatcher>,
     ingester: Arc<Ingester>,
+    ingest_queue: redis_objects::Queue<MessageSubmission>,
+    components: tokio::task::JoinSet<()>,
+    signal: Arc<Notify>,
 }
 
-pub async fn setup() -> TestContext {
+async fn setup() -> TestContext {
     let (core, guard) = setup_services(test_services()).await;
+
+    let signal = Arc::new(Notify::new());
+    let mut components = tokio::task::JoinSet::new();
 
 //     # Block logs from being initialized, it breaks under pytest if you create new stream handlers
 //     from assemblyline.common import log as al_log
@@ -259,25 +332,28 @@ pub async fn setup() -> TestContext {
 
 //     ds = clean_datastore
 
-//     # Register services
-//     stages = get_service_stage_hash(redis)
+    // Register services
+    let mut services = HashMap::new();
+    let stages = core.services.get_service_stage_hash();
+    for (name, _service) in test_services() {
+        // ds.service.save(f'{svc}_0', dummy_service(svc, stage, docid=f'{svc}_0'))
+        // ds.service_delta.save(svc, ServiceDelta({
+        //     'name': svc,
+        //     'version': '0',
+        //     'enabled': True
+        // }))
+        stages.set(&name, &ServiceStage::Running).await.unwrap();
+        let service_agent = MockService::new(&name, signal.clone(), &core).await;
+        components.spawn(service_agent.clone().run());
+        services.insert(name, service_agent);
+    }
 
-//     services = []
-//     for svc, stage in [('pre', 'EXTRACT'), ('core-a', 'CORE'), ('core-b', 'CORE'), ('finish', 'POST')]:
-//         ds.service.save(f'{svc}_0', dummy_service(svc, stage, docid=f'{svc}_0'))
-//         ds.service_delta.save(svc, ServiceDelta({
-//             'name': svc,
-//             'version': '0',
-//             'enabled': True
-//         }))
-//         stages.set(svc, ServiceStage.Running)
-//         services.append(MockService(svc, ds, redis, filestore))
-
+    // setup test user
     let user: User = Default::default();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     core.datastore.user.commit(None).await.unwrap();
 
-    let mut components = tokio::task::JoinSet::new();
+
     // listed_services = ds.list_all_services(full=True)
     // assert len(listed_services) == 4
 
@@ -321,16 +397,19 @@ pub async fn setup() -> TestContext {
     // return fields
 
     TestContext {
-        metrics: core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()),
+        metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned())),
+        ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
         core,
         guard,
         dispatcher,
-        ingester
+        ingester,
+        components,
+        signal
     }
 }
 
 
-async fn ready_body(core: &Core, body: serde_json::Value) -> (Sha256, usize) {
+async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize) {
     let body = {
         let out = body.as_object_mut().unwrap();
         out.insert("salt".to_owned(), json!(thread_rng().gen::<u64>().to_string()));
@@ -340,17 +419,16 @@ async fn ready_body(core: &Core, body: serde_json::Value) -> (Sha256, usize) {
     let mut hasher = sha2::Sha256::default();
     hasher.update(body.as_bytes());
     let sha256 = Sha256::try_from(hasher.finalize().as_slice()).unwrap();
-    // core.filestore.put(&sha256, body).await.unwrap();
+    core.filestore.put(&sha256, body.as_bytes()).await.unwrap();
 
-    // with NamedTemporaryFile() as file:
-    //     file.write(out)
-    //     file.flush()
-    //     with forge.get_identify(use_cache=False) as identify:
-    //         fileinfo = identify.fileinfo(file.name)
+    let temporary_file = tempfile::NamedTempFile::new().unwrap();
+    tokio::fs::write(temporary_file.path(), body.as_bytes()).await.unwrap();
+    let fileinfo = core.identify.fileinfo(temporary_file.path().to_owned(), None, None, None).await.unwrap();
+    let serde_json::Value::Object(fileinfo) = serde_json::to_value(&fileinfo).unwrap() else { panic!() };
     let expiry = Some(chrono::Utc::now() + chrono::TimeDelta::seconds(500));
-    core.datastore.save_or_freshen_file(&sha256, fileinfo, expiry, "U".to_string(), &core.classification_parser).await.unwrap();
+    core.datastore.save_or_freshen_file(&sha256, fileinfo, expiry, core.classification_parser.unrestricted().to_owned(), &core.classification_parser).await.unwrap();
 
-    return sha256.hexdigest(), len(out)
+    return (sha256, body.len())
 }
 
 
@@ -371,101 +449,187 @@ async fn ready_body(core: &Core, body: serde_json::Value) -> (Sha256, usize) {
 //         }
 //     }
 //     return ready_body(core, body)
-    
+
+struct MetricsWatcher {
+    counts: Arc<Mutex<HashMap<String, HashMap<String, i64>>>>,
+}
+
+impl MetricsWatcher {
+    fn new(mut metrics: mpsc::Receiver<Option<redis_objects::Msg>>) -> Self {
+        let counts = Arc::new(Mutex::new(HashMap::<String, HashMap<String, i64>>::new()));
+        tokio::spawn({
+            let counts = counts.clone();
+            async move {
+                while let Some(msg) = metrics.recv().await {
+                    let message = match msg {
+                        Some(message) => message,
+                        None => continue,
+                    };
+                    let message: String = message.get_payload().unwrap();
+                    let message: JsonMap = serde_json::from_str(&message).unwrap();
+
+                    let message_type = if let Some(message_type) = message.get("type") {
+                        if let Some(message_type) = message_type.as_str() {
+                            message_type.to_string()
+                        } else {
+                            continue
+                        }
+                    } else {
+                        continue
+                    };
+
+                    {
+                        let mut counts = counts.lock();
+                        let type_counts = counts.entry(message_type).or_default();
+                        for (key, value) in message {
+                            if let Some(number) = value.as_number() {
+                                if let Some(number) = number.as_i64() {
+                                    *type_counts.entry(key).or_default() += number;
+                                }
+                            }                            
+                        }
+                
+                        type_counts.retain(|_, v| *v != 0);
+                    }
+                }
+            }
+        });
+        Self { counts }
+    }
+
+    /// wait for metrics messages with the given fields
+    pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
+        let start = std::time::Instant::now();
+        let mut values: HashMap<&str, i64> = HashMap::from_iter(values.iter().cloned());
+        while !values.is_empty() {
+            if start.elapsed() > std::time::Duration::from_secs(30) {
+                match self.counts.lock().get(service) {
+                    Some(count) => error!("Existing metrics for {service}: {count:?}"),
+                    None => error!("No metrics for {service}"),
+                };
+                panic!("Metrics failed {service} {:?}", values);
+            }
+
+            {
+                let mut count = self.counts.lock();
+                let type_counts = match count.get_mut(service) {
+                    Some(count) => count,
+                    None => continue,
+                };
+
+                for (key, value) in values.iter_mut() {
+                    let input_value = match type_counts.get_mut(*key) {
+                        Some(input) => input,
+                        None => continue
+                    };
+
+                    let change = *input_value.min(value);
+                    *input_value -= change;
+                    *value -= change;
+                }
+
+                values.retain(|_, v| *v != 0);
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+}
+
+
 /// MARK: deduplication
 /// Submit two identical jobs, check that they get deduped by ingester
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_deduplication() {
     let context = setup().await;
 
-    sha, size = ready_body(core, {
-        'pre': {'lock': 60}
-    })
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"lock": 60}
+    })).await;
 
-//     _global_semaphore = threading.Semaphore(value=0)
+    for _ in 0..2 {
+        context.ingest_queue.push(&MessageSubmission {
+            sid: thread_rng().gen(),
+            metadata: Default::default(),
+            params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+                .set_description("file abc123")
+                .set_services_selected(&[])
+                .set_submitter("user")
+                .set_groups(&["user"]),
+            notification: Notification {
+                queue: Some("output-queue-one".to_string()),
+                threshold: None,
+            },
+            files: vec![File {
+                sha256: sha.clone(),
+                size: Some(size as u64),
+                name: "abc123".to_string()
+            }],
+            time: chrono::Utc::now(),
+            scan_key: None,
+        }).await.unwrap();
+    }
 
-//     for _ in range(2):
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//             ),
-//             notification=dict(
-//                 queue='output-queue-one',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+    context.metrics.assert_metrics("ingester", &[("duplicates", 1)]).await;
+    context.signal.notify_one();
 
-//     metrics.expect('ingester', 'duplicates', 1)
-//     _global_semaphore.release()
+    // notification_queue = NamedQueue('', core.redis)
+    let notification_queue = context.core.notification_queue("output-queue-one");
+    let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     notification_queue = NamedQueue('nq-output-queue-one', core.redis)
-//     first_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+    // One of the submission will get processed fully
+    let first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(first_submission.state, SubmissionState::Completed);
+    assert_eq!(first_submission.files.len(), 1);
+    assert_eq!(first_submission.errors.len(), 0);
+    assert_eq!(first_submission.results.len(), 4);
 
-//     # One of the submission will get processed fully
-//     assert first_task is not None
-//     first_task = IngestTask(first_task)
-//     first_submission: Submission = core.ds.submission.get(first_task.submission.sid)
-//     assert first_submission.state == 'completed'
-//     assert len(first_submission.files) == 1
-//     assert len(first_submission.errors) == 0
-//     assert len(first_submission.results) == 4
+    // The other will get processed as a duplicate
+    // (Which one is the 'real' one and which is the duplicate isn't important for our purposes)
+    let second_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    assert_eq!(second_task.submission.sid, first_task.submission.sid);
 
-//     # The other will get processed as a duplicate
-//     # (Which one is the 'real' one and which is the duplicate isn't important for our purposes)
-//     second_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     second_task = IngestTask(second_task)
-//     assert second_task.submission.sid == first_task.submission.sid
+    // -------------------------------------------------------------------------------
+    // Submit the same body, but change a parameter so the cache key misses,
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            .set_max_extracted(10000),
+        notification: Notification {
+            queue: Some("2".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     # -------------------------------------------------------------------------------
-//     # Submit the same body, but change a parameter so the cache key misses,
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='2',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
-//     _global_semaphore.release()
+    context.signal.notify_one();
 
-//     notification_queue = NamedQueue('nq-2', core.redis)
-//     third_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     assert third_task
+    let notification_queue = context.core.notification_queue("2");
+    let third_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     # The third task should not be deduplicated by ingester, so will have a different submission
-//     third_task = IngestTask(third_task)
-//     third_submission: Submission = core.ds.submission.get(third_task.submission.sid)
-//     assert third_submission.state == 'completed'
-//     assert first_submission.sid != third_submission.sid
-//     assert len(third_submission.files) == 1
-//     assert len(third_submission.results) == 4
+    // The third task should not be deduplicated by ingester, so will have a different submission
+    let third_submission: Submission = context.core.datastore.submission.get(&third_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(third_submission.state, SubmissionState::Completed);
+    assert_ne!(first_submission.sid, third_submission.sid);
+    assert_eq!(third_submission.files.len(), 1);
+    assert_eq!(third_submission.results.len(), 4);
 
-//     metrics.expect('ingester', 'submissions_ingested', 3)
-//     metrics.expect('ingester', 'submissions_completed', 2)
-//     metrics.expect('ingester', 'files_completed', 2)
-//     metrics.expect('dispatcher', 'submissions_completed', 2)
-//     metrics.expect('dispatcher', 'files_completed', 2)
-    todo!()
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 3)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_completed", 2)]).await;
+    context.metrics.assert_metrics("ingester", &[("files_completed", 2)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 2), ("files_completed", 2)]).await;
 }
 
 #[tokio::test]

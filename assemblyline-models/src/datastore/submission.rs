@@ -211,6 +211,26 @@ impl SubmissionParams {
         }
     }
 
+    pub fn set_description(mut self, text: &str) -> Self {
+        self.description = Some(text.into()); self
+    }    
+
+    pub fn set_services_selected(mut self, selected: &[&str]) -> Self {
+        self.services.selected = selected.iter().map(|s|s.to_string()).collect(); self
+    }
+
+    pub fn set_submitter(mut self, submitter: &str) -> Self {
+        self.submitter = submitter.to_owned(); self
+    }
+
+    pub fn set_groups(mut self, groups: &[&str]) -> Self {
+        self.groups = groups.iter().map(|s|s.parse().unwrap()).collect(); self
+    }
+
+    pub fn set_max_extracted(mut self, max_extracted: i32) -> Self {
+        self.max_extracted = max_extracted; self
+    }
+
     /// Get the sections of the submission parameters that should be used in result hashes.
     fn get_hashing_keys(&self) -> Vec<(String, serde_json::Value)> {
         [
@@ -270,6 +290,19 @@ impl SubmissionParams {
         format!("{hex}v{version}")
     }
 }
+
+// pub struct SubmissionParamsBuilder {
+//     params: SubmissionParams,
+// }
+
+// impl SubmissionParamsBuilder {
+//     pub fn new(classification: ClassificationString) -> Self {
+//         Self { params: SubmissionParams::new(classification) }
+//     }
+
+
+// }
+
 
 /// Service Selection Scheme
 #[derive(Serialize, Deserialize, Default, Debug, Described, Clone)]

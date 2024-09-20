@@ -149,6 +149,12 @@ impl From<serde_json::Error> for ElasticErrorInner {
     }
 } 
 
+impl From<assemblyline_models::ModelError> for ElasticErrorInner {
+    fn from(value: assemblyline_models::ModelError) -> Self {
+        Self::JsonError(value.to_string())
+    }
+} 
+
 impl From<url::ParseError> for ElasticErrorInner {
     fn from(value: url::ParseError) -> Self {
         Self::NetworkError{ source: Box::new(value) }

@@ -1670,6 +1670,7 @@ mod test {
         assert!(!ce.is_accessible("L2//ORCON", "L2//ORCON/NOCON")?);
         assert!(!ce.is_accessible("L2//NOCON", "L2//ORCON/NOCON")?);
         assert!(ce.is_accessible("L2//ORCON/NOCON", "L2//ORCON/NOCON")?);
+        assert!(!ce.is_accessible("L2//REL A", "L2//REL A,X//R2")?);
 
         // Access limits due to releasability
         assert!(!ce.is_accessible("L2", "L2//REL A")?);
