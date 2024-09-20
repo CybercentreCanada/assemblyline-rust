@@ -1,4 +1,4 @@
-//! 
+//! Tool that submits files for processing in a consistant manner between API server and ingester
 
 use std::sync::Arc;
 
@@ -11,7 +11,7 @@ use chrono::{Utc, Duration};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 use assemblyline_models::datastore::submission::{Submission as DatastoreSubmission, SubmissionState};
 use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
-use redis_objects::{Queue, RedisObjects};
+use redis_objects::Queue;
 
 use crate::constants::SUBMISSION_QUEUE;
 use crate::elastic::Elastic;

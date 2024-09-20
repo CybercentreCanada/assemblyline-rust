@@ -25,7 +25,6 @@ use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
 use crate::dispatcher::client::DispatchClient;
 use crate::dispatcher::Dispatcher;
 
-use crate::elastic::Elastic;
 use crate::filestore::FileStore;
 use crate::ingester::Ingester;
 use crate::services::test::{dummy_service, setup_services};
@@ -75,7 +74,7 @@ const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 
 /// Replaces everything past the dispatcher.
-///
+/// MARK: MockService
 /// Including service API, in the future probably include that in this test.
 struct MockService {
     service_name: String,
@@ -315,22 +314,15 @@ struct TestContext {
     ingest_queue: redis_objects::Queue<MessageSubmission>,
     components: tokio::task::JoinSet<()>,
     signal: Arc<Notify>,
+    services: HashMap<String, Arc<MockService>>,
 }
 
+/// MARK: setup
 async fn setup() -> TestContext {
     let (core, guard) = setup_services(test_services()).await;
 
     let signal = Arc::new(Notify::new());
     let mut components = tokio::task::JoinSet::new();
-
-//     # Block logs from being initialized, it breaks under pytest if you create new stream handlers
-//     from assemblyline.common import log as al_log
-//     al_log.init_logging = lambda *args: None
-//     dispatcher.TIMEOUT_EXTRA_TIME = 1
-//     dispatcher.TIMEOUT_TEST_INTERVAL = 3
-//     # al_log.init_logging("simulation")
-
-//     ds = clean_datastore
 
     // Register services
     let mut services = HashMap::new();
@@ -353,10 +345,6 @@ async fn setup() -> TestContext {
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     core.datastore.user.commit(None).await.unwrap();
 
-
-    // listed_services = ds.list_all_services(full=True)
-    // assert len(listed_services) == 4
-
     // launch the ingester
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
     ingester.start(&mut components).await.unwrap();
@@ -368,13 +356,6 @@ async fn setup() -> TestContext {
     let dispatcher = Dispatcher::new(core.clone(), tcp).await.unwrap();
     dispatcher.start(&mut components);
 
-    // fields = CoreSession(config, ingester)
-    // fields.redis = redis
-    // fields.ds = ds
-
-    // fields.config = config
-    // forge.config_cache[None] = fields.config
-
     // threads = []
     // fields.filestore = filestore
     // fields.dispatcher = Dispatcher(datastore=ds, redis=redis, redis_persist=redis, config=config)
@@ -384,18 +365,6 @@ async fn setup() -> TestContext {
     //     Plumber(datastore=ds, redis=redis, redis_persist=redis, delay=0.5, config=config),
     // ]
 
-    // threads = threads + services
-
-    // for t in threads:
-    //     t.daemon = True
-    //     t.start()
-
-    // def stop_core():
-    //     [tr.stop() for tr in threads]
-    //     [tr.raising_join() for tr in threads]
-    // request.addfinalizer(stop_core)
-    // return fields
-
     TestContext {
         metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned())),
         ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
@@ -404,7 +373,8 @@ async fn setup() -> TestContext {
         dispatcher,
         ingester,
         components,
-        signal
+        signal,
+        services
     }
 }
 
@@ -431,24 +401,30 @@ async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize)
     return (sha256, body.len())
 }
 
+async fn ready_extract(core: &Core, children: &[Sha256]) -> (Sha256, usize) {
+    let mut extracted = vec![];
+    for child in children {
+        let mut entry = json!({
+            "name": child,
+            "sha256": child,
+            "description": "abc",
+        });
+        if let Some(entry) = entry.as_object_mut() {
+            ExpandingClassification::<false>::insert(&core.classification_parser, entry, core.classification_parser.unrestricted()).unwrap();
+        }
+        extracted.push(entry);
+    }
 
-// def ready_extract(core, children):
-//     if not isinstance(children, list):
-//         children = [children]
+    let body = json!({
+        "pre": {
+            "response": {
+                "extracted": extracted
+            }
+        }
+    });
 
-//     body = {
-//         'pre': {
-//             'response': {
-//                 'extracted': [{
-//                     'name': child,
-//                     'sha256': child,
-//                     'description': 'abc',
-//                     'classification': 'U'
-//                 } for child in children]
-//             }
-//         }
-//     }
-//     return ready_body(core, body)
+    return ready_body(core, body).await
+}
 
 struct MetricsWatcher {
     counts: Arc<Mutex<HashMap<String, HashMap<String, i64>>>>,
@@ -502,7 +478,7 @@ impl MetricsWatcher {
         let start = std::time::Instant::now();
         let mut values: HashMap<&str, i64> = HashMap::from_iter(values.iter().cloned());
         while !values.is_empty() {
-            if start.elapsed() > std::time::Duration::from_secs(30) {
+            if start.elapsed() > std::time::Duration::from_secs(20) {
                 match self.counts.lock().get(service) {
                     Some(count) => error!("Existing metrics for {service}: {count:?}"),
                     None => error!("No metrics for {service}"),
@@ -632,17 +608,18 @@ async fn test_deduplication() {
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 2), ("files_completed", 2)]).await;
 }
 
-#[tokio::test]
+/// MARK: ingest retry
+#[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_retry() {
     todo!()
-//     # -------------------------------------------------------------------------------
-//     #
-//     sha, size = ready_body(core)
-//     original_retry_delay = assemblyline_core.ingester.ingester._retry_delay
-//     assemblyline_core.ingester.ingester._retry_delay = 1
+//     let context = setup().await;
+//     let (sha, size) = ready_body(&context.core, json!({})).await;
 
-//     attempts = []
-//     failures = []
+//     // original_retry_delay = assemblyline_core.ingester.ingester._retry_delay
+//     // assemblyline_core.ingester.ingester._retry_delay = 1
+
+//     let attempts = vec![];
+//     let failures = vec![];
 //     original_submit = core.ingest.submit
 
 //     def fail_once(task):
@@ -654,53 +631,48 @@ async fn test_ingest_retry() {
 //             raise ValueError()
 //     core.ingest.submit = fail_once
 
-//     try:
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//             ),
-//             notification=dict(
-//                 queue='output-queue-one',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+//     context.ingest_queue.push(&MessageSubmission {
+//         sid: thread_rng().gen(),
+//         metadata: Default::default(),
+//         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+//             .set_description("file abc123")
+//             .set_services_selected(&[])
+//             .set_submitter("user")
+//             .set_groups(&["user"])
+//         notification: Notification {
+//             queue: Some("output-queue-one".to_string()),
+//             threshold: None,
+//         },
+//         files: vec![File {
+//             sha256: sha.clone(),
+//             size: Some(size as u64),
+//             name: "abc123".to_string()
+//         }],
+//         time: chrono::Utc::now(),
+//         scan_key: None,
+//     }).await.unwrap();
 
-//         notification_queue = NamedQueue('nq-output-queue-one', core.redis)
-//         first_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+//     let notification_queue = context.core.notification_queue("output-queue-one");
+//     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//         # One of the submission will get processed fully
-//         assert first_task is not None
-//         first_task = IngestTask(first_task)
-//         first_submission: Submission = core.ds.submission.get(first_task.submission.sid)
-//         assert len(attempts) == 2
-//         assert len(failures) == 1
-//         assert first_submission.state == 'completed'
-//         assert len(first_submission.files) == 1
-//         assert len(first_submission.errors) == 0
-//         assert len(first_submission.results) == 4
+//     // One of the submission will get processed fully
+//     let first_submission: Submission = context.core.datastore.submission.get(first_task.submission.sid, None).await.unwrap().unwrap();
+//     assert len(attempts) == 2
+//     assert len(failures) == 1
+//     assert first_submission.state == 'completed'
+//     assert len(first_submission.files) == 1
+//     assert len(first_submission.errors) == 0
+//     assert len(first_submission.results) == 4
 
-//         metrics.expect('ingester', 'submissions_ingested', 1)
-//         metrics.expect('ingester', 'submissions_completed', 1)
-//         metrics.expect('ingester', 'files_completed', 1)
-//         metrics.expect('ingester', 'duplicates', 0)
-//         metrics.expect('dispatcher', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'files_completed', 1)
+//     // metrics.expect('ingester', 'duplicates', 0)
+//     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
+//     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 
-//     finally:
-//         core.ingest.submit = original_submit
-//         assemblyline_core.ingester.ingester._retry_delay = original_retry_delay
+//     todo!()
 }
 
-#[tokio::test]
+/// MARK: ingest timeout
+#[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_timeout() {
     todo!()
 //     # -------------------------------------------------------------------------------
@@ -758,379 +730,381 @@ async fn test_ingest_timeout() {
 //         assemblyline_core.ingester.ingester._max_time = original_max_time
 }
 
-#[tokio::test]
+// MARK: service crash
+#[tokio::test(flavor = "multi_thread")]
 async fn test_service_crash_recovery() {
-    todo!()
-//     # This time have the service 'crash'
-//     sha, size = ready_body(core, {
-//         'pre': {'drop': 1}
-//     })
+    // This time have the service 'crash'
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"drop": 1}
+    })).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='watcher-recover',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("watcher-recover".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-watcher-recover', core.redis)
-//     dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     assert dropped_task
-//     dropped_task = IngestTask(dropped_task)
-//     sub = core.ds.submission.get(dropped_task.submission.sid)
-//     assert len(sub.errors) == 0  # No error raised if the service succeeds on retry
-//     assert len(sub.results) == 4
-//     assert core.pre_service.drops[sha] == 1
-//     assert core.pre_service.hits[sha] == 2
+    let notification_queue = context.core.notification_queue("watcher-recover");
+    let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     # Wait until we get feedback from the metrics channel
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('service', 'fail_recoverable', 1)
-//     metrics.expect('dispatcher', 'service_timeouts', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 1)
+    let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.errors.len(), 0);  // No error raised if the service succeeds on retry
+    assert_eq!(sub.results.len(), 4);
+    assert_eq!(*context.services.get("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 1);
+    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 2);
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
+    context.metrics.assert_metrics("service", &[("fail_recoverable", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("service_timeouts", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
 }
 
-#[tokio::test]
+// MARK: retry limit
+#[tokio::test(flavor = "multi_thread")]
 async fn test_service_retry_limit() {
-    todo!()
-//     # This time have the service 'crash'
-//     sha, size = ready_body(core, {
-//         'pre': {'drop': 3}
-//     })
+    // This time have the service 'crash'
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"drop": 3}
+    })).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='watcher-recover',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("watcher-recover".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-watcher-recover', core.redis)
-//     dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     assert dropped_task
-//     dropped_task = IngestTask(dropped_task)
-//     sub = core.ds.submission.get(dropped_task.submission.sid)
-//     assert len(sub.errors) == 1
-//     assert len(sub.results) == 3
-//     assert core.pre_service.drops[sha] == 3
-//     assert core.pre_service.hits[sha] == 3
+    let notification_queue = context.core.notification_queue("watcher-recover");
+    let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     # Wait until we get feedback from the metrics channel
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'service_timeouts', 3)
-//     metrics.expect('service', 'fail_recoverable', 3)
-//     metrics.expect('service', 'fail_nonrecoverable', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 1)
+    let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.errors.len(), 1);
+    assert_eq!(sub.results.len(), 3);
+    assert_eq!(*context.services.get("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 3);
+    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 3);
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
+    context.metrics.assert_metrics("service", &[("fail_recoverable", 3), ("fail_nonrecoverable", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("service_timeouts", 3), ("submissions_completed", 1), ("files_completed", 1)]).await;
 }
 
-#[tokio::test]
+// MARK: dropping early
+#[tokio::test(flavor = "multi_thread")]
 async fn test_dropping_early() {
-    todo!()
-//     # -------------------------------------------------------------------------------
-//     # This time have a file get marked for dropping by a service
-//     sha, size = ready_body(core, {
-//         'pre': {'result': {'drop_file': True}}
-//     })
+    // This time have a file get marked for dropping by a service
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"result": {"drop_file": true}}
+    })).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='drop',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("drop".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-drop', core.redis)
-//     dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     dropped_task = IngestTask(dropped_task)
-//     sub = core.ds.submission.get(dropped_task.submission.sid)
-//     assert len(sub.files) == 1
-//     assert len(sub.results) == 1
+    let notification_queue = context.core.notification_queue("drop");
+    let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 1)
+    let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 1);
+
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 }
 
-#[tokio::test]
+// MARK: service error
+#[tokio::test(flavor = "multi_thread")]
 async fn test_service_error() {
-    todo!()
-//     # -------------------------------------------------------------------------------
-//     # Have a service produce an error
-//     # -------------------------------------------------------------------------------
-//     # This time have a file get marked for dropping by a service
-//     sha, size = ready_body(core, {
-//         'core-a': {
-//             'error': {
-//                 'archive_ts': None,
-//                 'sha256': 'a'*64,
-//                 'response': {
-//                     'message': 'words',
-//                     'status': 'FAIL_NONRECOVERABLE',
-//                     'service_name': 'core-a',
-//                     'service_tool_version': 0,
-//                     'service_version': '0'
-//                 },
-//                 'expiry_ts': time.time() + 500
-//             },
-//             'failure': True,
-//         }
-//     })
+    // Have a service produce an error
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({
+        "core-a": {
+            "error": {
+                "sha256": vec!["a"; 64].join(""),
+                "response": {
+                    "message": "words",
+                    "status": "FAIL_NONRECOVERABLE",
+                    "service_name": "core-a",
+                    "service_tool_version": "0",
+                    "service_version": "0"
+                },
+                "expiry_ts": chrono::Utc::now() + chrono::TimeDelta::seconds(500),
+            },
+            "failure": true,
+        }
+    })).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='error',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("error".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-error', core.redis)
-//     task = IngestTask(notification_queue.pop(timeout=RESPONSE_TIMEOUT))
-//     sub = core.ds.submission.get(task.submission.sid)
-//     assert len(sub.files) == 1
-//     assert len(sub.results) == 3
-//     assert len(sub.errors) == 1
+    let notification_queue = context.core.notification_queue("error");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 1)
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 3);
+    assert_eq!(sub.errors.len(), 1);
+
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
 }
 
-#[tokio::test]
+// MARK: extracted file
+#[tokio::test(flavor = "multi_thread")]
 async fn test_extracted_file() {
-    todo!()
-//     sha, size = ready_extract(core, ready_body(core)[0])
+    let context = setup().await;
+    let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=10000
-//         ),
-//         notification=dict(
-//             queue='text-extracted-file',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("text-extracted-file".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-text-extracted-file', core.redis)
-//     task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     assert task
-//     task = IngestTask(task)
-//     sub = core.ds.submission.get(task.submission.sid)
-//     assert len(sub.files) == 1
-//     assert len(sub.results) == 8
-//     assert len(sub.errors) == 0
+    let notification_queue = context.core.notification_queue("text-extracted-file");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 2)
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 8);
+    assert_eq!(sub.errors.len(), 0);
+
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
 }
 
-#[tokio::test]
+// MARK: depth limit
+#[tokio::test(flavor = "multi_thread")]
 async fn test_depth_limit() {
-    todo!()
-//     # Make a nested set of files that goes deeper than the max depth by one
-//     sha, size = ready_body(core)
-//     for _ in range(core.config.submission.max_extraction_depth + 1):
-//         sha, size = ready_extract(core, sha)
+    let context = setup().await;
+    // Make a nested set of files that goes deeper than the max depth by one
+    let (mut sha, mut size) = ready_body(&context.core, json!({})).await;
+    for _ in 0..(context.core.config.submission.max_extraction_depth + 1) {
+        (sha, size) = ready_extract(&context.core, &[sha]).await;
+    }
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             # Make sure we can extract enough files that we will definitely hit the depth limit first
-//             max_extracted=core.config.submission.max_extraction_depth + 10
-//         ),
-//         notification=dict(
-//             queue='test-depth-limit',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            // Make sure we can extract enough files that we will definitely hit the depth limit first
+            .set_max_extracted(context.core.config.submission.max_extraction_depth as i32 + 10),
+        notification: Notification {
+            queue: Some("test-depth-limit".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-test-depth-limit', core.redis)
-//     start = time.time()
-//     task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     print("notification time waited", time.time() - start)
-//     assert task is not None
-//     task = IngestTask(task)
-//     sub: Submission = core.ds.submission.get(task.submission.sid)
-//     assert len(sub.files) == 1
-//     # We should only get results for each file up to the max depth
-//     assert len(sub.results) == 4 * core.config.submission.max_extraction_depth
-//     assert len(sub.errors) == 1
+    let notification_queue = context.core.notification_queue("test-depth-limit");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', core.config.submission.max_extraction_depth)
+    // start = time.time()
+    // task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+    // print("notification time waited", time.time() - start)
+
+    let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    // We should only get results for each file up to the max depth
+    assert_eq!(sub.results.len(), 4 * context.core.config.submission.max_extraction_depth as usize);
+    assert_eq!(sub.errors.len(), 1);
+
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", context.core.config.submission.max_extraction_depth.into())]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", context.core.config.submission.max_extraction_depth.into())]).await;
 }
 
-#[tokio::test]
+// MARK: extract in one
+#[tokio::test(flavor = "multi_thread")]
 async fn test_max_extracted_in_one() {
-    todo!()
-//     # Make a set of files that is bigger than max_extracted (3 in this case)
-//     children = [ready_body(core)[0] for _ in range(5)]
-//     sha, size = ready_extract(core, children)
-//     max_extracted = 3
+    let context = setup().await;
+    // Make a set of files that is bigger than max_extracted (3 in this case)
+    let mut children = vec![];
+    for _ in 0..5 {
+        children.push(ready_body(&context.core, json!({})).await.0);
+    }
+    let (sha, size) = ready_extract(&context.core, &children).await;
+    let max_extracted = 3;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=max_extracted
-//         ),
-//         notification=dict(
-//             queue='test-extracted-in-one',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            .set_max_extracted(max_extracted),
+        notification: Notification {
+            queue: Some("test-extracted-in-one".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-test-extracted-in-one', core.redis)
-//     start = time.time()
-//     task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//     print("notification time waited", time.time() - start)
-//     assert task is not None
-//     task = IngestTask(task)
-//     sub: Submission = core.ds.submission.get(task.submission.sid)
-//     assert len(sub.files) == 1
-//     # We should only get results for each file up to the max depth
-//     assert len(sub.results) == 4 * (1 + 3)
-//     assert len(sub.errors) == 2  # The number of children that errored out
+    let notification_queue = context.core.notification_queue("test-extracted-in-one");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', max_extracted + 1)
+    let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    // We should only get results for each file up to the max depth
+    assert_eq!(sub.results.len(), 4 * (1 + 3));
+    assert_eq!(sub.errors.len(), 2);  // The number of children that errored out
+
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", max_extracted as i64 + 1)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", max_extracted as i64 + 1)]).await;
 }
 
-#[tokio::test]
+// MARK: extract in N
+#[tokio::test(flavor = "multi_thread")]
 async fn test_max_extracted_in_several() {
-    todo!()
-//     # Make a set of in a non trivial tree, that add up to more than 3 (max_extracted) files
-//     children = [
-//         ready_extract(core, [ready_body(core)[0], ready_body(core)[0]])[0],
-//         ready_extract(core, [ready_body(core)[0], ready_body(core)[0]])[0]
-//     ]
-//     sha, size = ready_extract(core, children)
+    let context = setup().await;
+    // Make a set of in a non trivial tree, that add up to more than 3 (max_extracted) files
+    let (sha, size) = ready_extract(&context.core, &[
+        ready_extract(&context.core, &[
+            ready_body(&context.core, json!({})).await.0, 
+            ready_body(&context.core, json!({})).await.0
+        ]).await.0,
+        ready_extract(&context.core, &[
+            ready_body(&context.core, json!({})).await.0, 
+            ready_body(&context.core, json!({})).await.0
+        ]).await.0
+    ]).await;
 
-//     core.ingest_queue.push(SubmissionInput(dict(
-//         metadata={},
-//         params=dict(
-//             description="file abc123",
-//             services=dict(selected=''),
-//             submitter='user',
-//             groups=['user'],
-//             max_extracted=3
-//         ),
-//         notification=dict(
-//             queue='test-extracted-in-several',
-//             threshold=0
-//         ),
-//         files=[dict(
-//             sha256=sha,
-//             size=size,
-//             name='abc123'
-//         )]
-//     )).as_primitives())
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            .set_max_extracted(3),
+        notification: Notification {
+            queue: Some("test-extracted-in-several".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//     notification_queue = NamedQueue('nq-test-extracted-in-several', core.redis)
-//     task = IngestTask(notification_queue.pop(timeout=RESPONSE_TIMEOUT))
-//     sub: Submission = core.ds.submission.get(task.submission.sid)
-//     assert len(sub.files) == 1
-//     # We should only get results for each file up to the max depth
-//     assert len(sub.results) == 4 * (1 + 3)  # 4 services, 1 original file, 3 extracted files
-//     assert len(sub.errors) == 3  # The number of children that errored out
+    let notification_queue = context.core.notification_queue("test-extracted-in-several");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     metrics.expect('ingester', 'submissions_ingested', 1)
-//     metrics.expect('ingester', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'submissions_completed', 1)
-//     metrics.expect('dispatcher', 'files_completed', 4)
+    let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    // We should only get results for each file up to the max depth
+    assert_eq!(sub.results.len(), 4 * (1 + 3));  // 4 services, 1 original file, 3 extracted files
+    assert_eq!(sub.errors.len(), 3);  // The number of children that errored out
+
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 4)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 4)]).await;
 }
 
-#[tokio::test]
+// MARK: caching
+#[tokio::test(flavor = "multi_thread")]
 async fn test_caching() {
     todo!()
 //     sha, size = ready_body(core)
@@ -1185,7 +1159,8 @@ async fn test_caching() {
 //     assert sid1 == sid3
 }
 
-#[tokio::test]
+// MARK: plumber
+#[tokio::test(flavor = "multi_thread")]
 async fn test_plumber_clearing() {
     todo!()
 //     global _global_semaphore
@@ -1253,7 +1228,8 @@ async fn test_plumber_clearing() {
 //         core.ds.service_delta.save('pre', service_delta)
 }
 
-#[tokio::test]
+// MARK: filter
+#[tokio::test(flavor = "multi_thread")]
 async fn test_filter() {
     todo!()
 //     from assemblyline.common.postprocess import SubmissionFilter, PostprocessAction
@@ -1310,7 +1286,8 @@ async fn test_filter() {
 //         core.dispatcher.postprocess_worker.actions.pop('test_process')
 }
 
-#[tokio::test]
+// MARK: tag filter
+#[tokio::test(flavor = "multi_thread")]
 async fn test_tag_filter() {
     todo!()
 //     from assemblyline.common.postprocess import SubmissionFilter, PostprocessAction

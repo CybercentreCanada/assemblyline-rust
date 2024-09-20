@@ -288,7 +288,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
     /// 
     /// Versioned get-save for atomic update has three paths:
     ///   1. Document doesn't exist at all. Create token will be returned for version.
-    /// This way only the first query to try and create the document will succeed.
+    ///      This way only the first query to try and create the document will succeed.
     ///   2. Document exists. A version string with the info needed to do a versioned save is returned.
     ///
     /// The create token is needed to differentiate between "I'm saving a new
@@ -668,8 +668,7 @@ impl OperationBatch {
     pub fn to_script(&self) -> serde_json::Value {
         let mut op_sources = vec![];
         let mut op_params = HashMap::<String, serde_json::Value>::new();
-        let mut val_id = 0;
-        for (op, doc_key, value) in &self.operations {
+        for (val_id, (op, doc_key, value)) in self.operations.iter().enumerate() {
             match op {
                 UpdateOperation::Set => {
                     op_sources.push(format!("ctx._source.{doc_key} = params.value{val_id}"));
@@ -729,8 +728,6 @@ impl OperationBatch {
                     op_params.insert(format!("value{val_id}"), value.clone());
                 }
             }
-
-            val_id += 1;
         }
 
         let joined_sources = op_sources.into_iter().join(";\n");

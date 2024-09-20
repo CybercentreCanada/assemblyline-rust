@@ -19,7 +19,6 @@ use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, File, Ser
 use chrono::{DateTime, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
-use itertools::Itertools;
 use log::info;
 use reqwest::{Method, StatusCode};
 use responses::DescribeIndex;
@@ -1250,7 +1249,7 @@ impl Elastic {
             let seen = seen.as_object_mut().unwrap();
 
             // seen.entry("count") = seen.get('count', 0) + 1
-            seen.insert("count".to_string(), json!(extract_number(&seen, "count") + 1));
+            seen.insert("count".to_string(), json!(extract_number(seen, "count") + 1));
             seen.insert("last".to_owned(), json!(now));
             seen.insert("first".to_owned(), seen.get("first").unwrap_or(&json!(now)).clone());
 
@@ -1294,12 +1293,9 @@ fn extract_number(container: &JsonMap, name: &str) -> u64 {
 mod test {
     use std::sync::Arc;
 
-    use assemblyline_markings::classification;
     use assemblyline_models::datastore::{File, Service};
-    use assemblyline_models::JsonMap;
     use log::debug;
     use rand::{thread_rng, Rng};
-    use sha2::Digest;
 
     use super::Elastic;
 

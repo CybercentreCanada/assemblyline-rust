@@ -135,12 +135,6 @@ pub struct Identify {
 
 impl Identify {
     pub async fn new(cache: Option<CacheStore>, redis_volatile: Arc<RedisObjects>) -> Result<Arc<Self>> {
-//     def __init__(self, use_cache: bool = True, config=None, datastore=None, log=None) -> None:
-        // self.config = None
-        // self.datastore = None
-        // self.use_cache = use_cache
-        // self.lock = threading.Lock()
-
         // Load all data for the first time
         let (file_type, mime_type) = Self::_load_magic_file(&cache).await.context("_load_bagic_file")?;
         let yara_rules = Self::_load_yara_file(&cache).await.context("_load_yara_file")?;
@@ -162,19 +156,6 @@ impl Identify {
         // If cache is use, load the config and datastore objects to load potential items from cache
         if obj.cache.is_some() {
             info!("Using cache with identify");
-
-            // self.config = config or get_config()
-            // self.datastore = datastore or get_datastore(config)
-
-            // self.reload_map = {
-            //     "magic": self._load_magic_file,
-            //     "mimes": self._load_trusted_mimes,
-            //     "patterns": self._load_magic_patterns,
-            //     "yara": self._load_yara_file,
-            // }
-            // self.reload_watcher: Optional[EventWatcher[str]] = EventWatcher()
-            // self.reload_watcher.register("system.identify", self._handle_reload_event)
-            // self.reload_watcher.start()
             let messages = redis_volatile.subscribe("system.identify".to_owned());
             let obj = obj.clone();
             tokio::spawn(async move {

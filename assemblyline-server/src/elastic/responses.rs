@@ -1,8 +1,6 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use assemblyline_models::JsonMap;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 
@@ -111,7 +109,7 @@ pub struct Shards {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum ShardsFailure {
+pub enum ShardsFailure {
     NoFailures(i64),
     Failures(Vec<String>)
 }

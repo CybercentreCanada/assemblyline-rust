@@ -201,7 +201,7 @@ impl ServiceHelper {
             };
             // let rejected = bool(service.rejects) and re.match(service.rejects, file_type)
             let rejected = match &service.rejects {
-                Some(rejects) if !rejects.trim().is_empty() => self.regex_cache.matches(&rejects, file_type)?,
+                Some(rejects) if !rejects.trim().is_empty() => self.regex_cache.matches(rejects, file_type)?,
                 _ => false,
             };
 
@@ -360,7 +360,7 @@ pub mod test {
 //     return sub
 
     use std::collections::HashMap;
-    use std::sync::Arc;
+    // use std::sync::Arc;
     use std::time::Duration;
 
     use crate::constants::ServiceStage;

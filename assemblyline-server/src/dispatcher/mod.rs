@@ -1287,7 +1287,7 @@ impl Dispatcher {
                     }).await?;
                 },
                 DispatchAction::Check(_) => {
-                    info!("[{sid}] submission timeout, checking dispatch status...");
+                    info!("[{sid}] checking dispatch status...");
                     finished = self.check_submission(task).await?;
 
                     // If we didn't finish the submission here, wait another 20 minutes

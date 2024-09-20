@@ -113,6 +113,7 @@ impl rand::distributions::Distribution<Response> for rand::distributions::Standa
 #[metadata(index=true, store=true)]
 pub struct Error {
     /// Error creation timestamp
+    #[serde(default="chrono::Utc::now")]
     pub created: DateTime<Utc>,
     /// Expiry timestamp
     #[metadata(store=false)]

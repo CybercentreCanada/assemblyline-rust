@@ -279,8 +279,8 @@ impl<const USER: bool> ExpandingClassification<USER> {
     pub fn insert(parser: &ClassificationParser, output: &mut JsonMap, classification: &str) -> Result<(), ModelError> {
         use serde_json::json;
         if parser.original_definition.enforce {
-            let parts = parser.get_classification_parts(classification, false, true, !USER)?;
-            let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
+            let parts = parser.get_classification_parts(classification, true, true, !USER)?;
+            let classification = parser.get_normalized_classification_text(parts.clone(), true, false)?;
 
             output.insert("classification".to_string(), json!(classification));
             output.insert("__access_lvl__".to_string(), json!(parts.level));

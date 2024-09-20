@@ -686,7 +686,7 @@ fn default_redis_persistant() -> RedisServer {
 pub struct Metrics {
 //     apm_server: APMServer = odm.Compound(APMServer, default=DEFAULT_APM_SERVER, description="APM server configuration")
 //     elasticsearch: ESMetrics = odm.Compound(ESMetrics, default=DEFAULT_ES_METRICS, description="Where to export metrics?")
-    /// How often should we be exporting metrics?
+    /// How often should we be exporting metrics in seconds?
     pub export_interval: u32,
     /// Redis for Dashboard metrics
     pub redis: RedisServer,
