@@ -20,6 +20,7 @@ use chrono::{DateTime, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
 use log::info;
+use rand::Rng;
 use reqwest::{Method, StatusCode};
 use responses::DescribeIndex;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ pub enum Version {
     Expected{primary_term: i64, sequence_number: i64},
 }
 
+const ALT_ELASTICSEARCH_USERS: &[&str] = &["plumber"];
 
 /// Methods supported for copying indices
 enum CopyMethod {
@@ -132,10 +134,60 @@ struct Request {
 //             raise_conflicts: false
 //         }
 //     }
-// }
+// }wait_for_completion
 
 impl Request {
+    pub fn get_task(host: &reqwest::Url, task_id: &str, wait_for_completion: bool, timeout: &str) -> Result<Self> {
+        let mut url = host.join(&format!("/_tasks/{task_id}"))?;
+
+        url.query_pairs_mut()
+            .append_pair("wait_for_completion", &wait_for_completion.to_string().to_lowercase())
+            .append_pair("timeout", timeout);
+
+        Ok(Self {
+            method: Method::GET,
+            url,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn delete_by_query(host: &reqwest::Url, name: &str, wait_for_completion: bool, conflicts: &str, max_docs: Option<u64>) -> Result<Self> {
+        let mut url = host.join(&format!("/{name}/_delete_by_query"))?;
+
+        url.query_pairs_mut()
+            .append_pair("wait_for_completion", &wait_for_completion.to_string().to_lowercase())
+            .append_pair("conflicts", conflicts);
+        if let Some(max_docs) = max_docs {
+            url.query_pairs_mut().append_pair("max_docs", &max_docs.to_string());
+        }
+
+        Ok(Self {
+            method: Method::POST,
+            url,
+            index_name: Some(name.to_owned()),
+            raise_conflicts: false,
+        })
+    }
     
+    pub fn post_user(host: &reqwest::Url, name: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join(&format!("_security/user/{name}"))?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn put_role(host: &reqwest::Url, name: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join(&format!("_security/role/{name}"))?,
+            index_name: None,
+            raise_conflicts: false,
+        })
+    }
+
     pub fn put_index_settings(host: &reqwest::Url, index: &str) -> Result<Self> {
         Ok(Self {
             method: Method::PUT,
@@ -579,6 +631,8 @@ fn get_transport_timeout() -> std::time::Duration {
     std::time::Duration::from_secs(seconds)
 }
 
+// MARK: ElasticHelper
+
 /// Wrapper around the elasticsearch client for helper methods used across contexts
 /// This struct is deliberately private to this module
 struct ElasticHelper {
@@ -610,6 +664,15 @@ impl ElasticHelper {
             archive_access,
         })
     }
+
+    fn change_host(&self, url: url::Url) -> Self {
+        ElasticHelper{
+            client: self.client.clone(),
+            host: url,
+            archive_access: self.archive_access,
+        }
+    }
+
 
     // async fn connection_reset(&self) -> Result<()> {
     //     *self.es.write().await = Self::_create_connection(self.host.clone())?;
@@ -772,6 +835,17 @@ impl ElasticHelper {
                 return Ok(None)
             }
             return Err(ElasticErrorInner::Fatal("Database not available".to_string()).into())
+        } else if StatusCode::REQUEST_TIMEOUT == status {
+            return Err(ElasticErrorInner::Timeout.into())
+        } else if StatusCode::INTERNAL_SERVER_ERROR == status {
+            // some errors don't have a status code assigned to them, try to read them from the body
+            if let Ok(body) = serde_json::from_str::<responses::Error>(&body) {
+                if body.error._type == "timeout_exception" {
+                    return Err(ElasticErrorInner::Timeout.into())
+                }
+                return Err(ElasticError::fatal("server error: ".to_owned() + &body.error._type))
+            }
+            return Err(ElasticError::fatal("server error"))
         }
 
         todo!("{url} {status:?} {body:?} {headers:?}");
@@ -1020,6 +1094,8 @@ pub fn default_settings(index: serde_json::Value) -> serde_json::Value {
    })
 }
 
+// MARK: Elastic
+
 /// Public interface to our elastic datastore.
 /// details are actually in Collection and ElasticHelper classes.
 pub struct Elastic {
@@ -1045,6 +1121,10 @@ pub struct Elastic {
 impl Elastic {
     pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
         let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
+        Self::setup(helper, prefix).await
+    }
+
+    async fn setup(helper: Arc<ElasticHelper>, prefix: &str) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
             es: helper.clone(),
             file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned()), prefix.to_string()).await?,
@@ -1084,6 +1164,93 @@ impl Elastic {
         Ok(())
     } 
 
+    pub async fn switch_user(&self, username: &str) -> Result<Arc<Elastic>> {
+        if !ALT_ELASTICSEARCH_USERS.contains(&username){
+            warn!("Unknown alternative user '{username}' to switch to for Elasticsearch");
+        }
+        // generate a format safe random password that is just 16 characters of hex
+        let password = hex::encode(rand::thread_rng().gen::<u128>().to_be_bytes());
+
+        if username.starts_with("plumber") {
+            // Ensure roles for "plumber" user are created
+            let request = Request::put_role(&self.es.host, "manage_tasks")?;
+            self.es.make_request_json(&mut 0, &request, &json!({
+                "indices": [{
+                    "names": [".tasks"], 
+                    "privileges": ["all"], 
+                    "allow_restricted_indices": true,
+                }]
+            })).await?;
+            // self.with_retries(
+            //     self.client.security.put_role,
+            //     name="manage_tasks",
+            //     indices=[{}])
+
+            // Initialize/update 'plumber' user in Elasticsearch to perform cleanup
+            let request = Request::post_user(&self.es.host, username)?;
+            self.es.make_request_json(&mut 0, &request, &json!({
+                "password": password,
+                "roles": ["manage_tasks", "superuser"]
+            })).await?;
+        }
+
+        // Modify the client details for next reconnect
+        let mut url = self.es.host.clone();
+
+        url.set_username(username).map_err(|_| ElasticErrorInner::Fatal("Could not set username when switching user".to_owned()))?;
+        url.set_password(Some(&password)).map_err(|_| ElasticErrorInner::Fatal("Could not set password when switching user".to_owned()))?;
+
+        // self._hosts = [h.replace(f"{urlparse(h).username}:{urlparse(h).password}",
+        //                         f"{username}:{password}") for h in self._hosts]
+        // self.client.close()
+        // self.connection_reset()
+        let helper = Arc::new(self.es.change_host(url));
+        Self::setup(helper, &self.prefix).await
+    }
+
+    pub async fn task_cleanup(&self, deleteable_task_age: Option<chrono::TimeDelta>, max_tasks: Option<u64>) -> Result<u64> {
+        let deleteable_task_age = deleteable_task_age.unwrap_or(chrono::TimeDelta::zero());
+
+        // Create the query to delete the tasks
+        //   NOTE: This will delete up to 'max_tasks' completed tasks older then a 'deleteable_task_age'
+        let q = format!("completed:true AND task.start_time_in_millis:<{}", (Utc::now() - deleteable_task_age).timestamp_millis());
+
+        // Create a new task to delete expired tasks
+        let request = Request::delete_by_query(&self.es.host, ".tasks", false, "proceed", max_tasks)?;
+        let task: responses::TaskId = self.es.make_request_json(&mut 0, &request, &json!({
+            "query": {"bool": {"must": {"query_string": {"query": q}}}},
+        })).await?.json().await?;
+
+        // Wait until the tasks deletion task is over
+        let res = self.get_task_results(&task.task).await?;
+
+        // return the number of deleted items
+        return Ok(res._status.deleted)
+    }
+
+    // retry_function=None
+    async fn get_task_results(&self, task: &str) -> Result<responses::TaskResponse> {
+        // This function is only used to wait for a asynchronous task to finish in a graceful manner without
+        //  timing out the elastic client. You can create an async task for long running operation like:
+        //   - update_by_query
+        //   - delete_by_query
+        //   - reindex ...
+        // if retry_function is None:
+        //     retry_function = self.with_retries
+
+        let res: responses::TaskBody = loop {
+            let request = Request::get_task(&self.es.host, task, true, "5s")?;
+            let res = self.es.make_request(&mut 0, &request).await;
+
+            match res {
+                Ok(ok) => break ok.json().await?,
+                Err(err) if err.is_timeout() => { continue }
+                Err(err) => return Err(err)
+            }
+        };
+
+        Ok(res.response)
+    }
     // pub async fn update_service_delta(&self, name: &str, delta: &JsonMap) -> Result<()> {
     //     todo!();
     // }
@@ -1289,6 +1456,7 @@ fn extract_number(container: &JsonMap, name: &str) -> u64 {
     }
 }
 
+// MARK: test
 #[cfg(test)]
 mod test {
     use std::sync::Arc;

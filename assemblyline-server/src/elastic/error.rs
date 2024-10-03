@@ -42,6 +42,10 @@ impl ElasticError {
     pub fn is_resource_already_exists(&self) -> bool {
         self.inner.is_resource_already_exists()
     }
+    
+    pub fn is_timeout(&self) -> bool {
+        self.inner.is_timeout()
+    }
 }
 
 impl<T: Into<ElasticErrorInner>> From<T> for ElasticError {
@@ -79,6 +83,8 @@ pub enum ElasticErrorInner {
     VersionConflict(String),
     #[error("Resource conflict, already exists")]
     ResourceAlreadyExists,
+    #[error("Server side request timeout")]
+    Timeout,
 
     // Some errors that handle specific AL runtime conditions, but probably won't be handled outright
     #[error("Index {0} does not have an archive")]
@@ -139,6 +145,10 @@ impl ElasticErrorInner {
             Self::Context{inner, ..} => inner.is_resource_already_exists(),
             _ => false,
         }
+    }
+
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, ElasticErrorInner::Timeout)
     }
 }
 

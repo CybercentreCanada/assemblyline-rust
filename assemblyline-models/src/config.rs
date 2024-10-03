@@ -87,6 +87,33 @@ pub struct PostprocessAction {
     pub archive_submission: bool,
 }
 
+impl PostprocessAction {
+    pub fn new(filter: String) -> Self {
+        Self {
+            enabled: Default::default(),
+            run_on_cache: Default::default(),
+            run_on_completed: Default::default(),
+            filter,
+            webhook: Default::default(),
+            raise_alert: Default::default(),
+            resubmit: Default::default(),
+            archive_submission: Default::default(),
+        }
+    }
+
+    pub fn enable(mut self) -> Self {
+        self.enabled = true; self
+    }
+
+    pub fn alert(mut self) -> Self {
+        self.raise_alert = true; self
+    }
+
+    pub fn on_completed(mut self) -> Self {
+        self.run_on_completed = true; self
+    }
+}
+
 pub fn default_postprocess_actions() -> HashMap<String, PostprocessAction> {
     // Raise alerts for all submissions over 500, both on cache hits and submission complete
     [("default_alerts".to_string(), PostprocessAction{
@@ -927,6 +954,8 @@ pub struct Core {
     pub ingester: Ingester,
     /// Configuration for Metrics Collection
     pub metrics: Metrics,
+    /// Configuration for system cleanup
+    pub plumber: Plumber,
     /// Configuration for Redis instances
     pub redis: Redis,
     // /// Configuration for Scaler
@@ -951,6 +980,27 @@ pub struct Core {
 //     "scaler": DEFAULT_SCALER,
 //     "updater": DEFAULT_UPDATER,
 // }
+
+/// Plumber Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Plumber {
+    /// Interval in seconds at which the notification queue cleanup should run
+    pub notification_queue_interval: u64,
+    /// Max age in seconds notification queue messages can be
+    pub notification_queue_max_age: u64,
+}
+
+impl Default for Plumber {
+    fn default() -> Self {
+        Self { 
+            notification_queue_interval: 30 * 60,
+            notification_queue_max_age: 24 * 60 * 60
+        }
+    }
+}
+
+
 
 
 /// Datastore Archive feature configuration

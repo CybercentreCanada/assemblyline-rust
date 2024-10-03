@@ -231,6 +231,10 @@ impl SubmissionParams {
         self.max_extracted = max_extracted; self
     }
 
+    pub fn set_generate_alert(mut self, alert: bool) -> Self {
+        self.generate_alert = alert; self
+    }
+
     /// Get the sections of the submission parameters that should be used in result hashes.
     fn get_hashing_keys(&self) -> Vec<(String, serde_json::Value)> {
         [

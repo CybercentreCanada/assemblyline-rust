@@ -14,7 +14,7 @@ use assemblyline_models::datastore::submission::SubmissionParams;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
 use itertools::Itertools;
-use log::{error, warn};
+use log::{error, info, warn};
 use parking_lot::{RwLock, Mutex};
 use redis_objects::RedisObjects;
 use tokio::sync::mpsc;
@@ -247,12 +247,12 @@ async fn service_daemon(datastore: Arc<Elastic>, mut changes: ChangeChannel, inf
     }
 }
 
-async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, info: Arc<RwLock<ServiceInfo>>) -> Result<()> {
+async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, service_info: Arc<RwLock<ServiceInfo>>) -> Result<()> {
     // 
     let mut refresh_interval = tokio::time::interval(REFRESH_INTERVAL);
 
     // load services as long as someone is holding a pointer to the service list
-    while Arc::strong_count(&info) > 1 {
+    while Arc::strong_count(&service_info) > 1 {
         tokio::select!{
             // wait for a change notification
             change = changes.recv() => {
@@ -260,11 +260,13 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, i
                 if let Some(change) = change {
                     // update the service information based on the service specified
                     if change.operation.is_removed() {
-                        info.write().services.remove(&change.name);
+                        info!("Service Watcher: Service removed: {}", change.name);
+                        service_info.write().services.remove(&change.name);
                         // don't worry about access_cache on this branch, extra service names will be ignored
                     } else {
+                        info!("Service Watcher: Service changed: {}", change.name);
                         let service_data = datastore.get_service_with_delta(&change.name, None).await?;
-                        let mut info = info.write();
+                        let mut info = service_info.write();
                         match service_data {
                             Some(service) => info.services.insert(change.name, Arc::new(service)),
                             None => info.services.remove(&change.name),
@@ -281,8 +283,9 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, i
         }
 
         // Refresh service list
+        info!("Service Watcher: Reloading all services");
         let new_services = datastore.list_all_services().await?;
-        let mut info = info.write();
+        let mut info = service_info.write();
         info.services = new_services.into_iter()
             .map(|service|(service.name.clone(), Arc::new(service)))
             .collect();

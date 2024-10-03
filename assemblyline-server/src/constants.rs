@@ -19,10 +19,11 @@ pub(crate) const DISPATCH_TASK_HASH: &str = "dispatch-active-submissions";
 // pub(crate) const DISPATCH_RUNNING_TASK_HASH: &str = "dispatch-active-tasks";
 pub(crate) const SCALER_TIMEOUT_QUEUE: &str = "scaler-timeout-queue";
 
+pub(crate) const SERVICE_QUEUE_PREFIX: &str = "service-queue-";
 
 /// Take the name of a service, and provide the queue name to send tasks to that service.
 pub fn service_queue_name(service: &str) -> String {
-    format!("service-queue-{service}")
+    format!("{SERVICE_QUEUE_PREFIX}{service}")
 }
 
 /// Get the name of the list dispatcher will pull for sending out submission events.
@@ -36,7 +37,7 @@ pub fn make_watcher_list_name(sid: Sid) -> String {
 /// If the service is marked as enabled=true, each component should take steps needed to move it to the 'Running' stage.
 /// If the service is marked as enabled=false, each component should take steps needed to stop it.
 /// If at any time a service is disabled, scaler will stop the dependent containers
-#[derive(strum::FromRepr, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, strum::FromRepr, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceStage {
     // A service is not running
     // - if enabled scaler will start dependent containers and move to next stage

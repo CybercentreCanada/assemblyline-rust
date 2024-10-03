@@ -275,6 +275,10 @@ impl Ingester {
         Ok(())
     }
 
+    pub fn clear_local_cache(&self) {
+        self.cache.lock().clear();
+    }
+
     async fn handle_ingest(self: Arc<Self>) -> Result<()> {
         // Move from ingest to unique and waiting queues.
         // While there are entries in the ingest queue we consume chunk_size

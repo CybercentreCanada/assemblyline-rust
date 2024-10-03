@@ -51,6 +51,7 @@ mod filestore;
 mod identify;
 mod cachestore;
 mod string_utils;
+mod plumber;
 
 #[cfg(test)]
 mod tests;
@@ -72,6 +73,9 @@ enum Commands {
         
     },
     Dispatcher {
+
+    },
+    Plumber {
 
     }
 }
@@ -105,6 +109,9 @@ async fn main() -> ExitCode {
         },
         Commands::Dispatcher {  } => {
             crate::dispatcher::main(core).await
+        }
+        Commands::Plumber {  } => {
+            crate::plumber::main(core).await
         }
     };
 

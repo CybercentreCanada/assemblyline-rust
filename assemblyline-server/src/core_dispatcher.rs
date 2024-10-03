@@ -37,7 +37,7 @@ impl Core {
     }
 
     pub fn get_service_queue(&self, service: &str) -> redis_objects::PriorityQueue<Task> {
-        self.redis_persistant.priority_queue(service_queue_name(service))
+        self.redis_volatile.priority_queue(service_queue_name(service))
     }
 
     // def dispatcher_queue_lengths(redis, instance_id):

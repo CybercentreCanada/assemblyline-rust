@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::str::FromStr;
 
+use assemblyline_models::JsonMap;
 use serde::Deserialize;
 
 
@@ -253,9 +254,12 @@ pub struct ErrorInner {
     #[serde(rename="type")]
     pub _type: String,
     pub reason: String,
-    pub index_uuid: String,
-    pub shard: String,
-    pub index: String,
+    #[serde(default)]
+    pub index_uuid: Option<String>,
+    #[serde(default)]
+    pub shard: Option<String>,
+    #[serde(default)]
+    pub index: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -263,12 +267,77 @@ pub struct ErrorCause {
     #[serde(rename="type")]
     pub _type: String,
     pub reason: String,
-    pub index_uuid: String,
-    pub shard: String,
-    pub index: String,
+    #[serde(default)]
+    pub index_uuid: Option<String>,
+    #[serde(default)]
+    pub shard: Option<String>,
+    #[serde(default)]
+    pub index: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DescribeIndex {
     // Object {"aliases": Object {"112691228370903790308498296117861805943user": Object {}}, "mappings": Object {"dynamic": String("true"), "dynamic_templates": Array [Object {"strings_as_keywords": Object {"mapping": Object {"ignore_above": Number(8191), "type": String("keyword")}, "match_mapping_type": String("string")}}, Object {"refuse_all_implicit_mappings": Object {"mapping": Object {"ignore_malformed": Bool(true), "index": Bool(false)}, "match": String("*")}}], "properties": Object {"__access_grp1__": Object {"type": String("keyword")}, "__access_grp2__": Object {"type": String("keyword")}, "__access_lvl__": Object {"type": String("integer")}, "__access_req__": Object {"type": String("keyword")}, "__text__": Object {"type": String("text")}, "agrees_with_tos": Object {"doc_values": Bool(false), "format": String("date_optional_time||epoch_millis"), "index": Bool(false), "type": String("date")}, "api_quota": Object {"type": String("long")}, "apikeys": Object {"enabled": Bool(false), "type": String("object")}, "apps": Object {"enabled": Bool(false), "type": String("object")}, "can_impersonate": Object {"doc_values": Bool(false), "index": Bool(false), "type": String("boolean")}, "classification": Object {"store": Bool(true), "type": String("keyword")}, "dn": Object {"copy_to": Array [String("__text__")], "ignore_above": Number(8191), "type": String("keyword")}, "email": Object {"copy_to": Array [String("__text__")], "ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}, "groups": Object {"copy_to": Array [String("__text__")], "ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}, "id": Object {"store": Bool(true), "type": String("keyword")}, "is_active": Object {"store": Bool(true), "type": String("boolean")}, "name": Object {"copy_to": Array [String("__text__")], "ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}, "otp_sk": Object {"doc_values": Bool(false), "ignore_above": Number(8191), "index": Bool(false), "type": String("keyword")}, "password": Object {"doc_values": Bool(false), "ignore_above": Number(8191), "index": Bool(false), "type": String("keyword")}, "roles": Object {"ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}, "security_tokens": Object {"enabled": Bool(false), "type": String("object")}, "submission_quota": Object {"type": String("long")}, "type": Object {"ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}, "uname": Object {"copy_to": Array [String("__text__")], "ignore_above": Number(8191), "store": Bool(true), "type": String("keyword")}}}, "settings": Object {"index": Object {"analysis": Object {"analyzer": Object {"string_ci": Object {"filter": Array [String("lowercase")], "tokenizer": String("keyword"), "type": String("custom")}, "text_fuzzy": Object {"lowercase": String("false"), "pattern": String("\\s*:\\s*"), "type": String("pattern")}, "text_whitespace": Object {"type": String("whitespace")}, "text_ws_dsplit": Object {"filters": Array [String("text_ws_dsplit")], "tokenizer": String("whitespace"), "type": String("custom")}}, "filter": Object {"text_ws_dsplit": Object {"pattern": String("(\\.)"), "replacement": String(" "), "type": String("pattern_replace")}}, "normalizer": Object {"lowercase_normalizer": Object {"char_filter": Array [], "filter": Array [String("lowercase")], "type": String("custom")}}}, "creation_date": String("1724871445236"), "number_of_replicas": String("0"), "number_of_shards": String("1"), "provided_name": String("112691228370903790308498296117861805943user_hot"), "routing": Object {"allocation": Object {"include": Object {"_tier_preference": String("data_content")}}}, "uuid": String("1s5rUSinQ1qtYwSLejDUjg"), "version": Object {"created": String("8505000")}}}}}
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskId {
+    pub task: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskBody {
+    pub response: TaskResponse, 
+    pub completed: bool,
+    pub task: Task
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskResponse {
+    #[serde(flatten)]
+    pub _status: TaskStatus,
+    pub failures: Vec<serde_json::Value>,
+    pub throttled: String,
+    pub throttled_until: String,
+    pub timed_out: bool,
+    pub took: i64,
+}
+
+
+#[derive(Debug, Deserialize)]
+pub struct Task {
+    pub action: String,
+    pub cancellable: bool,
+    pub cancelled: bool,
+    pub description: String,
+    pub headers: JsonMap, 
+    pub id: u64,
+    pub node: String,
+    pub running_time_in_nanos: u64,
+    pub start_time_in_millis: u64,
+    pub status: TaskStatus, 
+    #[serde(rename="type")]
+    pub type_: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskStatus {
+    pub batches: u64,
+    pub created: u64,
+    pub deleted: u64,
+    pub noops: u64,
+    pub requests_per_second: f64,
+    pub retries: TaskRetries, 
+    pub throttled_millis: u64,
+    pub throttled_until_millis: u64,
+    pub total: u64,
+    pub updated: u64,
+    pub version_conflicts: u64,
+}
+
+
+#[derive(Debug, Deserialize)]
+pub struct TaskRetries {
+    pub bulk: u64,
+    pub search: u64,
 }

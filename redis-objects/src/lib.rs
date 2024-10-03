@@ -160,6 +160,14 @@ pub enum ErrorTypes {
     Serde(serde_json::Error),
 }
 
+impl ErrorTypes {
+    /// Test if an error was created in serializing or deserializing data
+    pub fn is_serialize_error(&self) -> bool {
+        matches!(self, ErrorTypes::Serde(_))
+    }
+}
+
+
 impl std::fmt::Display for ErrorTypes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

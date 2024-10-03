@@ -42,13 +42,13 @@ pub use self::search::{Query, parse};
 const RETRY_MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
-struct SubmissionFilter {
+pub struct SubmissionFilter {
     operation: Query,
     pub cache_safe: bool,
 }
 
 impl SubmissionFilter {
-    fn new(expression: &str) -> Result<Self, ParsingError> {
+    pub fn new(expression: &str) -> Result<Self, ParsingError> {
         let operation: Query = parse(expression)?;
         Ok(Self { cache_safe: operation.cache_safe().can_run(), operation })
     }
@@ -86,12 +86,12 @@ pub struct ActionWorker {
     // Configuration
     config: Arc<Config>,
     running_cache_tasks: bool,
-    actions: RwLock<Arc<HashMap<String, (SubmissionFilter, PostprocessAction)>>>,
+    pub actions: RwLock<Arc<HashMap<String, (SubmissionFilter, PostprocessAction)>>>,
 
     // Redis information
     config_data: Hashmap<serde_json::Value>,
     unique_queue: PriorityQueue<serde_json::Value>,
-    alert_queue: Queue<serde_json::Value>,
+    pub alert_queue: Queue<serde_json::Value>,
     archive_manager: ArchiveManager
 }
 

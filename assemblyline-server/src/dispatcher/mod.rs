@@ -448,7 +448,7 @@ pub struct Dispatcher {
     bad_sids: tokio::sync::RwLock<HashSet<Sid>>,
 
     // Utility object to handle post-processing actions
-    postprocess_worker: Arc<ActionWorker>,
+    pub postprocess_worker: Arc<ActionWorker>,
 }
 
 //     def __init__(self, datastore=None, redis=None, redis_persist=None, logger=None,

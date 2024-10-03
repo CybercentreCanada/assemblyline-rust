@@ -1,5 +1,5 @@
 //! A test of ingest+dispatch running in one process.
-//! 
+//!
 //! Needs the datastore and filestore to be running, otherwise these test are stand alone.
 
 use std::collections::HashMap;
@@ -7,11 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::config::PostprocessAction;
 use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{Service, Submission};
+use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
 use log::{error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -27,6 +29,8 @@ use crate::dispatcher::Dispatcher;
 
 use crate::filestore::FileStore;
 use crate::ingester::Ingester;
+use crate::plumber::Plumber;
+use crate::postprocessing::SubmissionFilter;
 use crate::services::test::{dummy_service, setup_services};
 use crate::{Core, Flag, TestGuard};
 
@@ -83,7 +87,7 @@ struct MockService {
     // self.datastore = datastore
     filestore: Arc<FileStore>,
     // self.queue = get_service_queue(name, redis)
-    
+
     hits: Mutex<HashMap<String, u64>>,
     drops: Mutex<HashMap<String, u64>>,
 
@@ -181,7 +185,7 @@ impl MockService {
             });
 
             if let Some(result_data) = result_data.as_object_mut() {
-                ExpandingClassification::<false>::insert(&self.classification_engine, result_data, self.classification_engine.unrestricted()).unwrap();    
+                ExpandingClassification::<false>::insert(&self.classification_engine, result_data, self.classification_engine.unrestricted()).unwrap();
 
                 if let Some(result) = instructions.get_mut("result") {
                     if let Some(result) = result.as_object_mut() {
@@ -319,6 +323,7 @@ struct TestContext {
 
 /// MARK: setup
 async fn setup() -> TestContext {
+    std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
     let (core, guard) = setup_services(test_services()).await;
 
     let signal = Arc::new(Notify::new());
@@ -356,14 +361,10 @@ async fn setup() -> TestContext {
     let dispatcher = Dispatcher::new(core.clone(), tcp).await.unwrap();
     dispatcher.start(&mut components);
 
-    // threads = []
-    // fields.filestore = filestore
-    // fields.dispatcher = Dispatcher(datastore=ds, redis=redis, redis_persist=redis, config=config)
-    // fields.pre_service = services[0]
-    // threads: list[ServerBase] = [
-    //     # Start plumber
-    //     Plumber(datastore=ds, redis=redis, redis_persist=redis, delay=0.5, config=config),
-    // ]
+    // launch the plumber
+    let plumber_name = format!("plumber{}", thread_rng().gen::<u32>());
+    let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
+    plumber.start(&mut components);
 
     TestContext {
         metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned())),
@@ -462,15 +463,19 @@ impl MetricsWatcher {
                                 if let Some(number) = number.as_i64() {
                                     *type_counts.entry(key).or_default() += number;
                                 }
-                            }                            
+                            }
                         }
-                
+
                         type_counts.retain(|_, v| *v != 0);
                     }
                 }
             }
         });
         Self { counts }
+    }
+
+    pub fn clear(&self) {
+        self.counts.lock().clear();
     }
 
     /// wait for metrics messages with the given fields
@@ -1059,11 +1064,11 @@ async fn test_max_extracted_in_several() {
     // Make a set of in a non trivial tree, that add up to more than 3 (max_extracted) files
     let (sha, size) = ready_extract(&context.core, &[
         ready_extract(&context.core, &[
-            ready_body(&context.core, json!({})).await.0, 
+            ready_body(&context.core, json!({})).await.0,
             ready_body(&context.core, json!({})).await.0
         ]).await.0,
         ready_extract(&context.core, &[
-            ready_body(&context.core, json!({})).await.0, 
+            ready_body(&context.core, json!({})).await.0,
             ready_body(&context.core, json!({})).await.0
         ]).await.0
     ]).await;
@@ -1106,184 +1111,177 @@ async fn test_max_extracted_in_several() {
 // MARK: caching
 #[tokio::test(flavor = "multi_thread")]
 async fn test_caching() {
-    todo!()
-//     sha, size = ready_body(core)
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({})).await;
 
-//     def run_once():
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//             ),
-//             notification=dict(
-//                 queue='1',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+    async fn run_once(context: &TestContext, sha: &Sha256, size: usize) -> Sid {
+        context.ingest_queue.push(&MessageSubmission {
+            sid: thread_rng().gen(),
+            metadata: Default::default(),
+            params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+                .set_description("file abc123")
+                .set_services_selected(&[])
+                .set_submitter("user")
+                .set_groups(&["user"]),
+            notification: Notification {
+                queue: Some("caching".to_string()),
+                threshold: None,
+            },
+            files: vec![File {
+                sha256: sha.clone(),
+                size: Some(size as u64),
+                name: "abc123".to_string()
+            }],
+            time: chrono::Utc::now(),
+            scan_key: None,
+        }).await.unwrap();
 
-//         notification_queue = NamedQueue('nq-1', core.redis)
-//         first_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+        let notification_queue = context.core.notification_queue("caching");
+        let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//         # One of the submission will get processed fully
-//         assert first_task is not None
-//         first_task = IngestTask(first_task)
-//         first_submission: Submission = core.ds.submission.get(first_task.submission.sid)
-//         assert first_submission.state == 'completed'
-//         assert len(first_submission.files) == 1
-//         assert len(first_submission.errors) == 0
-//         assert len(first_submission.results) == 4
-//         return first_submission.sid
+        // One of the submission will get processed fully
+        let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+        assert_eq!(sub.state, SubmissionState::Completed);
+        assert_eq!(sub.files.len(), 1);
+        assert_eq!(sub.errors.len(), 0);
+        assert_eq!(sub.results.len(), 4);
+        return sub.sid
+    }
 
-//     sid1 = run_once()
-//     metrics.expect('ingester', 'cache_miss', 1)
-//     metrics.clear()
+    let sid1 = run_once(&context, &sha, size).await;
+    context.metrics.assert_metrics("ingester", &[("cache_miss", 1)]).await;
+    context.metrics.clear();
 
-//     sid2 = run_once()
-//     metrics.expect('ingester', 'cache_hit_local', 1)
-//     metrics.clear()
-//     assert sid1 == sid2
+    let sid2 = run_once(&context, &sha, size).await;
+    context.metrics.assert_metrics("ingester", &[("cache_hit_local", 1)]).await;
+    context.metrics.clear();
+    assert_eq!(sid1, sid2);
 
-//     core.ingest.cache = {}
+    context.ingester.clear_local_cache();
 
-//     sid3 = run_once()
-//     metrics.expect('ingester', 'cache_hit', 1)
-//     metrics.clear()
-//     assert sid1 == sid3
+    let sid3 = run_once(&context, &sha, size).await;
+    context.metrics.assert_metrics("ingester", &[("cache_hit", 1)]).await;
+    context.metrics.clear();
+    assert_eq!(sid1, sid3);
 }
 
 // MARK: plumber
+/// Have the plumber cancel tasks
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plumber_clearing() {
-    todo!()
-//     global _global_semaphore
-//     _global_semaphore = threading.Semaphore(value=0)
-//     start = time.time()
+    let context = setup().await;
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"hold": 60}
+    })).await;
 
-//     try:
-//         # Have the plumber cancel tasks
-//         sha, size = ready_body(core, {
-//             'pre': {'hold': 60}
-//         })
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("test_plumber_clearing".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//                 max_extracted=10000
-//             ),
-//             notification=dict(
-//                 queue='test_plumber_clearing',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1)]).await;
+    let service_queue = context.core.get_service_queue("pre");
 
-//         metrics.expect('ingester', 'submissions_ingested', 1)
-//         service_queue = get_service_queue('pre', core.redis)
+    let start = std::time::Instant::now();
+    while service_queue.length().await.unwrap() < 1 {
+        if start.elapsed() > RESPONSE_TIMEOUT {
+            panic!();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
-//         start = time.time()
-//         while service_queue.length() < 1:
-//             if time.time() - start > RESPONSE_TIMEOUT:
-//                 pytest.fail(f'Found { service_queue.length()}')
-//             time.sleep(0.1)
+    let mut service_delta = context.core.datastore.service_delta.get("pre", None).await.unwrap().unwrap();
+    service_delta.enabled = Some(false);
+    context.core.datastore.service_delta.save("pre", &service_delta, None, None).await.unwrap();
+    context.core.redis_volatile.publish("changes.services.pre", &serde_json::to_vec(&ServiceChange {
+        name: "pre".to_owned(),
+        operation: assemblyline_models::messages::changes::Operation::Modified
+    }).unwrap()).await.unwrap();
 
-//         service_delta = core.ds.service_delta.get('pre')
-//         service_delta['enabled'] = False
-//         core.ds.service_delta.save('pre', service_delta)
+    let notification_queue = context.core.notification_queue("test_plumber_clearing");
+    let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//         notification_queue = NamedQueue('nq-test_plumber_clearing', core.redis)
-//         dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//         dropped_task = IngestTask(dropped_task)
-//         sub = core.ds.submission.get(dropped_task.submission.sid)
-//         assert len(sub.files) == 1
-//         assert len(sub.results) == 3
-//         assert len(sub.errors) == 1
-//         error = core.ds.error.get(sub.errors[0])
-//         assert "disabled" in error.response.message
+    let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 3);
+    assert_eq!(sub.errors.len(), 1);
+    let error = context.core.datastore.error.get(&sub.errors[0], None).await.unwrap().unwrap();
+    assert!(error.response.message.contains("disabled"));
 
-//         metrics.expect('ingester', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'files_completed', 1)
-//         metrics.expect('service', 'fail_recoverable', 1)
-
-//     finally:
-//         _global_semaphore.release()
-//         service_delta = core.ds.service_delta.get('pre')
-//         service_delta['enabled'] = True
-//         core.ds.service_delta.save('pre', service_delta)
+    context.metrics.assert_metrics("ingester", &[("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+    context.metrics.assert_metrics("service", &[("fail_recoverable", 1)]).await;
 }
 
 // MARK: filter
 #[tokio::test(flavor = "multi_thread")]
 async fn test_filter() {
-    todo!()
-//     from assemblyline.common.postprocess import SubmissionFilter, PostprocessAction
-//     filter_string = "params.submitter: user"
-//     core.dispatcher.postprocess_worker.actions['test_process'] = \
-//         SubmissionFilter(filter_string), PostprocessAction({
-//             'enabled': True,
-//             'raise_alert': True,
-//             'filter': filter_string,
-//         })
+    let context = setup().await;
+    let filter_string = "params.submitter: user";
 
-//     try:
-//         sha, size = ready_extract(core, ready_body(core)[0])
+    {
+        let mut actions: HashMap<String, (_, _)> = Default::default();
+        actions.insert("test_process".to_string(), (
+            SubmissionFilter::new(filter_string).unwrap(), 
+            PostprocessAction::new(filter_string.to_string()).enable().alert().on_completed()
+        ));
 
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//                 max_extracted=10000,
-//                 generate_alert=True,
-//             ),
-//             notification=dict(
-//                 queue='text-filter',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+        *context.dispatcher.postprocess_worker.actions.write().await = Arc::new(actions);
+    }
 
-//         notification_queue = NamedQueue('nq-text-filter', core.redis)
-//         task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//         assert task
-//         task = IngestTask(task)
-//         sub = core.ds.submission.get(task.submission.sid)
-//         assert len(sub.files) == 1
-//         assert len(sub.results) == 8
-//         assert len(sub.errors) == 0
+    let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
-//         metrics.expect('ingester', 'submissions_ingested', 1)
-//         metrics.expect('ingester', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'files_completed', 2)
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            .set_generate_alert(true),
+        notification: Notification {
+            queue: Some("text-filter".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//         alert = core.dispatcher.postprocess_worker.alert_queue.pop(timeout=5)
-//         assert alert['submission']['sid'] == sub['sid']
+    let notification_queue = context.core.notification_queue("text-filter");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     finally:
-//         core.dispatcher.postprocess_worker.actions.pop('test_process')
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 8);
+    assert_eq!(sub.errors.len(), 0);
+
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
+
+    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
+    assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string())
 }
 
 // MARK: tag filter
