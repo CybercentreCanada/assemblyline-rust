@@ -935,14 +935,11 @@ pub fn flatten(data: JsonMap, parent_key: Option<&str>) -> JsonMap {
         }
     }
 
-    return items.into_iter().collect()
+    items.into_iter().collect()
 }
 
 impl Tagging {
 
-    // pub fn to_dict(&self, safelisted: Option<bool>) -> HashMap<String, TagEntry> {
-
-    // }
 
     pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
         let safelisted = safelisted.unwrap_or(false);

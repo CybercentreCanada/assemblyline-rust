@@ -14,7 +14,7 @@ use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
-use log::{error, info};
+use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
 use rand::{thread_rng, Rng};
@@ -205,6 +205,7 @@ impl MockService {
             }
 
             let result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
+            debug!("result: {result:?}");
             let result_key: String = instructions
                 .get("result_key")
                 .and_then(|x|x.as_str())
@@ -1287,74 +1288,67 @@ async fn test_filter() {
 // MARK: tag filter
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tag_filter() {
-    todo!()
-//     from assemblyline.common.postprocess import SubmissionFilter, PostprocessAction
-//     filter_string = "tags.file.behavior: exist"
-//     core.dispatcher.postprocess_worker.actions['test_process'] = \
-//         SubmissionFilter(filter_string), PostprocessAction({
-//             'enabled': True,
-//             'raise_alert': True,
-//             'filter': filter_string,
-//         })
+    let context = setup().await;
+    let filter_string = "tags.file.behavior: exist";
 
-//     try:
-//         sha, size = ready_body(core, {
-//             'pre': {'result': {'result': {
-//                 'sections': [
-//                     {
-//                         'body': 'info',
-//                         'body_format': 'TEXT',
-//                         'classification': 'U',
-//                         'depth': 0,
-//                         'tags': {
-//                             'file': {
-//                                 'behavior': ['exist']
-//                             }
-//                         },
-//                         'title_text': 'title'
-//                     }
-//                 ]
-//             }}}
-//         })
+    {
+        let mut actions: HashMap<String, (_, _)> = Default::default();
+        actions.insert("test_process".to_string(), (
+            SubmissionFilter::new(filter_string).unwrap(), 
+            PostprocessAction::new(filter_string.to_string()).enable().alert().on_completed()
+        ));
 
-//         core.ingest_queue.push(SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//                 max_extracted=10000,
-//                 generate_alert=True,
-//             ),
-//             notification=dict(
-//                 queue='tag-filter',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         )).as_primitives())
+        *context.dispatcher.postprocess_worker.actions.write().await = Arc::new(actions);
+    }
 
-//         notification_queue = NamedQueue('nq-tag-filter', core.redis)
-//         task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-//         assert task
-//         task = IngestTask(task)
-//         sub = core.ds.submission.get(task.submission.sid)
-//         assert len(sub.files) == 1
-//         assert len(sub.results) == 4
-//         assert len(sub.errors) == 0
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"result": {"result": { "sections": [{
+            "body": "info",
+            "body_format": "TEXT",
+            "classification": context.core.classification_parser.unrestricted(),
+            "depth": 0,
+            "tags": {
+                "file": {
+                    "behavior": ["exist"]
+                }
+            },
+            "title_text": "title"
+        }]}}}
+    })).await;
 
-//         metrics.expect('ingester', 'submissions_ingested', 1)
-//         metrics.expect('ingester', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'submissions_completed', 1)
-//         metrics.expect('dispatcher', 'files_completed', 1)
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"])
+            .set_generate_alert(true),
+        notification: Notification {
+            queue: Some("tag-filter".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-//         alert = core.dispatcher.postprocess_worker.alert_queue.pop(timeout=5)
-//         assert alert['submission']['sid'] == sub['sid']
+    let notification_queue = context.core.notification_queue("tag-filter");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-//     finally:
-//         core.dispatcher.postprocess_worker.actions.pop('test_process')
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 4);
+    assert_eq!(sub.errors.len(), 0);
+
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
+    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
+    assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string())
 }

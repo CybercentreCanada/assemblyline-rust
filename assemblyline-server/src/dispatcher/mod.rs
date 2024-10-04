@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use assemblyline_models::datastore::submission::SubmissionState;
-use assemblyline_models::datastore::{Service, Submission, error};
+use assemblyline_models::datastore::{error, Service, Submission, Tagging};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
 use assemblyline_models::messages::submission::SubmissionMessage;
 use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, ServiceResponse, ServiceResult, TagEntry, TagItem, Task as ServiceTask};
@@ -24,6 +24,7 @@ use poem::listener::Acceptor;
 use redis_objects::quota::UserQuotaTracker;
 use redis_objects::increment;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
 
@@ -1800,18 +1801,42 @@ impl Dispatcher {
         // Don't run post processing and traffic notifications if the submission is terminated
         if !task.submission.to_be_deleted {
             // Pull the tags keys and values into a searchable form
-            let mut tags = vec![];
+            let mut tags = JsonMap::new();
+
+            fn insert(target: &mut JsonMap, full_key: &str, key: &str, value: &str) {
+                match key.split_once(".") {
+                    Some((root, key)) => {
+                        let entry = target.entry(root).or_insert(serde_json::Value::Object(Default::default()));
+                        if let Some(values) = entry.as_object_mut() {
+                            insert(values, full_key, key, value);
+                        } else {
+                            error!("Unable to place tag [{full_key}]: scope conflict, expected object");
+                        }
+                    },
+                    None => {
+                        let entry = target.entry(key).or_insert(serde_json::Value::Array(Default::default()));
+                        if let Some(values) = entry.as_array_mut() {
+                            values.push(json!(value));
+                        } else {
+                            error!("Unable to place tag [{full_key}]: scope conflict, expected list");
+                        }
+                    }
+                }
+            }
+
             for file_tags in task.file_tags.values() {
                 for _t in file_tags.values() {
-                    tags.push(serde_json::json!({
-                        "value": _t.value, 
-                        "type": _t.tag_type
-                    }))
+                    insert(&mut tags, &_t.tag_type, &_t.tag_type, &_t.value);
+            //         tags.push(serde_json::json!({
+            //             "value": _t.value, 
+            //             "type": _t.tag_type
+            //         }))
                 }   
             }
-            let tags = serde_json::json!(tags);
+            let tags = serde_json::Value::Object(tags);
 
             // Send the submission for alerting or resubmission
+            debug!("submission tags: {tags}");
             self.postprocess_worker.process(submission, tags, submission.params.auto_archive).await?;
 
             // Write all finished submissions to the traffic queue
