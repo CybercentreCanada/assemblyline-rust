@@ -5,18 +5,23 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use assemblyline_models::datastore::badlist::Badlist;
+use assemblyline_models::datastore::heuristic::Heuristic;
+use assemblyline_models::datastore::safelist::Safelist;
 use log::{error, warn};
 
 pub mod responses;
 pub mod collection;
 pub mod error;
+pub mod search;
+pub mod bulk;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, File, Service, ServiceDelta, Submission};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
 use log::info;
@@ -76,6 +81,42 @@ fn strip_nulls(d: serde_json::Value) -> serde_json::Value {
     } else {
         d
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Result key could not be broken into components [{0}]")]
+pub struct InvalidResultKey(String);
+
+pub fn create_empty_result_from_key(key: &str, dtl: i64, cl_engine: &ClassificationParser) -> anyhow::Result<assemblyline_models::datastore::Result> {
+    let mut parts = key.split(".");
+    let sha256 = parts.next().ok_or(InvalidResultKey(key.to_owned()))?;
+    let svc_name = parts.next().ok_or(InvalidResultKey(key.to_owned()))?;
+    let svc_version = parts.next().ok_or(InvalidResultKey(key.to_owned()))?;
+    let svc_version = &svc_version[1..];
+
+    Ok(assemblyline_models::datastore::Result {
+        archive_ts: None,
+        expiry_ts: Some(Utc::now() + TimeDelta::days(dtl)),
+        classification: ExpandingClassification::new(cl_engine.unrestricted().to_owned(), cl_engine)?,
+        response: assemblyline_models::datastore::result::ResponseBody {
+            service_name: svc_name.to_owned(),
+            service_version: svc_version.to_owned(),
+            milestones: Default::default(),
+            service_tool_version: Default::default(),
+            supplementary: Default::default(),
+            extracted: Default::default(),
+            service_context: Default::default(),
+            service_debug_info: Default::default(),
+        },
+        sha256: Sha256::from_str(sha256)?,
+        created: Utc::now(),
+        result: Default::default(),
+        result_type: Default::default(),
+        size: Default::default(),
+        drop_file: Default::default(),
+        partial: Default::default(),
+        from_archive: Default::default(),
+    })
 }
 
 
@@ -215,6 +256,15 @@ impl Request {
         })
     }
 
+    pub fn head_doc(host: &reqwest::Url, index: &str, id: &str) -> Result<Self> {
+        Ok(Self {
+            method: Method::HEAD,
+            url: host.join(&format!("{index}/_doc/{id}"))?,
+            index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }    
+
     pub fn head_index(host: &reqwest::Url, index: &str) -> Result<Self> {
         Ok(Self {
             method: Method::HEAD,
@@ -229,6 +279,17 @@ impl Request {
             method: Method::DELETE,
             url: host.join(index)?,
             index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn get_search_on(host: &reqwest::Url, target: &str, params: Vec<(&str, Cow<str>)>) -> Result<Self> {
+        let mut url = host.join(&format!("{target}/_search"))?;  
+        url.query_pairs_mut().extend_pairs(params);
+        Ok(Self {
+            method: Method::GET,
+            url,
+            index_name: None,
             raise_conflicts: false,
         })
     }
@@ -285,6 +346,15 @@ impl Request {
             method: Method::POST,
             url: host.join(&format!("{index}/_cache/clear"))?,
             index_name: Some(index.to_owned()),
+            raise_conflicts: false,
+        })
+    }
+
+    pub fn bulk(host: &reqwest::Url) -> Result<Self> {
+        Ok(Self {
+            method: Method::POST,
+            url: host.join("_bulk")?,
+            index_name: None,
             raise_conflicts: false,
         })
     }
@@ -1004,6 +1074,7 @@ impl ElasticHelper {
         // self.hosts.iter().map(|url|format!("{}:{}", url.host_str().unwrap_or_default(), url.port_or_known_default().unwrap_or(80))).collect()
         vec![format!("{}:{}", self.host.host_str().unwrap_or_default(), self.host.port_or_known_default().unwrap_or(80))]
     }
+
 }
 
 
@@ -1106,6 +1177,9 @@ pub struct Elastic {
     pub submission: Collection<Submission>,
     pub user: Collection<User>,
     pub error: Collection<ErrorModel>,
+    pub safelist: Collection<Safelist>,
+    pub badlist: Collection<Badlist>,
+    pub heuristic: Collection<Heuristic>,
 
     pub result: Collection<assemblyline_models::datastore::result::Result>,
     pub emptyresult: Collection<EmptyResult>,
@@ -1130,8 +1204,11 @@ impl Elastic {
             file: Collection::new(helper.clone(), "file".to_owned(), Some("file-ma".to_owned()), prefix.to_string()).await?,
             submission: Collection::new(helper.clone(), "submission".to_owned(), Some("submission-ma".to_owned()), prefix.to_string()).await?,
             error: Collection::new(helper.clone(), "error".to_owned(), None, prefix.to_string()).await?,
+            safelist: Collection::new(helper.clone(), "safelist".to_owned(), None, prefix.to_string()).await?,
+            badlist: Collection::new(helper.clone(), "badlist".to_owned(), None, prefix.to_string()).await?,
             result: Collection::new(helper.clone(), "result".to_owned(), Some("result-ma".to_owned()), prefix.to_string()).await?,
             emptyresult: Collection::new(helper.clone(), "emptyresult".to_owned(), None, prefix.to_string()).await?,
+            heuristic: Collection::new(helper.clone(), "heuristic".to_owned(), None, prefix.to_string()).await?,
             service: Collection::new(helper.clone(), "service".to_owned(), None, prefix.to_string()).await?,
             service_delta: Collection::new(helper.clone(), "service_delta".to_owned(), None, prefix.to_string()).await?,
             user: Collection::new(helper.clone(), "user".to_owned(), None, prefix.to_string()).await?,
@@ -1445,6 +1522,31 @@ impl Elastic {
                 },
                 Err(err) => return Err(err)
             }
+        }
+    }
+
+    pub async fn list_service_heuristics(&self, service_name: &str) -> Result<Vec<Heuristic>> {
+        let mut heuristics = vec![];
+        let mut cursor = self.heuristic.stream_search(&format!("id:{}.*", service_name.to_uppercase()), "*".to_string(), vec![], None, None, None).await?;
+        while let Some(row) = cursor.next().await? {
+            heuristics.push(row);
+        }
+        Ok(heuristics)
+    }
+
+    pub async fn list_all_heuristics(&self) -> Result<Vec<Heuristic>> {
+        let mut heuristics = vec![];
+        let mut cursor = self.heuristic.stream_search("id:*", "*".to_string(), vec![], None, None, None).await?;
+        while let Some(row) = cursor.next().await? {
+            heuristics.push(row);
+        }
+        Ok(heuristics)
+    }
+
+    pub async fn ping(&self) -> bool {
+        match self.es.client.head(self.es.host.clone()).send().await {
+            Ok(res) => res.status().is_success(),
+            _ => false
         }
     }
 }

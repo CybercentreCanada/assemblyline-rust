@@ -125,6 +125,7 @@ impl Plumber {
                         use assemblyline_models::datastore::error;
 
                         let error = error::Error {
+                            archive_ts: None,
                             created: Utc::now(),
                             expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                             response: error::Response {
@@ -298,6 +299,7 @@ impl Plumber {
 
                 use assemblyline_models::datastore::error::{Error, Status, ErrorTypes, Response};
                 let error = Error {
+                    archive_ts: None,
                     created: Utc::now(),
                     expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                     response: Response {

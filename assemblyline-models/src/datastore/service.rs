@@ -303,6 +303,9 @@ pub struct Service {
     /// Does this service use submission metadata for analysis?
     #[serde(default)]
     pub uses_metadata: bool,
+    /// This service watches these temporary keys for changes when partial results are produced.
+    #[serde(default)]
+    pub monitored_keys: Vec<String>,
 
     /// Name of service
     #[metadata(store=true, copyto="__text__")]

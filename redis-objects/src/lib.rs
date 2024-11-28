@@ -95,6 +95,10 @@ impl RedisObjects {
         retry_call!(self.pool, publish, channel, data)
     }
 
+    pub async fn publish_json<T: Serialize>(&self, channel: &str, value: &T) -> Result<u32, ErrorTypes> {
+        self.publish(channel, &serde_json::to_vec(value)?).await
+    }
+
     /// Start building a metrics exporter
     pub fn auto_exporting_metrics<T: MetricMessage>(self: &Arc<Self>, name: String, counter_type: String) -> AutoExportingMetricsBuilder<T> {
         AutoExportingMetricsBuilder::new(self.clone(), name, counter_type)

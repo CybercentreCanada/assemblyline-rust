@@ -244,6 +244,7 @@ pub struct ResultSummary {
     pub key: String,
     pub drop: bool,
     pub score: i32,
+    pub partial: bool,
     pub children: Vec<(Sha256, String)>
 }
 

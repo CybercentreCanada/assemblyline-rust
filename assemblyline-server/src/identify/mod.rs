@@ -214,11 +214,11 @@ impl Identify {
         if let Some(cache) = cache {
             info!("Checking for custom magic patterns...");
             match cache.get("custom_patterns").await {
-                Ok(patterns) => {
+                Ok(Some(patterns)) => {
                     magic_patterns = serde_yaml::from_slice(&patterns)?;
                     info!("Custom magic patterns loaded!");
                 },
-                Err(_) => {
+                _ => {
                     info!("No custom magic patterns found.");
                 }
             }
@@ -243,12 +243,12 @@ impl Identify {
         if let Some(cache) = cache {
             info!("Checking for custom trusted mimes...");
             match cache.get("custom_mimes").await {
-                Ok(mimes) => {
+                Ok(Some(mimes)) => {
                     let trusted_mimes = serde_yaml::from_slice(&mimes)?;
                     info!("Custom trusted mimes loaded!");
                     return Ok(Arc::new(trusted_mimes))
                 },
-                Err(_) => {
+                _ => {
                     info!("No custom magic patterns found.");
                 }
             }

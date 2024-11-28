@@ -1,9 +1,10 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use anyhow::{bail, Context, Result};
-use log::error;
+use bytes::Bytes;
 
 
 pub struct FileStore {
@@ -46,7 +47,25 @@ impl FileStore {
         Ok(())
     }
 
-    pub async fn get(&self, name: &str) -> Result<Vec<u8>> {
+    pub async fn exists(&self, name: &str) -> Result<bool> {
+        let mut last_error = None;
+        for transport in &self.transports {
+            match transport.exists(name).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => continue,
+                Err(err) => {
+                    last_error = Some(err);
+                    continue
+                },
+            }
+        }
+        if let Some(error) = last_error {
+            return Err(error).context("Transport errors");
+        }
+        return Ok(false)
+    }
+
+    pub async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let mut last_error = None;
         for transport in &self.transports {
             match transport.get(name).await {
@@ -59,7 +78,7 @@ impl FileStore {
         }
         match last_error {
             Some(error) => Err(error).context("All transports failed to fetch"),
-            None => bail!("All transports failed to fetch [{name}]")
+            None => Ok(None)
         }
     }
 
@@ -80,13 +99,34 @@ impl FileStore {
         }
     }
 
+    pub async fn upload(&self, path: &Path, name: &str) -> Result<()> {
+        let mut last_error = None;
+        for transport in &self.transports {
+            if let Err(err) = transport.upload(path, name).await {
+                last_error = Some(err);
+            }
+        }
+        match last_error {
+            Some(error) => Err(error).context("A transport failed to upload"),
+            None => Ok(())
+        }
+    }
+
+    pub async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
+        todo!()
+    }
 }
 
 #[async_trait]
 trait Transport: Send + Sync {
+
     async fn put(&self, name: &str, body: &[u8]) -> Result<()>;
-    async fn get(&self, name: &str) -> Result<Vec<u8>>;
+    async fn upload(&self, path: &Path, name: &str) -> Result<()>;
+
+    async fn get(&self, name: &str) -> Result<Option<Vec<u8>>>;
+    async fn exists(&self, name: &str) -> Result<bool>;
     async fn download(&self, name: &str, path: &Path) -> Result<()>;
+    async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)>;
 }
 
 struct LocalTransport {
@@ -128,9 +168,31 @@ impl Transport for LocalTransport {
         Ok(tokio::fs::write(path, body).await?)
     }
 
-    async fn get(&self, name: &str) -> Result<Vec<u8>> {
+    async fn upload(&self, source: &Path, name: &str) -> Result<()> {
         let path = self.make_path(name)?;
-        Ok(tokio::fs::read(path).await?)
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        if tokio::fs::hard_link(source, &path).await.is_ok() {
+            return Ok(())
+        }
+        let body = tokio::fs::read(source).await?;
+        tokio::fs::write(path, body).await?;
+        Ok(())
+    }
+
+    async fn exists(&self, name: &str) -> Result<bool> {
+        let path = self.make_path(name)?;
+        Ok(tokio::fs::try_exists(path).await?)
+    }
+
+    async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        let path = self.make_path(name)?;
+        match tokio::fs::read(path).await {
+            Ok(body) => Ok(Some(body)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into())
+        }
     }
 
     async fn download(&self, name: &str, dest: &Path) -> Result<()> {
@@ -142,6 +204,43 @@ impl Transport for LocalTransport {
         if tokio::fs::hard_link(path, dest).await.is_ok() {
             return Ok(())
         }
-        self.put(name, &self.get(name).await?).await
+        match self.get(name).await? {
+            Some(data) => self.put(name, &data).await,
+            None => Err(std::io::Error::from(std::io::ErrorKind::NotFound).into())
+        }
+    }
+
+    async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
+        let path = self.make_path(name)?;
+        let metadata = tokio::fs::metadata(&path).await?;
+        let (send, recv) = tokio::sync::mpsc::channel(8);
+        tokio::spawn(async move {
+            let mut file = match std::fs::OpenOptions::new().read(true).open(path) {
+                Ok(file) => file,
+                Err(err) => {
+                    _ = send.send(Err(err)).await;
+                    return
+                }
+            };
+
+            loop {
+                let mut buf = vec![0u8; 1 << 14];
+                let size = match file.read(&mut buf) {
+                    Ok(size) => size,
+                    Err(err) => {
+                        _ = send.send(Err(err)).await;
+                        return    
+                    }
+                };
+
+                if size == 0 { break }                
+                buf.truncate(size);
+                
+                if send.send(Ok(buf.into())).await.is_err() {
+                    break
+                }
+            }
+        });
+        Ok((metadata.len(), recv))
     }
 }

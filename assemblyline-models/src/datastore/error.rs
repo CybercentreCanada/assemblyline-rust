@@ -8,7 +8,7 @@ use strum::IntoEnumIterator;
 use crate::messages::task::{generate_conf_key, Task};
 use crate::{random_word, random_words, ElasticMeta, Readable, Sha256};
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 pub enum Status {
     #[strum(serialize = "FAIL_NONRECOVERABLE")]
@@ -112,6 +112,9 @@ impl rand::distributions::Distribution<Response> for rand::distributions::Standa
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Error {
+    /// Time at which the error was archived
+    #[serde(default)]
+    pub archive_ts: Option<DateTime<Utc>>,
     /// Error creation timestamp
     #[serde(default="chrono::Utc::now")]
     pub created: DateTime<Utc>,
@@ -132,6 +135,7 @@ pub struct Error {
 impl rand::distributions::Distribution<Error> for rand::distributions::Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Error {
         Error {
+            archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts: None,
             response: rng.r#gen(),

@@ -1,7 +1,6 @@
 //! Code for consistent interface with the dispatcher from other components.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,7 +53,7 @@ const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
 // class RetryRequestWork(Exception):
 //     pass
 
-use assemblyline_models::datastore::{error, result, EmptyResult, Error};
+use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::{JsonMap, Sid};
@@ -66,7 +65,6 @@ use crate::constants::{make_watcher_list_name, service_queue_name, SUBMISSION_QU
 use crate::elastic::{Elastic, Version};
 use crate::Core;
 
-use super::http::BasicStatus;
 use super::ServiceStartMessage;
 
 
@@ -420,6 +418,7 @@ impl DispatchClient {
                 key: result_key,
                 drop: result.drop_file,
                 score: result.result.score,
+                partial: result.partial,
                 children,
             },
             tags,

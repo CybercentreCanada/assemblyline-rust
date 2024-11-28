@@ -17,15 +17,18 @@ use thiserror::Error;
 
 use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
 
+use super::bulk::TypedBulkPlan;
 use super::responses::DeleteResult;
 use super::{parse_sort, CopyMethod, ElasticError, ElasticHelper, Index, Request, Result, SortDirection, Version};
 use super::error::{ElasticErrorInner, WithContext};
 
-const DEFAULT_SORT: &str = "_id asc";
-const PIT_KEEP_ALIVE: &str = "5m";
+pub (super) const DEFAULT_SORT: &str = "_id asc";
+pub (super) const PIT_KEEP_ALIVE: &str = "5m";
+pub (super) const DEFAULT_ROW_SIZE: u64 = 25;
+
 
 pub struct Collection<T: Serialize + DeserializeOwned> {
-    database: Arc<ElasticHelper>,
+    pub(super) database: Arc<ElasticHelper>,
     name: String,
     archive_name: Option<String>,
     _data: PhantomData<T>,
@@ -128,6 +131,21 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         }     
     }
 
+    /// Make an http request with a body
+    async fn make_request_data(&self, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
+        let mut attempt = 0;
+        loop {
+            match self.database.make_request_data(&mut attempt, request, body).await {
+                Ok(response) => break Ok(response),
+                Err(err) if err.is_index_not_found() => {
+                    self.ensure_collection().await?;
+                    continue    
+                },
+                Err(err) => break Err(err)    
+            }
+        }     
+    }
+
     fn get_index_list(&self, index_type: Option<Index>) -> Result<Vec<String>> {
         Ok(match index_type {
             // Default value
@@ -182,16 +200,35 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         })
     }
 
-    fn get_joined_index(&self, index_type: Option<Index>) -> Result<String> {
+    pub (super) fn get_joined_index(&self, index_type: Option<Index>) -> Result<String> {
         Ok(self.get_index_list(index_type)?.join(","))
     }
 
-    fn is_archive_index(&self, index: &str) -> bool {
+    pub (super) fn is_archive_index(&self, index: &str) -> bool {
         if let Some(archive_name) = &self.archive_name {
             index.starts_with(archive_name)
         } else {
             false
         }
+    }
+
+
+    /// Check if a document exists in the datastore.
+    ///
+    /// :param index_type: Type of indices to target
+    /// :param key: key of the document to get from the datastore
+    /// :return: true/false depending if the document exists or not
+    pub async fn exists(&self, key: &str, index_type: Option<Index>) -> Result<bool> {
+        let index_list = self.get_index_list(index_type)?;
+
+        for index in index_list {
+            let response = self.make_request(&Request::head_doc(&self.database.host, &index, key)?).await?;
+            if response.status().is_success() {
+                return Ok(true)
+            }
+        }
+
+        return Ok(false)
     }
 
     /// Get a list of documents from the datastore and make sure they are normalized using the model class
@@ -410,14 +447,14 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
     /// :param as_obj: Return objects instead of dictionaries
     /// :param index_type: Type of indices to target
     /// :return: a generator of dictionary of field list results
-    pub async fn stream_search<RT: DeserializeOwned + Debug>(&self,
+    pub async fn stream_search<RT: Debug + DeserializeOwned + Debug + Readable>(&self,
         query: &str,
         fl: String,
         mut filters: Vec<String>,
         access_control: Option<String>,
         item_buffer_size: Option<i64>,
         index_type: Option<Index>,
-    ) -> Result<ScrollCursor<RT>> {
+    ) -> Result<ScrollCursor<T, RT>> {
         let item_buffer_size = item_buffer_size.unwrap_or(200);
         let index_type = index_type.unwrap_or(Index::Hot);
 
@@ -459,7 +496,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         //     None => list(self.stored_fields.keys())
         // };
 
-        ScrollCursor::new(self.database.clone(), index, query_expression, sort, source, None, Some(item_buffer_size), None).await
+        ScrollCursor::<T, RT>::new(self, index, query_expression, sort, source, None, Some(item_buffer_size), None).await
     }
 
 
@@ -527,6 +564,22 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         }
 
         return Ok(deleted)
+    }
+
+    /// Creates a BulkPlan tailored for the current datastore
+    ///
+    /// :param index_type: Type of indices to target
+    /// :return: The BulkPlan object
+    pub fn get_bulk_plan(&self, index: Option<Index>) -> Result<TypedBulkPlan<T>> {
+        Ok(TypedBulkPlan::new(self.get_index_list(index)?))
+    }
+
+    /// Receives a bulk plan and executes the plan.
+    ///
+    /// :return: Results of the bulk operation
+    pub async fn bulk(&self, bulk: TypedBulkPlan<T>) -> Result<responses::Bulk> {
+        let request = Request::bulk(&self.database.host)?;
+        Ok(self.make_request_data(&request, bulk.get_plan_data().as_bytes()).await?.json().await?)
     }
 }
 
@@ -912,9 +965,9 @@ fn try_cast<Type: serde::de::DeserializeOwned>(name: &'static str, expected: &'s
     }
 }
 
-struct PitGuard {
+pub (super) struct PitGuard {
     helper: Arc<ElasticHelper>,
-    id: String,
+    pub (super) id: String,
 }
 
 impl PitGuard {
@@ -948,12 +1001,13 @@ impl Drop for PitGuard {
     }
 }
 
-pub struct ScrollCursor<T: DeserializeOwned> {
-    helper: Arc<ElasticHelper>,
+pub struct ScrollCursor<'a, T: Serialize + DeserializeOwned, RT> {
+    collection: &'a Collection<T>,
     pit: PitGuard,
     batch_size: i64,
+    offset: Option<i64>,
     keep_alive: String,
-    batch: Vec<T>,
+    batch: Vec<RT>,
     sort: Vec<(String, SortDirection)>,
     query: serde_json::Value,
     search_after: Option<serde_json::Value>,
@@ -962,9 +1016,10 @@ pub struct ScrollCursor<T: DeserializeOwned> {
     finished: bool,
 }
 
-impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
+impl<'a, T: Serialize + DeserializeOwned + Readable + Described<ElasticMeta>, RT: Debug + Readable> ScrollCursor<'a, T, RT> {
 
-    async fn new(helper: Arc<ElasticHelper>,
+    async fn new(
+        collection: &'a Collection<T>,
         index: String,
         query: serde_json::Value,
         mut sort: Vec<(String, SortDirection)>,
@@ -979,17 +1034,14 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
         // Add tie_breaker sort using _shard_doc ID
         sort.push(("_shard_doc".to_string(), SortDirection::Descending));
 
-        //     # initial search
-    //     resp = self.with_retries(self.datastore.client.search, query=query, pit=pit,
-    //                              size=size, timeout=timeout, sort=sort, _source=source)
-
         Ok(ScrollCursor {
-            pit: PitGuard::open(helper.clone(), &index).await?,
-            helper,
+            pit: PitGuard::open(collection.database.clone(), &index).await?,
+            collection,
             batch_size,
             keep_alive,
             batch: Default::default(),
             sort,
+            offset: None,
             query,
             search_after: None,
             timeout,
@@ -998,7 +1050,7 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Option<T>> {
+    pub async fn next(&mut self) -> Result<Option<RT>> {
         if self.finished {
             return Ok(None)
         }
@@ -1011,9 +1063,9 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
             params.push(("sort", sort.join(",").into()));
             params.push(("_source", self.source.as_str().into()));
 
-            // if let Some(search_after) = &self.search_after {
-            //     url.query_pairs_mut().append_pair("search_after", &search_after.to_string());
-            // }
+            if let Some(offset) = self.offset {
+                params.push(("from", offset.to_string().into()));
+            }
 
             if let Some(timeout) = &self.timeout {
                 params.push(("timeout", format!("{}ms", timeout.as_millis()).into()));
@@ -1021,17 +1073,20 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
 
             let mut body = JsonMap::new();
             body.insert("query".to_string(), self.query.clone());
-            body.insert("pit".to_string(), json!({
-                "id": self.pit.id,
-                "keep_alive": self.keep_alive,
-            }));
 
             if let Some(search_after) = &self.search_after {
                 body.insert("search_after".to_string(), search_after.clone());
             }
 
-            let response = self.helper.make_request_json(&mut 0, &Request::get_search(&self.helper.host, params)?, &body).await?;
-            let mut response: responses::Search<(), T> = response.json().await?;
+            body.insert("pit".to_string(), json!({
+                "id": self.pit.id,
+                "keep_alive": self.keep_alive,
+            }));
+            let request = Request::get_search(&self.collection.database.host, params)?;
+
+
+            let response = self.collection.database.make_request_json(&mut 0, &request, &body).await?;
+            let mut response: responses::Search<(), RT> = response.json().await?;
 
             match response.hits.hits.last() {
                 Some(row) => {
@@ -1045,7 +1100,8 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
 
             // move the results into self.batch in reverse
             while let Some(row) = response.hits.hits.pop() {
-                if let Some(source) = row._source {
+                if let Some(mut source) = row._source {
+                    source.set_from_archive(self.collection.is_archive_index(&row._index));
                     self.batch.push(source);
                 }
             }
@@ -1055,7 +1111,7 @@ impl<T: DeserializeOwned + std::fmt::Debug> ScrollCursor<T> {
         Ok(self.batch.pop())
     }
 
-    pub async fn collect(mut self) -> Result<Vec<T>> {
+    pub async fn collect(mut self) -> Result<Vec<RT>> {
         let mut output = vec![];
         while let Some(value) = self.next().await? {
             output.push(value);

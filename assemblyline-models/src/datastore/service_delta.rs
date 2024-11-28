@@ -151,7 +151,8 @@ pub struct SubmissionParamsDelta {
 
 
 /// Service Delta relative to Initial Service Configuration
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
+#[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct ServiceDelta {
@@ -194,6 +195,7 @@ pub struct ServiceDelta {
     pub uses_temp_submission_data: Option<bool>,
     /// REF_SERVICE
     pub uses_metadata: Option<bool>,
+    pub monitored_keys: Option<Vec<String>>,
 
     /// REF_SERVICE
     #[metadata(store=true, copyto="__text__")]

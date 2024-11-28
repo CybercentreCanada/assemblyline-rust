@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use assemblyline_models::JsonMap;
 use serde::Deserialize;
+use strum::Display;
 
 
 #[derive(Deserialize)]
@@ -106,6 +107,17 @@ pub struct Shards {
     /// An array that contains replication-related errors in the case an index operation failed on a replica shard. 0 indicates there were no failures. 
     pub failed: ShardsFailure
 }
+    
+#[derive(Debug, Deserialize)]
+pub struct BulkShards {
+    ///     (integer) Number of shards the operation attempted to execute on. 
+    pub total: i64,
+    //     (integer) Number of shards the operation succeeded on. 
+    pub successful: i64,
+    //     (integer) Number of shards the operation attempted to execute on but failed. 
+    pub failed: i64,
+}
+
 
 
 #[derive(Deserialize)]
@@ -340,4 +352,97 @@ pub struct TaskStatus {
 pub struct TaskRetries {
     pub bulk: u64,
     pub search: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Bulk {
+    /// (integer) How long, in milliseconds, it took to process the bulk request.     
+    pub took: u64,
+    /// (Boolean) If true, one or more of the operations in the bulk request did not complete successfully. 
+    pub errors: bool,
+    /// (array of objects) Contains the result of each operation in the bulk request, in the order they were submitted.
+    pub items: Vec<BulkItem>,
+}
+
+/// (object) The parameter name is an action associated with the operation. Possible values are create, delete, index, and update.
+#[derive(Debug, Deserialize)]
+#[serde(rename="lowercase")]
+pub enum BulkItem {
+    Create(BulkItemData),
+    Delete(BulkItemData),
+    Index(BulkItemData),
+    Update(BulkItemData),
+}
+
+impl std::ops::Deref for BulkItem {
+    type Target = BulkItemData;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            BulkItem::Create(bulk_item_data) => bulk_item_data,
+            BulkItem::Delete(bulk_item_data) => bulk_item_data,
+            BulkItem::Index(bulk_item_data) => bulk_item_data,
+            BulkItem::Update(bulk_item_data) => bulk_item_data,
+        }
+    }
+}
+
+/// The parameter value is an object that contains information for the associated operation.
+#[derive(Debug, Deserialize)]
+pub struct BulkItemData {
+    /// (string) Name of the index associated with the operation. If the operation targeted a data stream, this is the backing index into which the document was written. 
+    pub _index: String,
+    /// The document ID associated with the operation. 
+    pub _id: String,
+    /// (integer) The document version associated with the operation. The document version is incremented each time the document is updated.
+    ///
+    /// This parameter is only returned for successful actions.
+    #[serde(default)]
+    pub _version: Option<i64>,
+    /// (string) Result of the operation. Successful values are created, deleted, and updated. Other valid values are noop and not_found. 
+    pub result: BulkResult,
+    /// (object) Contains shard information for the operation.
+    /// This parameter is only returned for successful operations.
+    pub _shards: Option<BulkShards>,
+
+    /// (integer) The sequence number assigned to the document for the operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control.
+    ///
+    /// This parameter is only returned for successful operations.
+    #[serde(default)]
+    pub _seq_no: Option<i64>,
+    /// (integer) The primary term assigned to the document for the operation. See Optimistic concurrency control.
+    ///
+    /// This parameter is only returned for successful operations.
+    #[serde(default)]
+    pub _primary_term: Option<i64>,
+
+    /// (integer) HTTP status code returned for the operation. 
+    pub status: i32,
+        
+    // (object) Contains additional information about the failed operation.
+
+    // The parameter is only returned for failed operations.
+    // Properties of error
+
+    // type
+    //     (string) Error type for the operation. 
+    // reason
+    //     (string) Reason for the failed operation. 
+    // index_uuid
+    //     (string) The universally unique identifier (UUID) of the index associated with the failed operation. 
+    // shard
+    //     (string) ID of the shard associated with the failed operation. 
+    // index
+    //     (string) Name of the index associated with the failed operation. If the operation targeted a data stream, this is the backing index into which the document was attempted to be written. 
+    pub error: serde_json::Value,
+}
+
+#[derive(Debug, Display, Deserialize, PartialEq, Eq)]
+#[serde(rename="lower_snake_case")]
+pub enum BulkResult {
+    Created,
+    Deleted,
+    Updated,
+    Noop,
+    NotFound,
 }

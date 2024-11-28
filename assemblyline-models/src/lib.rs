@@ -346,7 +346,7 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
 }
 
 /// A classification value stored as a string
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="classification")]
 pub struct ClassificationString(String);
@@ -387,7 +387,7 @@ pub type Platform = String;
 pub type Processor = String;
 
 /// Validated ssdeep type
-#[derive(SerializeDisplay, DeserializeFromStr, Described, PartialEq, Debug, Clone)]
+#[derive(SerializeDisplay, DeserializeFromStr, Described, PartialEq, Eq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text", analyzer="text_fuzzy")]
 pub struct SSDeepHash(String);

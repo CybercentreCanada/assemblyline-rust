@@ -9,15 +9,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use assemblyline_models::config::TemporaryKeyType;
 use assemblyline_models::datastore::submission::SubmissionState;
-use assemblyline_models::datastore::{error, Service, Submission, Tagging};
+use assemblyline_models::datastore::{error, Service, Submission};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
 use assemblyline_models::messages::submission::SubmissionMessage;
 use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, ServiceResponse, ServiceResult, TagEntry, TagItem, Task as ServiceTask};
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
-use assemblyline_models::{ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::{ExpandingClassification, JsonMap, Readable, Sha256, Sid};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use poem::listener::Acceptor;
@@ -83,7 +84,7 @@ macro_rules! retry {
                 while let Err(err) = dispatcher.clone().$method().await {
                     error!("Error in {name}: {err:?}");
                     dispatcher.core.sleep(ERROR_BACKOFF).await;
-                }        
+                }
             }
         }
     };
@@ -136,9 +137,21 @@ struct ServiceStartMessage {
 #[derive(Serialize, Deserialize, Clone)]
 struct AncestoryEntry {
     #[serde(rename="type")]
-    file_type: String, 
-    parent_relation: String, 
+    file_type: String,
+    parent_relation: String,
     sha256: Sha256,
+}
+
+/// Tracks whether a task needs to be rerun based on
+struct MonitorTask {
+    /// Service name
+    service: String,
+    /// sha256 of file in question
+    sha: Sha256,
+    /// The temporary values this task was last dispatached with
+    values: HashMap<String, Option<serde_json::Value>>,
+    /// Should aservice be dispatched again when possible
+    dispatch_needed: bool, // = dataclasses.field(default=False)
 }
 
 // struct ActiveFileInfo {
@@ -165,7 +178,7 @@ struct SubmissionTask {
     file_tags: HashMap<Sha256, HashMap<String, TagEntry>>, // = defaultdict(dict),
     file_depth: HashMap<Sha256, u32>,
     file_ancestry: HashMap<Sha256, Vec<Vec<AncestoryEntry>>>,
-    file_temporary_data: HashMap<Sha256, JsonMap>, // = defaultdict(dict),
+    file_temporary_data: HashMap<Sha256, TemporaryFileData>,
 
     /// files that are currently actively processing
     active_files: HashSet<Sha256>,
@@ -173,6 +186,8 @@ struct SubmissionTask {
     dropped_files: HashSet<Sha256>,
     /// files that are exempt from recursion prevention
     dynamic_recursion_bypass: HashSet<Sha256>,
+    /// services that may want to be retried with more information from the shared temporary data
+    monitoring: HashMap<(Sha256, String), MonitorTask>,
 
     // log and error information that may be passed through to the user
     service_logs: HashMap<(Sha256, String), Vec<String>>, // = defaultdict(list),
@@ -216,7 +231,8 @@ impl SubmissionTask {
             active_files: Default::default(),
             dropped_files: Default::default(),
             dynamic_recursion_bypass: Default::default(),
-        
+            monitoring: Default::default(),
+
             service_results: Default::default(),
             service_errors: Default::default(),
             service_attempts: Default::default(),
@@ -303,27 +319,27 @@ impl SubmissionTask {
         self.internal_task_queue.pop_front()
     }
 
-    pub fn update_temporary_data(&mut self, sha256: &Sha256, mut input: JsonMap, max_temp_data_length: usize) -> Result<()> {
-        // unpack the data
-        input.retain(|key, value| {
-            let encoded_length = match serde_json::to_string(value) {
-                Ok(text) => text.len(),
-                Err(_) => return false,
-            };
+    // pub fn update_temporary_data(&mut self, sha256: &Sha256, mut input: JsonMap, max_temp_data_length: usize) -> Result<()> {
+    //     // unpack the data
+    //     input.retain(|key, value| {
+    //         let encoded_length = match serde_json::to_string(value) {
+    //             Ok(text) => text.len(),
+    //             Err(_) => return false,
+    //         };
 
-            if encoded_length <= max_temp_data_length {
-                true
-            } else {
-                warn!("[{}] discarding temporary data for {key}", self.submission.sid);
-                false
-            }
-        });
+    //         if encoded_length <= max_temp_data_length {
+    //             true
+    //         } else {
+    //             warn!("[{}] discarding temporary data for {key}", self.submission.sid);
+    //             false
+    //         }
+    //     });
 
-        // update the temporary data
-        let temp_data = self.file_temporary_data.entry(sha256.clone()).or_default();
-        temp_data.append(&mut input);
-        Ok(())
-    }
+    //     // update the temporary data
+    //     let temp_data = self.file_temporary_data.entry(sha256.clone()).or_default();
+    //     temp_data.append(&mut input);
+    //     Ok(())
+    // }
 
     /// Mark that children of a given file should not be routed to a service.
     fn forbid_for_children(&mut self, sha256: Sha256, service_name: String) {
@@ -368,6 +384,191 @@ impl SubmissionTask {
         output.sort_unstable();
         output
     }
+
+    /// A service with monitoring has dispatched, keep track of the conditions.
+    fn set_monitoring_entry(&mut self, sha256: Sha256, service_name: String, values: HashMap<String, Option<serde_json::Value>>) {
+        self.monitoring.insert((sha256.clone(), service_name.clone()), MonitorTask {
+            service: service_name,
+            sha: sha256,
+            values,
+            dispatch_needed: false
+        });
+    }
+
+    /// Note that a partial result has been recieved. If a dispatch was requested process that now.
+    fn partial_result(&mut self, sha256: Sha256, service_name: String) {
+        let monitoring_entry = match self.monitoring.get(&(sha256.clone(), service_name.clone())) {
+            Some(entry) => entry,
+            None => return
+        };
+
+        if monitoring_entry.dispatch_needed {
+            self.redispatch_service(sha256, service_name)
+        }
+    }
+
+    /// A service has completed normally. If the service is monitoring clear out the record.
+    fn clear_monitoring_entry(&mut self, sha256: Sha256, service_name: String) {
+        let key = (sha256, service_name);
+        // We have an incoming non-partial result, flush out any partial monitoring
+        self.monitoring.remove(&key);
+        // If there is a partial result for this service flush that as well so we accept this new result
+        if let Some(result) = self.service_results.get(&key) {
+            if result.partial {
+                self.service_results.remove(&key);
+            }
+        }
+    }
+
+    /// Check all of the monitored tasks on that key for changes. Redispatch as needed.
+    fn temporary_data_changed(&mut self, key: &str) -> Vec<Sha256> {
+        let mut changed = vec![];
+        for ((sha256, service), entry) in self.monitoring.iter_mut() {
+            // Check if this key is actually being monitored by this entry and
+            // get whatever values (if any) were provided on the previous dispatch of this service
+            let dispatched_value = match entry.values.get(key) {
+                Some(val) => val,
+                None => continue,
+            };
+            let value = match self.file_temporary_data.get(sha256) {
+                Some(temp) => temp.read_key(key),
+                None => continue
+            };
+
+            if &value != dispatched_value {
+                let result = self.service_results.get(&(sha256.clone(), service.clone()));
+                if result.is_some() {
+                    // If there are results and there is a monitoring entry, the result was partial
+                    // so redispatch it immediately (after the loop). If there are not partial results the monitoring
+                    // entry will have been cleared.
+                    changed.push((sha256.clone(), service.clone()));
+                } else {
+                    // If the value has changed since the last dispatch but results haven't come in yet
+                    // mark this service to be disptached later. This will only happen if the service
+                    // returns partial results, if there are full results the entry will be cleared instead.
+                    entry.dispatch_needed = true;
+                }
+            }
+        }
+
+        let mut output = vec![];
+        for (sha256, service) in changed {
+            self.redispatch_service(sha256.clone(), service);
+            output.push(sha256);
+        }
+
+        return output
+    }
+
+    fn redispatch_service(&mut self, sha256: Sha256, service_name: String) {
+        // Clear the result if its partial or an error
+        let key = (sha256.clone(), service_name);
+        if let Some(result) = self.service_results.get(&key) {
+            if !result.partial {
+                return
+            }
+        }   
+        self.service_results.remove(&key);
+        self.service_errors.remove(&key);
+        self.service_attempts.insert(key, 1);
+
+        // Try to get the service to run again by reseting the schedule for that service
+        self.file_schedules.remove(&sha256);
+    }
+}
+
+#[derive(Clone)]
+struct TemporaryFileData {
+    config: Arc<HashMap<String, TemporaryKeyType>>,
+    shared: Arc<Mutex<JsonMap>>,
+    local: JsonMap,
+}
+
+impl TemporaryFileData {
+
+    pub fn new(config: HashMap<String, TemporaryKeyType>) -> Self {
+        Self {
+            config: Arc::new(config),
+            shared: Arc::new(Mutex::new(Default::default())),
+            local: Default::default(),            
+        }
+    }
+
+    /// Create an entry for another file with reference to the shared values.
+    pub fn child(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            shared: self.shared.clone(), 
+            local: self.local.clone(),
+        }
+    }
+
+    /// Get a copy of the current data
+    pub fn read(&self) -> JsonMap {
+        // Start with a shallow copy of the local data
+        let mut data = self.local.clone();
+
+        // mix in whatever the latest submission wide values are values are
+        let shared = self.shared.lock();
+        data.append(&mut shared.clone());
+        return data
+    }
+
+    /// Get a copy of the current data
+    pub fn read_key(&self, key: &str) -> Option<serde_json::Value> {
+        if let Some(value) = self.shared.lock().get(key) {
+            return Some(value.clone())
+        }
+        return self.local.get(key).cloned()
+    }
+
+    /// Set the value of a temporary data key using the appropriate method for the key.
+    ///
+    /// Return true if this change could mean partial results should be reevaluated.
+    pub fn set_value(&mut self, key: &str, value: serde_json::Value) -> bool {
+        match self.config.get(key) {
+            Some(TemporaryKeyType::Union) => {
+                self.union_shared_value(key, value)    
+            },
+            Some(TemporaryKeyType::Overwrite) => {
+                let mut shared = self.shared.lock();
+                let change = shared.get(key) != Some(&value);
+                shared.insert(key.to_owned(), value);
+                change
+            },
+            None => {
+                self.local.insert(key.to_owned(), value);
+                false
+            }
+        }        
+    }
+
+    fn union_shared_value(&self, key: &str, values: serde_json::Value) -> bool {
+        // Make sure the existing value is the right type
+        let mut shared = self.shared.lock();        
+        let existing = shared.entry(key.to_string()).or_insert(serde_json::Value::Array(vec![]));
+        if !existing.is_array() {
+            *existing = serde_json::Value::Array(vec![]);
+        }
+        let existing = existing.as_array_mut().unwrap();
+
+        // make sure the input is the right type
+        let serde_json::Value::Array(values) = values else {
+            return false
+        };
+
+        // Add each value one at a time testing for new values
+        // This is slower than using set intersection, but isn't type sensitive
+        let mut changed = false;
+        for new_item in values {
+            if existing.contains(&new_item) {
+                continue
+            }
+            existing.push(new_item);
+            changed = true;
+        }
+        return changed
+    }
 }
 
 
@@ -383,7 +584,7 @@ pub async fn main(core: Core) -> Result<()> {
 
     let mut components = tokio::task::JoinSet::new();
     dispatcher.start(&mut components);
-    
+
     // Wait for all of these components to terminate
     while components.join_next().await.is_some() {}
 
@@ -553,20 +754,20 @@ impl Dispatcher {
     pub fn start(self: &Arc<Self>, components: &mut tokio::task::JoinSet<()>) {
         // Pull in new submissions
         components.spawn(retry!("Pull Submissions", self, pull_submissions));
-    
+
         // pull start messages
         components.spawn(retry!("Pull Service Start", self, pull_service_starts));
-    
+
         // pull result messages
         components.spawn(retry!("Pull Service Result", self, pull_service_results));
-    
+
         // Work guard/thief
         components.spawn(retry!("Guard Work", self, work_guard));
         components.spawn(retry!("Work Thief", self, work_thief));
-    
+
         // Handle RPC commands
         components.spawn(retry!("Commands", self, handle_commands));
-    
+
         // Process to protect against old dead tasks timing out
         components.spawn(retry!("Global Timeout Backstop", self, timeout_backstop));
     }
@@ -583,7 +784,7 @@ impl Dispatcher {
         let mut start = self.finalizing_start.lock();
         start.get_or_insert_with(std::time::Instant::now).elapsed()
     }
-    
+
     /// get how long we will wait after getting a termination signal to allow for clean shutdown
     fn get_finalizing_window(&self) -> Duration {
         Duration::from_secs(self.shutdown_grace.saturating_sub(AL_SHUTDOWN_QUIT))
@@ -622,7 +823,7 @@ impl Dispatcher {
                 if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
                     self.core.sleep(ONE_SECOND).await;
                     continue
-                }   
+                }
 
                 // Check if we are maxing out our share of the submission limit
                 let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
@@ -841,7 +1042,7 @@ impl Dispatcher {
             Some(queue) => queue,
             None => {
                 watch_queue.push(&WatchQueueStatus::Stop.into()).await?;
-                return Ok(())    
+                return Ok(())
             }
         };
 
@@ -865,9 +1066,9 @@ impl Dispatcher {
                 },
                 None => {
                     response_queue.push(&Default::default()).await?;
-                    return Ok(())    
+                    return Ok(())
                 }
-            };    
+            };
             recv
         };
 
@@ -949,12 +1150,12 @@ impl Dispatcher {
             //             service: task.service_name.clone(),
             //             container: worker.to_owned()
             //         }).await?;
-                    
+
             //         // Report to the metrics system that a recoverable error has occurred for that service
             //         self.core.export_metrics_once(
-            //             &task.service_name, 
+            //             &task.service_name,
             //             &ServiceMetrics {fail_recoverable: 1, ..Default::default()},
-            //             Some(worker.as_str()), 
+            //             Some(worker.as_str()),
             //             Some("service")
             //         ).await?;
             //     }
@@ -964,6 +1165,8 @@ impl Dispatcher {
             struct FieldList {
                 sid: Sid,
             }
+
+            impl Readable for FieldList { fn set_from_archive(&mut self, from_archive: bool) {} }
 
             // Look for unassigned submissions in the datastore if we don't have a
             // large number of outstanding things in the queue already.
@@ -998,7 +1201,7 @@ impl Dispatcher {
                 for (sid, instance) in assignments {
                     if dispatcher_instances.contains(&instance) {
                         continue
-                    } 
+                    }
                     if self.submissions_assignments.conditional_remove(&sid, &instance).await? {
                         self.recover_submission(&sid, "from assignment table").await?;
                     }
@@ -1062,7 +1265,7 @@ impl Dispatcher {
         if self.bad_sids.read().await.contains(&task.submission.sid) {
             task.submission.to_be_deleted = true;
         }
-        
+
         if !self.submissions_assignments.add(&sid, &self.instance_id).await? {
             warn!("[{sid}] Received an assigned submission dropping");
             return Ok(())
@@ -1083,11 +1286,16 @@ impl Dispatcher {
         }
 
         // Apply initial data parameter
+        let mut temporary_data = TemporaryFileData::new(self.core.config.submission.temporary_keys.clone());
+        let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
         if let Some(initial) = &task.submission.params.initial_data {
             match serde_json::from_str::<JsonMap>(&initial.0) {
                 Ok(init) => {
-                    if let Err(err) = task.update_temporary_data(&sha256, init, self.core.config.submission.max_temp_data_length as usize) {
-                        warn!("[{sid}] could not process initialization data: {err}")
+                    for (key, value) in init {
+                        let encoded = serde_json::to_string(&value)?;
+                        if encoded.len() <= max_temp_data_length {
+                            temporary_data.set_value(&key, value);
+                        }
                     }
                 },
                 Err(err) => {
@@ -1095,6 +1303,8 @@ impl Dispatcher {
                 }
             }
         }
+        task.file_temporary_data.insert(sha256.clone(), temporary_data);
+
 
         // setup file parameters for root
         task.file_depth.insert(sha256.clone(), 0);
@@ -1109,8 +1319,8 @@ impl Dispatcher {
             None => "NOT_FOUND".to_owned(),
         };
         task.file_ancestry.insert(sha256.clone(), vec![vec![AncestoryEntry {
-            file_type: file_type.clone(), 
-            parent_relation: "ROOT".to_owned(), 
+            file_type: file_type.clone(),
+            parent_relation: "ROOT".to_owned(),
             sha256: sha256.clone()
         }]]);
 
@@ -1198,7 +1408,7 @@ impl Dispatcher {
                     timeouts.remove(key);
                 }
             }
-            
+
             // read messages
             let message = match message {
                 Some(message) => message,
@@ -1243,7 +1453,7 @@ impl Dispatcher {
                             }
                         }
                     }
-                },   
+                },
                 DispatchAction::Result(message) => {
                     submission_timeout = Instant::now();
                     let key = (message.sha256(), message.service_name().to_owned());
@@ -1253,7 +1463,7 @@ impl Dispatcher {
                     match message {
                         ServiceResponse::Result(data) => self.process_service_result(task, data).await?,
                         ServiceResponse::Error(data) => self.process_service_error(task, &data.error_key, data.error).await?,
-                    };              
+                    };
                 },
                 DispatchAction::DescribeStatus(_, watch_queue) => {
                     // Push all current keys to the newly created queue (Queue should have a TTL of about 30 sec to 1 minute)
@@ -1265,7 +1475,7 @@ impl Dispatcher {
                     }
                     for error_key in task.service_errors.values() {
                         let _ = watch_queue.push(&WatchQueueMessage {
-                            status: WatchQueueStatus::Fail, 
+                            status: WatchQueueStatus::Fail,
                             cache_key: Some(error_key.clone())
                         }).await;
                     }
@@ -1306,8 +1516,8 @@ impl Dispatcher {
                     self.dispatch_file(task, &sha256).await?;
                 },
                 DispatchAction::TestReport(_, respond) => {
-                    _ = respond.send(TestReport { 
-                        queue_keys: task.queue_keys.clone(), 
+                    _ = respond.send(TestReport {
+                        queue_keys: task.queue_keys.clone(),
                         service_results: task.service_results.clone(),
                         service_errors: task.service_errors.clone(),
                     });
@@ -1352,7 +1562,7 @@ impl Dispatcher {
                 }
 
                 let schedule = self.core.services.build_schedule(
-                    &task.submission.params, 
+                    &task.submission.params,
                     &file_info.file_type,
                     file_depth,
                     Some(forbidden_services),
@@ -1388,7 +1598,7 @@ impl Dispatcher {
                     Some(result) => result,
                     None => {
                         outstanding.insert(service.name.clone(), service);
-                        continue    
+                        continue
                     }
                 };
 
@@ -1462,20 +1672,40 @@ impl Dispatcher {
                 // Load the temp submission data we will pass
                 let mut temp_data = vec![];
                 if service.uses_temp_submission_data {
+                    // while we convert the map to a list of values capture any that we are monitoring
+                    let mut monitored_keys: HashSet<&String> = HashSet::from_iter(service.monitored_keys.iter());
+                    let mut monitored_values: HashMap<String, Option<serde_json::Value>> = Default::default();
+
+                    // load a copy of the temporary data and convert it to a list of DataItems
                     if let Some(temporary) = task.file_temporary_data.get(sha256) {
-                        for (key, value) in temporary {
+                        for (key, value) in temporary.read() {
+                            if monitored_keys.remove(&key) {
+                                monitored_values.insert(key.clone(), Some(value.clone()));
+                            }
                             temp_data.push(DataItem{
-                                name: key.clone(),
-                                value: value.clone()
+                                name: key,
+                                value
                             });
                         }
                     }
 
+                    // any keys that were not found in the temporary data should be filled with None to
+                    // indicate their abscence from the temp_data list
+                    for remaining_key in monitored_keys.drain() {
+                        monitored_values.insert(remaining_key.clone(), None);
+                    }
+
+                    // mix in the ancestory data
                     if let Some(ancestry) = task.file_ancestry.get(sha256) {
                         temp_data.push(DataItem{
-                            name: "ancestry".to_string(), 
+                            name: "ancestry".to_string(),
                             value: serde_json::json!(ancestry)
                         });
+                    }
+
+                    // if there are any monitored values create a monitoring entry
+                    if !monitored_values.is_empty() {
+                        task.set_monitoring_entry(sha256.clone(), service.name.clone(), monitored_values);
                     }
                 }
 
@@ -1551,7 +1781,7 @@ impl Dispatcher {
             info!("[{sid}] Finished processing file '{sha256}', checking if submission complete");
             task.send_dispatch_action(DispatchAction::Check(sid));
         } else {
-            info!("[{sid}] Finished processing file '{sha256}', submission incomplete (queued: {} running: {})", 
+            info!("[{sid}] Finished processing file '{sha256}', submission incomplete (queued: {} running: {})",
                 task.queue_keys.len(), task.running_services.len())
         }
         Ok(())
@@ -1571,6 +1801,7 @@ impl Dispatcher {
                 // Store an error and mark this file as unprocessable
                 task.dropped_files.insert(sha256.clone());
                 self._dispatching_error(task, &error::Error {
+                    archive_ts: None,
                     created: chrono::Utc::now(),
                     expiry_ts: task.submission.expiry_ts,
                     response: error::Response {
@@ -1725,8 +1956,8 @@ impl Dispatcher {
         } else {
             debug!("[{sid}] Finalizing submission.");
             // accumulate the score, submissions with no results have no score
-            // max_score = max(file_scores.values()) if file_scores else 0  
-            let max_score = file_scores.values().fold(0, |a, b| a.max(*b));            
+            // max_score = max(file_scores.values()) if file_scores else 0
+            let max_score = file_scores.values().fold(0, |a, b| a.max(*b));
             self.finalize_submission(task, max_score, checked).await?;
             return Ok(true)
         }
@@ -1753,7 +1984,7 @@ impl Dispatcher {
     }
 
     /// All of the services for all of the files in this submission have finished or failed.
-    /// 
+    ///
     /// Update the records in the datastore, and flush the working data from redis.
     async fn finalize_submission(&self, task: &mut SubmissionTask, max_score: i32, file_list: HashSet<Sha256>) -> Result<()> {
         let submission = &mut task.submission;
@@ -1828,10 +2059,10 @@ impl Dispatcher {
                 for _t in file_tags.values() {
                     insert(&mut tags, &_t.tag_type, &_t.tag_type, &_t.value);
             //         tags.push(serde_json::json!({
-            //             "value": _t.value, 
+            //             "value": _t.value,
             //             "type": _t.tag_type
             //         }))
-                }   
+                }
             }
             let tags = serde_json::Value::Object(tags);
 
@@ -1875,6 +2106,7 @@ impl Dispatcher {
         };
 
         let error = error::Error {
+            archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts,
             response: error::Response {
@@ -1885,7 +2117,7 @@ impl Dispatcher {
                 service_debug_info: None,
                 service_tool_version: None
             },
-            sha256: sha256.clone(), 
+            sha256: sha256.clone(),
             error_type: error::ErrorTypes::TaskPreempted,
         };
 
@@ -1897,9 +2129,9 @@ impl Dispatcher {
         task.service_errors.insert(key, error_key.clone());
 
         self.core.export_metrics_once(
-            service_name, 
+            service_name,
             &ServiceMetrics{ fail_nonrecoverable: 1, ..Default::default()},
-            Some("dispatcher"), 
+            Some("dispatcher"),
             Some("service")
         ).await?;
 
@@ -1928,6 +2160,14 @@ impl Dispatcher {
             extracted_names,
             dynamic_recursion_bypass,
         } = data;
+
+        // check for/clear old partial results
+        if summary.partial {
+            info!("[{sid}/{sha256}] {service_name} returned partial results");
+            task.partial_result(sha256.clone(), service_name.clone());
+        } else {
+            task.clear_monitoring_entry(sha256.clone(), service_name.clone());
+        }
 
         // Add SHA256s of files that allowed to run regardless of Dynamic Recursion Prevention
         for item in dynamic_recursion_bypass {
@@ -1978,7 +2218,23 @@ impl Dispatcher {
         }
 
         // Update the temporary data table for this file
-        task.update_temporary_data(&sha256, temporary_data, self.core.config.submission.max_temp_data_length as usize)?;
+        let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
+        let mut changed_keys = vec![];
+        if let Some(existing) = task.file_temporary_data.get_mut(&sha256) {
+            for (key, value) in temporary_data {
+                let encoded = serde_json::to_string(&value)?;
+                if encoded.len() <= max_temp_data_length && existing.set_value(&key, value) {
+                    changed_keys.push(key);
+                }
+            }
+        }
+
+        let mut force_redispatch = HashSet::new();
+        for key in changed_keys {
+            for hash in task.temporary_data_changed(&key) {
+                force_redispatch.insert(hash);
+            }
+        }
 
         // // Update children to include parent_relation, likely EXTRACTED
         // if summary.children and isinstance(summary.children[0], str):
@@ -2013,6 +2269,7 @@ impl Dispatcher {
                     info!("[{sid}] hit extraction limit, dropping {extracted_sha256}");
                     task.dropped_files.insert(extracted_sha256.clone());
                     self._dispatching_error(task, &error::Error {
+                        archive_ts: None,
                         created: chrono::Utc::now(),
                         expiry_ts,
                         response: error::Response {
@@ -2030,34 +2287,36 @@ impl Dispatcher {
                 }
 
                 task.active_files.insert(extracted_sha256.clone());
-                
+
                 let file_info = self.get_fileinfo(task, &extracted_sha256).await?;
                 let parent_ancestry = task.file_ancestry.get(&sha256).cloned().unwrap_or_default();
                 let existing_ancestry = task.file_ancestry.entry(extracted_sha256.clone()).or_default();
-                
+
                 let file_type = match file_info {
                     Some(file_info) => file_info.file_type.clone(),
                     None => "NOT_FOUND".to_owned()
-                }; 
-                let current_ancestry_node = AncestoryEntry { 
-                    file_type, 
+                };
+                let current_ancestry_node = AncestoryEntry {
+                    file_type,
                     parent_relation,
                     sha256: extracted_sha256.to_owned()
                 };
 
-                let parent_data = task.file_temporary_data.get(&sha256).cloned().unwrap_or_default();
-                task.file_temporary_data.insert(extracted_sha256.clone(), parent_data.clone());
-                for mut ancestry in parent_ancestry {
-                    ancestry.push(current_ancestry_node.clone());
-                    existing_ancestry.push(ancestry);
+                if let Some(parent_data) = task.file_temporary_data.get(&sha256) {
+                    task.file_temporary_data.insert(extracted_sha256.clone(), parent_data.child());
+                    for mut ancestry in parent_ancestry {
+                        ancestry.push(current_ancestry_node.clone());
+                        existing_ancestry.push(ancestry);
+                    }
                 }
-                
+
                 task.send_dispatch_action(DispatchAction::DispatchFile(sid, extracted_sha256));
             }
         } else {
             for (extracted_sha256, _) in summary.children {
                 task.dropped_files.insert(extracted_sha256.clone());
                 self._dispatching_error(task, &error::Error {
+                    archive_ts: None,
                     created: chrono::Utc::now(),
                     expiry_ts,
                     response: error::Response {
@@ -2087,8 +2346,23 @@ impl Dispatcher {
             debug!("[{sid} :: {sha256}] Delaying dispatching, already queued for {services:?}");
             return Ok(())
         }
+
+        // Check if its worth trying to run the next stage
+        // Not worth running if we know we are waiting for another service
+        if !task.running_services.keys().any(|(hash, _)| hash == &sha256) {
+            force_redispatch.insert(sha256.clone());
+        }
+
+        // Not worth running if we know we have services in queue
+        if !task.queue_keys.keys().any(|(hash, _)| hash == &sha256) {
+            force_redispatch.insert(sha256);
+        }
+
         // Try to run the next stage
-        self.dispatch_file(task, &sha256).await
+        for sha256 in force_redispatch {
+            self.dispatch_file(task, &sha256).await?;
+        }
+        Ok(())
     }
 
     async fn _dispatching_error(&self, task: &mut SubmissionTask, error: &error::Error) -> Result<()> {
@@ -2096,7 +2370,7 @@ impl Dispatcher {
         task.extra_errors.push(error_key.clone());
         self.core.datastore.error.save(&error_key, error, None, None).await?;
         let msg = WatchQueueMessage{
-            status: WatchQueueStatus::Fail, 
+            status: WatchQueueStatus::Fail,
             cache_key: Some(error_key)
         };
         for w in self._watcher_list(task.submission.sid).members().await? {
@@ -2155,9 +2429,9 @@ impl Dispatcher {
 
         // Report to the metrics system that a recoverable error has occurred for that service
         self.core.export_metrics_once(
-            service_name, 
-            &ServiceMetrics {fail_recoverable: 1, ..Default::default()}, 
-            Some(worker_id), 
+            service_name,
+            &ServiceMetrics {fail_recoverable: 1, ..Default::default()},
+            Some(worker_id),
             Some("service")
         ).await?;
         Ok(())
@@ -2198,7 +2472,7 @@ struct QuotaGuard {
 impl QuotaGuard {
     fn new(sid: Sid, user: String, tracker: UserQuotaTracker) -> Self {
         Self { sid, user, tracker }
-    }   
+    }
 }
 
 impl Drop for QuotaGuard {

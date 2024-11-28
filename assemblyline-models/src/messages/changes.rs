@@ -34,6 +34,12 @@ pub struct ServiceChange {
     pub operation: Operation,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HeuristicChange {
+    pub service_name: String,
+    pub operation: Operation,
+}
+
 
 // @dataclass
 // class SignatureChange:

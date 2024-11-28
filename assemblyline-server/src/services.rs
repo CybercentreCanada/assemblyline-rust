@@ -14,7 +14,7 @@ use assemblyline_models::datastore::submission::SubmissionParams;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
 use itertools::Itertools;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::{RwLock, Mutex};
 use redis_objects::RedisObjects;
 use tokio::sync::mpsc;
@@ -253,10 +253,11 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
 
     // load services as long as someone is holding a pointer to the service list
     while Arc::strong_count(&service_info) > 1 {
+        debug!("Service info daemon is wating for new service info...");
         tokio::select!{
             // wait for a change notification
             change = changes.recv() => {
-                let change = change.expect("Redis event stream disconnect");
+                let change = change.ok_or_else(|| anyhow::anyhow!("Redis event stream disconnect"))?;
                 if let Some(change) = change {
                     // update the service information based on the service specified
                     if change.operation.is_removed() {
@@ -290,6 +291,7 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
             .map(|service|(service.name.clone(), Arc::new(service)))
             .collect();
         info.access_cache.clear();
+        info!("Service Watcher: Service load finished");
     }
     Ok(())
 }

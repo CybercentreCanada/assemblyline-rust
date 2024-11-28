@@ -16,7 +16,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
-use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256};
+use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256};
 
 use super::tagging::Tagging;
 
@@ -64,13 +64,13 @@ pub struct Signature {
     pub name: String,
     /// Number of times this signature triggered the heuristic
     #[serde(default = "default_signature_frequency")]
-    pub frequency: i64,
+    pub frequency: i32,
     /// Is the signature safelisted or not
     #[serde(default)]
     pub safe: bool,
 }
 
-fn default_signature_frequency() -> i64 { 1 }
+fn default_signature_frequency() -> i32 { 1 }
 
 /// Heuristic associated to the Section
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
@@ -123,7 +123,7 @@ pub struct Section {
     /// List of safelisted tags
     #[serde(default)]
     #[metadata(store=false)]
-    pub safelisted_tags: HashMap<String, Vec<serde_json::Value>>,
+    pub safelisted_tags: HashMap<String, Vec<String>>,
     /// Title of the section
     #[metadata(copyto="__text__")]
     pub title_text: String,
@@ -248,6 +248,8 @@ impl rand::distributions::Distribution<ResponseBody> for rand::distributions::St
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Result {
+    /// Timestamp indicating when the result was archived.
+    pub archive_ts: Option<DateTime<Utc>>,
     /// Aggregate classification for the result
     #[serde(flatten)]
     pub classification: ExpandingClassification,
@@ -273,6 +275,9 @@ pub struct Result {
     /// Use to not pass to other stages after this run
     #[serde(default)]
     pub drop_file: bool,
+    /// Invalidate the current result cache creation
+    #[serde(default)]
+    pub partial: bool,
     /// Was loaded from the archive
     #[serde(default)]
     #[metadata(index=false)]
@@ -283,6 +288,7 @@ pub struct Result {
 impl rand::distributions::Distribution<Result> for rand::distributions::Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Result {
         Result {
+            archive_ts: None,
             classification: ExpandingClassification {
                 classification: "".to_string(),
                 __access_lvl__: 0,
@@ -297,6 +303,7 @@ impl rand::distributions::Distribution<Result> for rand::distributions::Standard
             sha256: rng.gen(),
             result_type: None,
             size: rng.gen(),
+            partial: Default::default(),
             drop_file: Default::default(),
             from_archive: Default::default(),
         }

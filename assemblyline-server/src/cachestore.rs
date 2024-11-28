@@ -75,7 +75,7 @@ impl CacheStore {
 //         new_key = f"{self.component}_{cache_key}" if self.component else cache_key
 //         self.datastore.cached_file.save(new_key, {'expiry_ts': now_as_iso(ttl), 'component': self.component})
 
-    pub async fn get(&self, cache_key: &str) -> Result<Vec<u8>> {
+    pub async fn get(&self, cache_key: &str) -> Result<Option<Vec<u8>>> {
         let new_key = format!("{}_{cache_key}", self.component);
         self.filestore.get(&new_key).await
     }

@@ -125,7 +125,7 @@ impl MockService {
             };
             info!("{} has received a job {}", self.service_name, task.sid);
 
-            let file = self.filestore.get(&task.fileinfo.sha256).await.unwrap();
+            let file = self.filestore.get(&task.fileinfo.sha256).await.unwrap().unwrap();
 
             let mut instructions: JsonMap = serde_json::from_slice(&file).unwrap();
             let mut instructions: JsonMap = match instructions.remove(&self.service_name) {
@@ -173,6 +173,30 @@ impl MockService {
                 continue
             }
 
+            let mut partial = false;
+            let temp_data: JsonMap = 
+                task.temporary_submission_data.iter()
+                .map(|item|(item.name.clone(), item.value.clone()))
+                .collect();
+            if let Some(requirments) = instructions.get("partial") {
+                partial = true;
+                if let Some(requirements) = requirments.as_object() {
+                    for (key, value) in requirements.iter() {
+                        let temp = temp_data.get(key).cloned().unwrap_or_default().to_string();
+                        if temp.contains(value.as_str().unwrap()) {
+                            partial = false;
+                        } else {
+                            partial = true;
+                            break
+                        }
+                    }
+                }
+            }
+
+            if partial {
+                info!("{} will produce partial results", self.service_name);
+            }
+
             let mut result_data = json!({
                 "response": {
                     "service_version": "0",
@@ -180,6 +204,7 @@ impl MockService {
                     "service_name": self.service_name,
                 },
                 "result": {},
+                "partial": partial,
                 "sha256": task.fileinfo.sha256,
                 "expiry_ts": chrono::Utc::now() + chrono::TimeDelta::seconds(600)
             });
@@ -1351,4 +1376,194 @@ async fn test_tag_filter() {
 
     let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
     assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string())
+}
+
+
+// MARK: partial
+#[tokio::test(flavor = "multi_thread")]
+async fn test_partial() {
+    todo!();
+    let context = setup().await;
+    // Have pre produce a partial result, then have core-a update a monitored key
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"partial": {"passwords": "test_temp_data_monitoring"}}
+    })).await;
+
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("temp-data-monitor".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
+
+    // notification_queue = NamedQueue('nq-temp-data-monitor', core.redis)
+    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+    // assert dropped_task
+    // dropped_task = IngestTask(dropped_task)
+    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
+    // assert len(sub.errors) == 0
+    // assert len(sub.results) == 4, 'results'
+    // assert core.pre_service.hits[sha] == 1, 'pre_service.hits'
+
+    // # Wait until we get feedback from the metrics channel
+    // metrics.expect('ingester', 'submissions_ingested', 1)
+    // metrics.expect('ingester', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'files_completed', 1)
+
+    // partial_results = 0
+    // for res in sub.results:
+    //     result = core.ds.get_single_result(res, as_obj=True)
+    //     assert result is not None, res
+    //     if result.partial:
+    //         partial_results += 1
+    // assert partial_results == 1, 'partial_results'
+}
+
+// MARK: monitoring
+#[tokio::test(flavor = "multi_thread")]
+async fn test_temp_data_monitoring() {
+    todo!()
+    // # Have pre produce a partial result, then have core-a update a monitored key
+    // sha, size = ready_body(core, {
+    //     'pre': {'partial': {'passwords': 'test_temp_data_monitoring'}},
+    //     'core-a': {'temporary_data': {'passwords': ['test_temp_data_monitoring']}},
+    //     'final': {'temporary_data': {'passwords': ['some other password']}},
+    // })
+
+    // core.ingest_queue.push(SubmissionInput(dict(
+    //     metadata={},
+    //     params=dict(
+    //         description="file abc123",
+    //         services=dict(selected=[]),
+    //         submitter='user',
+    //         groups=['user'],
+    //         max_extracted=10000
+    //     ),
+    //     notification=dict(
+    //         queue='temp-data-monitor',
+    //         threshold=0
+    //     ),
+    //     files=[dict(
+    //         sha256=sha,
+    //         size=size,
+    //         name='abc123'
+    //     )]
+    // )).as_primitives())
+
+    // notification_queue = NamedQueue('nq-temp-data-monitor', core.redis)
+    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+    // assert dropped_task
+    // dropped_task = IngestTask(dropped_task)
+    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
+    // assert len(sub.errors) == 0
+    // assert len(sub.results) == 4, 'results'
+    // assert core.pre_service.hits[sha] >= 2, f'pre_service.hits {core.pre_service.hits}'
+
+    // # Wait until we get feedback from the metrics channel
+    // metrics.expect('ingester', 'submissions_ingested', 1)
+    // metrics.expect('ingester', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'files_completed', 1)
+
+    // partial_results = 0
+    // for res in sub.results:
+    //     result = core.ds.get_single_result(res, as_obj=True)
+    //     assert result is not None, res
+    //     if result.partial:
+    //         partial_results += 1
+    // assert partial_results == 0, 'partial_results'
+}
+
+// MARK: tag filter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_complex_extracted() {
+    todo!();
+    // # stages to this processing when everything goes well
+    // # 1. extract a file that will process to produce a partial result
+    // # 2. hold a few seconds on the second stage of the root file to let child start
+    // # 3. on the last stage of the root file produce the password
+    // dispatcher.TIMEOUT_EXTRA_TIME = 10
+
+    // child_sha, _ = ready_body(core, {
+    //     'pre': {'partial': {'passwords': 'test_temp_data_monitoring'}},
+    // })
+
+    // sha, size = ready_body(core, {
+    //     'pre': {
+    //         'response': {
+    //             'extracted': [{
+    //                 'name': child_sha,
+    //                 'sha256': child_sha,
+    //                 'description': 'abc',
+    //                 'classification': 'U'
+    //             }]
+    //         }
+    //     },
+    //     'core-a': {'lock': 5},
+    //     'finish': {'temporary_data': {'passwords': ['test_temp_data_monitoring']}},
+    // })
+
+    // core.ingest_queue.push(SubmissionInput(dict(
+    //     metadata={},
+    //     params=dict(
+    //         description="file abc123",
+    //         services=dict(selected=''),
+    //         submitter='user',
+    //         groups=['user'],
+    //         max_extracted=10000
+    //     ),
+    //     notification=dict(
+    //         queue='complex-extracted-file',
+    //         threshold=0
+    //     ),
+    //     files=[dict(
+    //         sha256=sha,
+    //         size=size,
+    //         name='abc123'
+    //     )]
+    // )).as_primitives())
+
+    // # Wait for the extract file to finish
+    // metrics.expect('dispatcher', 'files_completed', 1)
+    // _global_semaphore.release()
+
+    // # Wait for the entire submission to finish
+    // notification_queue = NamedQueue('nq-complex-extracted-file', core.redis)
+    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
+    // assert dropped_task
+    // dropped_task = IngestTask(dropped_task)
+    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
+    // assert len(sub.errors) == 0
+    // assert len(sub.results) == 8, 'results'
+    // assert core.pre_service.hits[sha] == 1, 'pre_service.hits[root]'
+    // assert core.pre_service.hits[child_sha] >= 2, 'pre_service.hits[child]'
+
+    // # Wait until we get feedback from the metrics channel
+    // metrics.expect('ingester', 'submissions_ingested', 1)
+    // metrics.expect('ingester', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'submissions_completed', 1)
+    // metrics.expect('dispatcher', 'files_completed', 2)
+
+    // partial_results = 0
+    // for res in sub.results:
+    //     result = core.ds.get_single_result(res, as_obj=True)
+    //     assert result is not None, res
+    //     if result.partial:
+    //         partial_results += 1
+    // assert partial_results == 0, 'partial_results'
 }

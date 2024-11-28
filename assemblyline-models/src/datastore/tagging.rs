@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::de::Error;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use struct_metadata::Described;
 
 use crate::messages::task::TagEntry;
@@ -920,7 +921,17 @@ pub struct Tagging {
     pub vector: Option<Box<Vec<String>>>,
 }
 
-pub fn flatten(data: JsonMap, parent_key: Option<&str>) -> JsonMap {
+
+fn into_string(value: serde_json::Value) -> String {
+    if let serde_json::Value::String(string) = value {
+        string
+    } else {
+        value.to_string()
+    }
+}
+
+
+pub fn flatten_tags(data: JsonMap, parent_key: Option<&str>) -> FlatTags {
     let mut items = vec![];
     for (k, v) in data {
         let cur_key = match parent_key {
@@ -929,9 +940,11 @@ pub fn flatten(data: JsonMap, parent_key: Option<&str>) -> JsonMap {
         };
 
         if let serde_json::Value::Object(obj) = v {
-            items.extend(flatten(obj, Some(&cur_key)).into_iter())
+            items.extend(flatten_tags(obj, Some(&cur_key)).into_iter())
+        } else if let serde_json::Value::Array(arr) = v {
+            items.push((cur_key, arr.into_iter().map(into_string).collect()));
         } else {
-            items.push((cur_key, v));
+            items.push((cur_key, vec![into_string(v)]));
         }
     }
 
@@ -940,29 +953,94 @@ pub fn flatten(data: JsonMap, parent_key: Option<&str>) -> JsonMap {
 
 impl Tagging {
 
+    pub fn flatten(&self) -> Result<FlatTags, serde_json::Error> {
+        let data = serde_json::to_value(self)?;
+        let serde_json::Value::Object(data) = data else {
+            return Err(serde_json::Error::custom("struct must become object"))
+        };
+        Ok(flatten_tags(data, None))
+    }
 
     pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
         let safelisted = safelisted.unwrap_or(false);
         let mut out = vec![];
         
         let tag_dict = if let serde_json::Value::Object(obj) = serde_json::to_value(&self)? {
-            flatten(obj, None)
+            flatten_tags(obj, None)
         } else {
             return Err(serde_json::Error::custom("tags couldn't fold to json"));
         };
 
-        for (k, v) in tag_dict {
-            if let serde_json::Value::Array(v) = v {
-                for t in v {
-                    out.push(TagEntry { 
-                        score: 0, 
-                        tag_type: k.clone(), 
-                        value: t.as_str().unwrap_or_default().to_string(), 
-                    }); // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
-                }
+        for (tag_type, values) in tag_dict.into_iter() {
+            for tag_value in values {
+                out.push(TagEntry { 
+                    score: 0, 
+                    tag_type: tag_type.clone(), 
+                    value: tag_value, 
+                }); // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
             }
         }
         Ok(out)
     }
 }
 
+// MARK: Flat tags
+#[derive(Default)]
+pub struct FlatTags(HashMap<String, Vec<String>>);
+
+impl From<HashMap<String, Vec<String>>> for FlatTags {
+    fn from(value: HashMap<String, Vec<String>>) -> Self { Self(value) }
+}
+
+impl FromIterator<(String, Vec<String>)> for FlatTags {
+    fn from_iter<T: IntoIterator<Item = (String, Vec<String>)>>(iter: T) -> Self { Self(iter.into_iter().collect())}
+}
+
+impl IntoIterator for FlatTags {
+    type Item = (String, Vec<String>);
+    type IntoIter = std::collections::hash_map::IntoIter<String, Vec<String>>;
+    fn into_iter(self) -> Self::IntoIter { self.0.into_iter() }
+}
+
+impl std::ops::Deref for FlatTags {
+    type Target = HashMap<String, Vec<String>>;
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl std::ops::DerefMut for FlatTags {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+
+impl FlatTags {
+    pub fn unflatten(&self) -> JsonMap {
+        let mut finished = JsonMap::new();
+        let mut nested_parts: HashMap<String, FlatTags> = Default::default();
+        
+        for (tag, values) in &self.0 {
+            match tag.split_once(".") {
+                Some((root, extension)) => {
+                    let entry = nested_parts.entry(root.to_string()).or_default();
+                    entry.0.insert(extension.to_string(), values.clone());
+                },
+                None => {
+                    finished.insert(tag.to_string(), json!(values));
+                }
+            }
+        }
+
+        for (root, parts) in nested_parts {
+            finished.insert(root.to_string(), serde_json::Value::Object(parts.unflatten()));
+        }
+
+        finished
+    }
+
+    pub fn to_tagging(&self) -> Result<Tagging, serde_json::Error> {
+        serde_json::from_value(serde_json::Value::Object(self.unflatten()))
+    }
+
+    pub fn into_inner(self) -> HashMap<String, Vec<String>> {
+        self.0
+    }
+}

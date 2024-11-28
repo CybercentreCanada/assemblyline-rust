@@ -27,6 +27,10 @@ impl ElasticError {
         ElasticErrorInner::Fatal(error.to_string()).into()
     }
 
+    pub fn is_json(&self) -> bool {
+        self.inner.is_json()
+    }
+
     pub fn is_version_conflict(&self) -> bool {
         self.inner.is_version_conflict()
     }
@@ -115,6 +119,14 @@ pub enum ElasticErrorInner {
 }
 
 impl ElasticErrorInner {
+    pub fn is_json(&self) -> bool {
+        match self {
+            Self::JsonError(_) => true,
+            Self::Context{inner, ..} => inner.is_json(),
+            _ => false,
+        }
+    }
+
     pub fn is_version_conflict(&self) -> bool {
         match self {
             Self::VersionConflict(_) => true,

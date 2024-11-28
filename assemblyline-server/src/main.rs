@@ -37,6 +37,7 @@ mod submit;
 mod http;
 mod core_dispatcher;
 mod core_metrics;
+mod core_util;
 mod archive;
 mod services;
 mod dispatcher;
@@ -52,6 +53,8 @@ mod identify;
 mod cachestore;
 mod string_utils;
 mod plumber;
+mod service_api;
+mod common;
 
 #[cfg(test)]
 mod tests;
@@ -226,6 +229,33 @@ impl Core {
         use parking_lot::Mutex;
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
 
+        // #[cfg(feature = "deadlock_detection")]
+        // { // only for #[cfg]
+        // use std::thread;
+        // use std::time::Duration;
+        // use parking_lot::deadlock;
+
+        // // Create a background thread which checks for deadlocks every 10s
+        // thread::spawn(move || {
+        //     loop {
+        //         thread::sleep(Duration::from_secs(10));
+        //         println!("deadlock check...");
+        //         let deadlocks = deadlock::check_deadlock();
+        //         if deadlocks.is_empty() {
+        //             continue;
+        //         }
+
+        //         println!("{} deadlocks detected", deadlocks.len());
+        //         for (i, threads) in deadlocks.iter().enumerate() {
+        //             println!("Deadlock #{}", i);
+        //             for t in threads {
+        //                 println!("Thread Id {:#?}", t.thread_id());
+        //                 println!("{:#?}", t.backtrace());
+        //             }
+        //         }
+        //     }
+        // });
+        // } // only for #[cfg]
 
         static USED_DB: LazyLock<Arc<Mutex<Vec<i64>>>> = LazyLock::new(|| {
             let out = Vec::from_iter(1..16);
@@ -235,8 +265,7 @@ impl Core {
         let table = USED_DB.clone();
         let db = loop {
             {
-                let mut table = table.lock();
-                if let Some(value) = table.pop() {
+                if let Some(value) = table.lock().pop() {
                     break value
                 }
             }
@@ -313,6 +342,7 @@ impl Core {
     }
 }
 
+
 /// While this struct is held prevent temporary core resources from being collected
 #[cfg(test)]
 struct TestGuard {
@@ -328,8 +358,7 @@ impl Drop for TestGuard {
     fn drop(&mut self) {
         self.running.set(false);
 
-        let mut table = self.table.lock();
-        table.push(self.used);
+        self.table.lock().push(self.used);
 
         let elastic = self.elastic.clone();
         tokio::spawn(async move {
@@ -374,3 +403,4 @@ impl Flag {
 /// A convenience trait that lets you pass true, false, or None for boolean arguments
 pub trait IBool: Into<Option<bool>> + Copy + Send {}
 impl<T: Into<Option<bool>> + Copy + Send> IBool for T {}
+

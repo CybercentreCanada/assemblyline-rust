@@ -1,0 +1,150 @@
+// import hashlib
+// from unittest.mock import patch, MagicMock
+
+// import pytest
+
+// from assemblyline.common import forge
+// from assemblyline.odm import randomizer
+// from assemblyline_service_server.config import AUTH_KEY
+// from assemblyline_service_server import app
+
+use super::{setup, AUTH_KEY, random_hash};
+
+// @pytest.fixture()
+// def client():
+//     client = app.app.test_client()
+//     yield client
+
+
+fn headers() -> http::HeaderMap {
+    [
+        ("Container-Id", random_hash(12)),
+        ("X-APIKey", AUTH_KEY.to_owned()),
+        ("Service-Name", "Badlist".to_owned()),
+        ("Service-Version", random_hash(2)),
+        ("Service-Tool-Version", random_hash(64)),
+        ("X-Forwarded-For", "127.0.0.1".to_owned()),
+    ].into_iter()
+    .map(|(name, value)|(reqwest::header::HeaderName::from_static(name), reqwest::header::HeaderValue::from_str(&value).unwrap()))
+    .collect()
+}
+
+
+// @pytest.fixture(scope='function')
+// def file_datastore():
+//     ds = MagicMock()
+//     with patch('assemblyline_service_server.config.TASKING_CLIENT.datastore', ds):
+//         yield ds
+
+
+#[tokio::test]
+async fn test_download_file() {
+    let (client, core, _guard, address) = setup(headers()).await;
+    todo!();
+    // # Put the file in place
+    // fs = forge.get_filestore()
+    // file_size = 12345
+    // fs.put('test_file', b'x' * file_size)
+    // try:
+    //     response = client.get('/api/v1/file/test_file/', headers=headers)
+    //     assert response.status_code == 200
+    //     assert response.data == (b'x' * file_size)
+    // finally:
+    //     fs.delete('test_file')
+
+    // # Try getting it again where the datastore thinks its there but its missing from the filestore
+    // response = client.get('/api/v1/file/test_file/', headers=headers)
+    // assert response.status_code == 404
+
+    // # Have the datastore say it doesn't exist
+    // file_datastore.file.get.return_value = None
+    // response = client.get('/api/v1/file/test_file/', headers=headers)
+    // assert response.status_code == 404
+}
+
+#[tokio::test]
+async fn test_upload_new_file() {
+    let (client, core, _guard, address) = setup(headers()).await;
+    todo!();
+    // fs = forge.get_filestore()
+
+    // file_size = 10003
+    // file_data = b'x'*file_size
+    // file_hash = hashlib.sha256(file_data).hexdigest()
+
+    // fs.delete(file_hash)
+
+    // file_headers = dict(headers)
+    // file_headers['sha256'] = file_hash
+    // file_headers['classification'] = 'U'
+    // file_headers['ttl'] = 1
+    // file_headers['Content-Type'] = 'application/octet-stream'
+
+    // try:
+    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
+    //     assert response.status_code == 200
+    //     assert fs.exists(file_hash)
+    //     assert file_datastore.save_or_freshen_file.call_count == 1
+    // finally:
+    //     fs.delete(file_hash)
+}
+
+#[tokio::test]
+async fn test_upload_section_image() {
+    let (client, core, _guard, address) = setup(headers()).await;
+    todo!();
+    // fs = forge.get_filestore()
+
+    // file_size = 10003
+    // file_data = b'x'*file_size
+    // file_hash = hashlib.sha256(file_data).hexdigest()
+
+    // fs.delete(file_hash)
+
+    // file_headers = dict(headers)
+    // file_headers['sha256'] = file_hash
+    // file_headers['classification'] = 'U'
+    // file_headers['ttl'] = 1
+    // file_headers['Content-Type'] = 'application/octet-stream'
+    // file_headers['Is-Section-Image'] = 'true'
+
+    // try:
+    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
+    //     assert response.status_code == 200
+    //     assert fs.exists(file_hash)
+    //     assert file_datastore.save_or_freshen_file.call_count == 1
+    //     assert file_datastore.file.get("sha256").is_section_image
+    // finally:
+    //     fs.delete(file_hash)
+}
+
+#[tokio::test]
+async fn test_upload_file_bad_hash() {
+    let (client, core, _guard, address) = setup(headers()).await;
+    todo!();
+    // fs = forge.get_filestore()
+
+    // file_size = 10003
+    // file_data = b'x'*file_size
+    // file_hash = hashlib.sha256(file_data).hexdigest()
+    // bad_hash = '0000' + file_hash[4:]
+
+    // fs.delete(file_hash)
+    // fs.delete(bad_hash)
+
+    // file_headers = dict(headers)
+    // file_headers['sha256'] = bad_hash
+    // file_headers['classification'] = 'U'
+    // file_headers['ttl'] = 1
+    // file_headers['Content-Type'] = 'application/octet-stream'
+
+    // try:
+    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
+    //     assert response.status_code in range(400, 500)
+    //     assert not fs.exists(file_hash)
+    //     assert not fs.exists(bad_hash)
+    //     assert file_datastore.save_or_freshen_file.call_count == 0
+    // finally:
+    //     fs.delete(file_hash)
+    //     fs.delete(bad_hash)
+}

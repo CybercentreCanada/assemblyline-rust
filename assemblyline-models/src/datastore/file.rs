@@ -12,6 +12,8 @@ use crate::{ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sh
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct File {
+    /// Timestamp indicating when the file was archived.
+    pub archive_ts: Option<DateTime<Utc>>,
     /// Dotted ASCII representation of the first 64 bytes of the file
     #[metadata(index=false, store=false)]
     pub ascii: String,
@@ -99,6 +101,7 @@ impl File {
         let md5 = hex::encode(md5::Md5::new().chain_update(data).finalize());
 
         File {
+            archive_ts: None,
             ascii: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
             classification: ExpandingClassification {
                 classification: "".to_string(),

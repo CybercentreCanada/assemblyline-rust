@@ -18,7 +18,7 @@ pub(crate) const ARCHIVE_QUEUE_NAME: &str = "m-archive";
 pub(crate) const DISPATCH_TASK_HASH: &str = "dispatch-active-submissions";
 // pub(crate) const DISPATCH_RUNNING_TASK_HASH: &str = "dispatch-active-tasks";
 pub(crate) const SCALER_TIMEOUT_QUEUE: &str = "scaler-timeout-queue";
-
+pub(crate) const SERVICE_STATE_HASH: &str = "service-stasis-table";
 pub(crate) const SERVICE_QUEUE_PREFIX: &str = "service-queue-";
 
 /// Take the name of a service, and provide the queue name to send tasks to that service.
@@ -49,6 +49,17 @@ pub enum ServiceStage {
     Running = 2,
     Paused = 3,
 }
+
+
+/// A table storing information about the state of a service, expected type is ExpiringHash
+/// with a default ttl of None, and the ttl set per field based on the timeouts of queries
+/// and service operation
+#[derive(Debug, strum::FromRepr, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStatus {
+    Idle = 0,
+    Running = 1,
+}
+
 
 impl<'de> Deserialize<'de> for ServiceStage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

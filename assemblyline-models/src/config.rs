@@ -1187,8 +1187,13 @@ fn default_service_stages() -> Vec<String> {
 pub enum SafelistHashTypes {
     Sha1, Sha256, Md5
 }
-// REGISTRY_TYPES = ['docker', 'harbor']
 
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy)]
+#[strum(serialize_all = "lowercase")]
+pub enum RegistryTypes {
+    Docker, 
+    Harbor
+}
 
 /// Service's Safelisting Configuration
 // @odm.model(index=False, store=False, description="")
@@ -1229,13 +1234,20 @@ pub struct Services {
 //     default_timeout: int = odm.Integer(description="Default service timeout time in seconds")
     /// List of execution stages a service can be assigned to
     pub stages: Vec<String>, 
-//     image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), description="Substitution variables for image paths (for custom registry support)")
-//     update_image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), description="Similar to `image_variables` but only applied to the updater. Intended for use with local registries.")
-//     preferred_update_channel: str = odm.Keyword(description="Default update channel to be used for new services")
-//     allow_insecure_registry: bool = odm.Boolean(description="Allow fetching container images from insecure registries")
-//     preferred_registry_type: str = odm.Enum(values=REGISTRY_TYPES,default='docker',description="Global registry type to be used for fetching updates for a service (overridable by a service)")
-//     prefer_service_privileged: bool = odm.Boolean(default=False,description="Global preference that controls if services should be privileged to communicate with core infrastucture")
-//     cpu_reservation: float = odm.Float(description="How much CPU do we want to reserve relative to the service's request?<br> At `1`, a service's full CPU request will be reserved for them.<br> At `0` (only for very small appliances/dev boxes), the service's CPU will be limited ""but no CPU will be reserved allowing for more flexible scheduling of containers.")
+    /// Substitution variables for image paths (for custom registry support)
+    // pub image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), ),
+    /// Similar to `image_variables` but only applied to the updater. Intended for use with local registries.
+    // pub update_image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), ),
+    /// Default update channel to be used for new services
+    pub preferred_update_channel: String,
+    /// Allow fetching container images from insecure registries
+    pub allow_insecure_registry: bool,
+    /// Global registry type to be used for fetching updates for a service (overridable by a service)
+    pub preferred_registry_type: RegistryTypes,
+    /// Global preference that controls if services should be privileged to communicate with core infrastucture
+    pub prefer_service_privileged: bool,
+    /// How much CPU do we want to reserve relative to the service's request?<br> At `1`, a service's full CPU request will be reserved for them.<br> At `0` (only for very small appliances/dev boxes), the service's CPU will be limited ""but no CPU will be reserved allowing for more flexible scheduling of containers.
+    pub cpu_reservation: f64,
     pub safelist: ServiceSafelist,
 //     registries = odm.Optional(odm.List(odm.Compound(ServiceRegistry)), description="Global set of registries for services")
 //     service_account = odm.optional(odm.keyword(description="Service account to use for pods in kubernetes where the service does not have one configured."))
@@ -1249,9 +1261,11 @@ impl Default for Services {
             stages: default_service_stages(),
     //     "image_variables": {},
     //     "update_image_variables": {},
-    //     "preferred_update_channel": "stable",
-    //     "allow_insecure_registry": False,
-    //     "cpu_reservation": 0.25,
+            preferred_update_channel: "stable".to_string(),
+            preferred_registry_type: RegistryTypes::Docker,
+            prefer_service_privileged: false,
+            allow_insecure_registry: false,
+            cpu_reservation: 0.25,
             safelist: Default::default(),
     //     "registries": []
         }
@@ -1609,7 +1623,6 @@ impl Default for UI {
 pub enum TemporaryKeyType {
     Union,
     Overwrite,
-    Ignore,
 }
 
 impl Default for TemporaryKeyType {
@@ -1669,7 +1682,6 @@ impl Default for Submission {
             // verdicts: Default::default()
             temporary_keys: [
                 ("passwords".to_owned(), TemporaryKeyType::Union),
-                ("ancestry".to_owned(), TemporaryKeyType::Ignore),
             ].into_iter().collect()
         }
     }
