@@ -50,6 +50,7 @@ tokio-tungstenite = "0.20"
 http = "*"
 
 # Crypto/hash libraries
+digest = "*"
 openssl = { version = "0.10" }
 native-tls = "0.2"
 hyper-rustls = { version = "0.23", features = [] }

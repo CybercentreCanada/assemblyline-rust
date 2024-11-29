@@ -19,10 +19,11 @@ const EMPTY: &[(); 0] = &[];
 // badlist_api._doc = "Query badlisted hashes"
 pub fn api(core: Arc<Core>) -> impl Endpoint {
     Route::new()
-    .at("/ssdeep/", post(similar_ssdeep))
-    .at("/tlsh/", post(similar_tlsh))
-    .at("/tags/", post(tags_exists))
+    .at("/ssdeep", post(similar_ssdeep))
+    .at("/tlsh", post(similar_tlsh))
+    .at("/tags", post(tags_exists))
     .at("/:qhash", get(exists))
+    .data(Arc::new(BadlistClient::new(core.datastore.clone(), core.config.clone(), core.classification_parser.clone())))
     .with(ServiceAuth::new(core))
 }
 
@@ -44,7 +45,8 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// Result example:
 /// <Badlisting object>
 #[handler]
-async fn exists(qhash: Path<String>, client: Data<&BadlistClient>) -> Response {
+async fn exists(Path(qhash): Path<String>, client: Data<&Arc<BadlistClient>>) -> Response {
+    log::debug!("looking for {qhash}");
     match client.exists(&qhash).await {
         Ok(Some(badlist)) => make_api_response(badlist),
         Ok(None) => make_empty_api_error(StatusCode::NOT_FOUND, "The hash was not found in the badlist."),
@@ -71,7 +73,7 @@ async fn exists(qhash: Path<String>, client: Data<&BadlistClient>) -> Response {
 /// Result example:
 /// <Badlisting object>
 #[handler]
-async fn similar_ssdeep(Json(body): Json<SimilarSSDeepRequest>, client: Data<&BadlistClient>) -> Response {
+async fn similar_ssdeep(Json(body): Json<SimilarSSDeepRequest>, client: Data<&Arc<BadlistClient>>) -> Response {
     match client.find_similar_ssdeep(&body.ssdeep).await {
         Ok(items) => if items.is_empty() {
             make_api_error(StatusCode::NOT_FOUND, "The hash was not found in the badlist.", EMPTY)
@@ -106,7 +108,7 @@ pub struct SimilarSSDeepRequest {
 /// Result example:
 /// <Badlisting object>
 #[handler]
-async fn similar_tlsh(Json(body): Json<SimilarTlshRequest>, client: Data<&BadlistClient>) -> Response {
+async fn similar_tlsh(Json(body): Json<SimilarTlshRequest>, client: Data<&Arc<BadlistClient>>) -> Response {
     match client.find_similar_tlsh(&body.tlsh).await {
         Ok(items) => if items.is_empty() {
             make_api_error(StatusCode::NOT_FOUND, "The hash was not found in the badlist.", EMPTY)
@@ -146,13 +148,13 @@ pub struct SimilarTlshRequest {
 ///     <Badlisting object>
 /// ]
 #[handler]
-async fn tags_exists(Json(data): Json<HashMap<String, Vec<String>>>) -> Response {
+async fn tags_exists(
+    Json(data): Json<HashMap<String, Vec<String>>>, 
+    client: Data<&Arc<BadlistClient>>
+) -> Response {
     log::info!("tags_exists");
-    todo!()
-    // client: Data<&BadlistClient>
-    // match client.exists_tags(data).await {
-    //     Ok(items) => make_api_response(items),
-    //     Err(err) => make_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string(), EMPTY)
-    // }
-
+    match client.exists_tags(data).await {
+        Ok(items) => make_api_response(items),
+        Err(err) => make_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string(), EMPTY)
+    }
 }

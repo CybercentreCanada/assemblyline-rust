@@ -14,16 +14,25 @@ const CHUNK_SIZE: u64 = 1000;
 // CLASSIFICATION = forge.get_classification()
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Arc;
 
+use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::config::Config;
+use assemblyline_models::datastore::badlist;
 use assemblyline_models::datastore::badlist::Badlist;
+use assemblyline_models::datastore::user::{User, UserRole};
+use assemblyline_models::ExpandingClassification;
+use chrono::{TimeDelta, Utc};
 use itertools::Itertools;
 use log::warn;
-use md5::Digest;
+use digest::Digest;
+use serde::Deserialize;
 use sha2::Sha256;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use thiserror::Error;
 
+use crate::common::PermissionError;
 use crate::elastic::Elastic;
 
 
@@ -34,91 +43,135 @@ pub struct InvalidBadhash(String);
 
 /// A helper class to simplify badlisting for privileged services and service-server.
 pub struct BadlistClient {
+    config: Arc<Config>,
     datastore: Arc<Elastic>,
+    ce: Arc<ClassificationParser>,
 }
 
 impl BadlistClient {
-    pub fn new(datastore: Arc<Elastic>) -> Self {
-        Self { datastore }
+    pub fn new(datastore: Arc<Elastic>, config: Arc<Config>, ce: Arc<ClassificationParser>) -> Self {
+        Self { datastore, ce, config }
     }
 
-    // pub fn _preprocess_object(&self, data: JsonMap) -> String {
-    //     # Set defaults
-    //     data.setdefault('classification', CLASSIFICATION.UNRESTRICTED)
-    //     data.setdefault('hashes', {})
-    //     data.setdefault('expiry_ts', None)
-    //     if data['type'] == 'tag':
-    //         # Remove file related fields
-    //         data.pop('file', None)
-    //         data.pop('hashes', None)
+    pub fn _preprocess_object(&self, data: RequestBadlist) -> Result<(String, Badlist)> {
+        // get defaults
+        let cln = match &data.body().classification {
+            Some(cln) => cln.clone(),
+            None => self.ce.unrestricted().to_string()
+        };
+        let classification = ExpandingClassification::new(cln, &self.ce)?;
 
-    //         tag_data = data.get('tag', None)
-    //         if tag_data is None or 'type' not in tag_data or 'value' not in tag_data:
-    //             raise ValueError("Tag data not found")
+        // Ensure expiry_ts is set on tag-related items
+        let expiry_ts = match data.body().dtl {
+            Some(days) => if days > 0 { 
+                Some(Utc::now() + TimeDelta::days(days.into())) 
+            } else {
+                None
+            },
+            None => Some(Utc::now() + TimeDelta::days(self.config.core.expiry.badlisted_tag_dtl.into())),
+        };
 
-    //         hashed_value = f"{tag_data['type']}: {tag_data['value']}".encode('utf8')
-    //         data['hashes'] = {
-    //             'sha256': hashlib.sha256(hashed_value).hexdigest()
-    //         }
+        // convert the different inputs to a badlist object
+        let badlist = match data {
+            RequestBadlist::Tag{ body, tag } => {
+                // tag_data = data.get("tag", None)
+                // if tag_data is None or "type" not in tag_data or "value" not in tag_data {
+                //     raise ValueError("Tag data not found")
+                // }
 
-    //     elif data['type'] == 'file':
-    //         data.pop('tag', None)
-    //         data.setdefault('file', {})
+                let mut hasher = sha2::Sha256::new();
+                hasher.write_all(format!("{}: {}", tag.tag_type, tag.value).as_bytes())?;
+                let hashes = badlist::Hashes {
+                    sha256: Some(hasher.finalize().as_slice().try_into()?),
+                    ..Default::default()
+                };
+                Badlist {
+                    added: Utc::now(),
+                    attribution: body.attribution,
+                    classification,
+                    enabled: body.enabled,
+                    expiry_ts,
+                    file: None,
+                    hash_type: badlist::BadhashTypes::Tag,
+                    hashes,
+                    sources: body.sources,
+                    tag: Some(tag),
+                    updated: Utc::now(),    
+                }
+            },
+            RequestBadlist::File{ body, file, hashes} => {
+                Badlist {
+                    added: Utc::now(),
+                    attribution: body.attribution,
+                    classification,
+                    enabled: body.enabled,
+                    expiry_ts,
+                    file: Some(file),
+                    hash_type: badlist::BadhashTypes::File,
+                    hashes,
+                    sources: body.sources,
+                    tag: None,
+                    updated: Utc::now(),
+                }
+            }
+        };
+       
+        // Find the best hash to use for the key
+        let qhash = badlist.hashes.label_hash();
 
-    //     # Ensure expiry_ts is set on tag-related items
-    //     dtl = data.pop('dtl', None) or self.config.core.expiry.badlisted_tag_dtl
-    //     if dtl:
-    //         data['expiry_ts'] = now_as_iso(dtl * 24 * 3600)
+        // Validate hash length
+        let qhash = match qhash {
+            Some(hash) => hash,
+            None => bail!("No valid hash found")
+        };
 
-    //     # Set last updated
-    //     data['added'] = data['updated'] = now_as_iso()
+        Ok((qhash, badlist))
+    }
 
-    //     # Find the best hash to use for the key
-    //     for hash_key in ['sha256', 'sha1', 'md5', 'tlsh', 'ssdeep']:
-    //         qhash = data['hashes'].get(hash_key, None)
-    //         if qhash:
-    //             break
+    pub async fn add_update(&self, badlist_object: RequestBadlist, user: Option<User>) -> Result<(String, &'static str)> {
+        let (qhash, mut badlist_object) = self._preprocess_object(badlist_object)?;
 
-    //     # Validate hash length
-    //     if not qhash:
-    //         raise ValueError("No valid hash found")
+        // Validate sources
+        let mut src_map = HashMap::<String, badlist::Source>::new();
+        let mut classification = badlist_object.classification.classification;
+        for src in badlist_object.sources {
+            if let Some(user) = &user {
+                if src.source_type == badlist::SourceTypes::User {
+                    if src.name != user.uname {
+                        bail!("You cannot add a source for another user. {} != {}", src.name, user.uname);
+                    }
+                } else {
+                    if !user.roles.contains(&UserRole::SignatureImport) {
+                        return Err(PermissionError("You do not have sufficient priviledges to add an external source.".to_owned()).into())
+                    }
+                }
+            }
 
-    //     return qhash
-    // }
+            // Find the highest classification of all sources
+            classification = self.ce.max_classification(&classification, src.classification.as_str(), None)?;
+            src_map.insert(src.name.clone(), src);
+        }
+        badlist_object.classification = ExpandingClassification::new(classification, &self.ce)?;
+        badlist_object.sources = src_map.into_values().collect();
 
-    // def add_update(self, badlist_object: dict, user: dict = None):
-    //     qhash = self._preprocess_object(badlist_object)
-
-    //     # Validate sources
-    //     src_map = {}
-    //     for src in badlist_object['sources']:
-    //         if user:
-    //             if src['type'] == 'user':
-    //                 if src['name'] != user['uname']:
-    //                     raise ValueError(f"You cannot add a source for another user. {src['name']} != {user['uname']}")
-    //             else:
-    //                 if ROLES.signature_import not in user['roles']:
-    //                     raise PermissionError("You do not have sufficient priviledges to add an external source.")
-
-    //         # Find the highest classification of all sources
-    //         badlist_object['classification'] = CLASSIFICATION.max_classification(
-    //             badlist_object['classification'], src.get('classification', None))
-
-    //         src_map[src['name']] = src
-
-    //     with Lock(f'add_or_update-badlist-{qhash}', 30):
-    //         old = self.datastore.badlist.get_if_exists(qhash, as_obj=False)
-    //         if old:
-    //             # Save data to the DB
-    //             self.datastore.badlist.save(qhash, BadlistClient._merge_hashes(badlist_object, old))
-    //             return qhash, "update"
-    //         else:
-    //             try:
-    //                 badlist_object['sources'] = list(src_map.values())
-    //                 self.datastore.badlist.save(qhash, badlist_object)
-    //                 return qhash, "add"
-    //             except Exception as e:
-    //                 return ValueError(f"Invalid data provided: {str(e)}")
+        // Save data to the DB
+        loop {
+            if let Some((old, version)) = self.datastore.badlist.get_if_exists(&qhash, None).await? {
+                let old = self.merge_hashes(badlist_object.clone(), old)?;
+                if let Err(err) = self.datastore.badlist.save(&qhash, &old, Some(version), None).await {
+                    if err.is_version_conflict() { continue }
+                    return Err(err.into())
+                }
+                return Ok((qhash, "update"))
+            } else {
+                if let Err(err) = self.datastore.badlist.save(&qhash, &badlist_object, Some(crate::elastic::Version::Create), None).await {
+                    if err.is_version_conflict() { continue }
+                    return Err(err.into())
+                }
+                return Ok((qhash, "add"))
+            }
+        }
+    }
 
     // def add_update_many(self, list_of_badlist_objects: list):
     //     if not isinstance(list_of_badlist_objects, list):
@@ -202,84 +255,137 @@ impl BadlistClient {
             .execute::<()>().await?.source_items)
     }
 
-    // @staticmethod
-    // def _merge_hashes(new, old):
-    //     # Account for the possibility of merging with null types
-    //     if not (new or old):
-    //         # Both are null
-    //         raise ValueError("New and old are both null")
-    //     elif not (new and old):
-    //         # Only one is null, in which case return the other
-    //         return new or old
+    fn merge_hashes(&self, new: Badlist, mut old: Badlist) -> Result<Badlist> {
+        // Account for the possibility of merging with null types
+        // if not (new or old) {
+        //     # Both are null
+        //     raise ValueError("New and old are both null")
+        // } elif not (new and old):
+        //     # Only one is null, in which case return the other
+        //     return new or old
 
-    //     try:
-    //         # Check if hash types match
-    //         if new['type'] != old['type']:
-    //             raise InvalidBadhash(f"Bad hash type mismatch: {new['type']} != {old['type']}")
+        // Check if hash types match
+        if new.hash_type != old.hash_type {
+            return Err(InvalidBadhash(format!("Bad hash type mismatch: {} != {}", new.hash_type, old.hash_type)).into())
+        }
 
-    //         # Use the new classification but we will recompute it later anyway
-    //         old['classification'] = new['classification']
+        // Use the new classification but we will recompute it later anyway
+        old.classification = new.classification;
 
-    //         # Update updated time
-    //         old['updated'] = new.get('updated', now_as_iso())
+        // Update updated time
+        old.updated = new.updated;
 
-    //         # Update hashes
-    //         old['hashes'].update({k: v for k, v in new['hashes'].items() if v})
+        // Update hashes
+        // old.hashes.update({k: v for k, v in new["hashes"].items() if v})
+        old.hashes.update(new.hashes);
 
-    //         # Merge attributions
-    //         if not old['attribution']:
-    //             old['attribution'] = new.get('attribution', None)
-    //         elif new.get('attribution', None):
-    //             for key in ["actor", 'campaign', 'category', 'exploit', 'implant', 'family', 'network']:
-    //                 old_value = old['attribution'].get(key, []) or []
-    //                 new_value = new['attribution'].get(key, []) or []
-    //                 old['attribution'][key] = list(set(old_value + new_value)) or None
+        // Merge attributions
+        if let Some(old_attr) = &mut old.attribution {
+            if let Some(new_attr) = new.attribution {
+                old_attr.update(new_attr);
+            }
+        } else {
+            old.attribution = new.attribution;
+        }
+        
+        // if let Some(attr) = old.attribution {
+        //     old["attribution"] = {key: value for key, value in old["attribution"].items() if value}
+        // }
 
-    //         if old['attribution'] is not None:
-    //             old['attribution'] = {key: value for key, value in old['attribution'].items() if value}
+        // Update type specific info
+        match old.hash_type { 
+            badlist::BadhashTypes::File => {
+                if let Some(file) = &mut old.file {
+                    if let Some(mut new_file) = new.file {
+                        file.name.append(&mut new_file.name);
+                        file.name.sort_unstable();
+                        file.name.dedup();
 
-    //         # Update type specific info
-    //         if old['type'] == 'file':
-    //             old.setdefault('file', {})
-    //             new_names = new.get('file', {}).pop('name', [])
-    //             if 'name' in old['file']:
-    //                 for name in new_names:
-    //                     if name not in old['file']['name']:
-    //                         old['file']['name'].append(name)
-    //             elif new_names:
-    //                 old['file']['name'] = new_names
-    //             old['file'].update({k: v for k, v in new.get('file', {}).items() if v})
-    //         elif old['type'] == 'tag':
-    //             old['tag'] = new['tag']
+                        file.file_type = new_file.file_type.or(file.file_type.take());
+                        file.size = new_file.size.or(file.size);
+                    }
+                } else {
+                    old.file = new.file;
+                } 
+            },
+            badlist::BadhashTypes::Tag => {
+                old.tag = new.tag;
+            }
+        }        
 
-    //         # Merge sources
-    //         src_map = {x['name']: x for x in new['sources']}
-    //         if not src_map:
-    //             raise InvalidBadhash("No valid source found")
+        // Merge sources
+        if new.sources.is_empty() {
+            return Err(InvalidBadhash("No valid source found".to_owned()).into())
+        }
 
-    //         old_src_map = {x['name']: x for x in old['sources']}
-    //         for name, src in src_map.items():
-    //             if name not in old_src_map:
-    //                 old_src_map[name] = src
-    //             else:
-    //                 old_src = old_src_map[name]
-    //                 if old_src['type'] != src['type']:
-    //                     raise InvalidBadhash(f"Source {name} has a type conflict: {old_src['type']} != {src['type']}")
+        let mut old_src_map: HashMap<String, _> = old.sources.into_iter().map(|src|(src.name.clone(), src)).collect();
+        for src in new.sources {
+            match old_src_map.get_mut(&src.name) {
+                Some(old_src) => {
+                    if old_src.source_type != src.source_type {
+                        return Err(InvalidBadhash(format!("Source {} has a type conflict: {} != {}", src.name, old_src.source_type, src.source_type)).into())
+                    }
+    
+                    for reason in src.reason {
+                        if !old_src.reason.contains(&reason) {
+                            old_src.reason.push(reason)
+                        }
+                    }
+                    old_src.classification = src.classification;
+                },
+                None => {
+                    old_src_map.insert(src.name.clone(), src);
+                }
+            }
+        }
+        old.sources = old_src_map.into_values().collect();
 
-    //                 for reason in src['reason']:
-    //                     if reason not in old_src['reason']:
-    //                         old_src['reason'].append(reason)
-    //                 old_src['classification'] = src.get('classification', old_src['classification'])
-    //         old['sources'] = list(old_src_map.values())
+        // Calculate the new classification
+        let mut classification = old.classification.classification;
+        for src in &old.sources {
+            classification = self.ce.max_classification(&classification, src.classification.as_str(), None)?;
+        }
+        old.classification = ExpandingClassification::new(classification, &self.ce)?;
 
-    //         # Calculate the new classification
-    //         for src in old['sources']:
-    //             old['classification'] = CLASSIFICATION.max_classification(
-    //                 old['classification'], src.get('classification', None))
+        // Set the expiry
+        old.expiry_ts = match (old.expiry_ts, new.expiry_ts) {
+            (None, _) | (_, None) => None,
+            (Some(a), Some(b)) => Some(a.max(b)),
+        };
+        Ok(old)
+    }
+}
 
-    //         # Set the expiry
-    //         old['expiry_ts'] = new.get('expiry_ts', None)
-    //         return old
-    //     except Exception as e:
-    //         raise InvalidBadhash(f"Invalid data provided: {str(e)}")
+#[derive(Deserialize)]
+#[serde(tag="type", rename_all="lowercase")]
+pub enum RequestBadlist {
+    File {
+        #[serde(flatten)]
+        body: CommonRequestBadlist,
+        file: badlist::File,
+        hashes: badlist::Hashes,
+    },
+    Tag {
+        #[serde(flatten)]
+        body: CommonRequestBadlist,
+        tag: badlist::Tag,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CommonRequestBadlist {
+    pub classification: Option<String>,
+    pub enabled: bool,
+    pub dtl: Option<u32>,
+    pub attribution: Option<badlist::Attribution>,
+    pub sources: Vec<badlist::Source>,
+}
+
+impl RequestBadlist {
+    fn body(&self) -> &CommonRequestBadlist {
+        match self {
+            RequestBadlist::Tag { body, .. } => body,
+            RequestBadlist::File { body, .. } => body,
+        }
+    }
 }

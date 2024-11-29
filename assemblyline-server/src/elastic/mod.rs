@@ -1549,6 +1549,17 @@ impl Elastic {
             _ => false
         }
     }
+
+    #[cfg(test)]
+    pub async fn apply_test_settings(&self) -> Result<()> {
+        let body = serde_json::json!({
+            "persistent": {
+                "cluster.max_shards_per_node": 1000000
+            }
+        });
+        self.es.client.put(self.es.host.join("/_cluster/settings")?).json(&body).send().await?.error_for_status()?;
+        Ok(())
+    }
 }
 
 fn extract_number(container: &JsonMap, name: &str) -> u64 {

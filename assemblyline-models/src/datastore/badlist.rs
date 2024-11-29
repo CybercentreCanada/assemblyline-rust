@@ -9,7 +9,7 @@ use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable
 // from assemblyline.common import forge
 
 // Classification = forge.get_classification()
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, PartialEq, Eq)]
+#[derive(SerializeDisplay, DeserializeFromStr, Clone, Copy, strum::Display, strum::EnumString, Described, Debug, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum BadhashTypes {
@@ -17,7 +17,7 @@ pub enum BadhashTypes {
     Tag,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, PartialEq, Eq)]
+#[derive(SerializeDisplay, DeserializeFromStr, Clone, Copy, strum::Display, strum::EnumString, Described, Debug, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum SourceTypes {
@@ -28,7 +28,7 @@ pub enum SourceTypes {
 // SOURCE_TYPES = ["user", "external"]
 
 /// Attribution Tag Model
-#[derive(Debug, Serialize, Deserialize, Described, Default, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, Default, PartialEq, Eq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
@@ -56,8 +56,33 @@ pub struct Attribution {
     pub network: Option<Vec<UpperString>>,
 }
 
+impl Attribution {
+    pub fn update(&mut self, mut other: Attribution) {
+        macro_rules! update_field {($self: ident, $other: ident, $key: ident) => {
+            match &mut $self.$key {
+                Some(data) => {
+                    data.append(&mut $other.$key.take().unwrap_or_default());
+                    data.sort_unstable();
+                    data.dedup();                    
+                },
+                None => {
+                    $self.$key = $other.$key;
+                }
+            }; 
+        };}
+
+        update_field!(self, other, actor);
+        update_field!(self, other, campaign);
+        update_field!(self, other, category);
+        update_field!(self, other, exploit);
+        update_field!(self, other, implant);
+        update_field!(self, other, family);
+        update_field!(self, other, network);
+    }
+}
+
 /// Hashes of a badlisted file
-#[derive(Debug, Serialize, Deserialize, Described, Default, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, Default, PartialEq, Eq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
@@ -79,8 +104,37 @@ pub struct Hashes {
     pub tlsh: Option<String>,
 }
 
+impl Hashes {
+    pub fn update(&mut self, other: Hashes) {
+        macro_rules! update_field {($self: ident, $other: ident, $key: ident) => {
+            $self.$key = $other.$key.or($self.$key.take())
+        };}
+
+        update_field!(self, other, md5);
+        update_field!(self, other, sha1);
+        update_field!(self, other, sha256);
+        update_field!(self, other, ssdeep);
+        update_field!(self, other, tlsh);
+    }
+
+    pub fn label_hash(&self) -> Option<String> {
+        macro_rules! read_field {($self: ident, $key: ident) => {
+            if let Some(val) = &($self.$key) {
+                return Some(val.to_string());
+            }
+        };}
+
+        read_field!(self, sha256);
+        read_field!(self, sha1);
+        read_field!(self, md5);
+        read_field!(self, tlsh);
+        read_field!(self, ssdeep);
+        None
+    }
+}
+
 /// File Details
-#[derive(Debug, Serialize, Deserialize, Described, Default, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, Default, PartialEq, Eq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
@@ -97,7 +151,7 @@ pub struct File {
 
 
 /// Badlist source
-#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Source {
@@ -114,7 +168,7 @@ pub struct Source {
 }
 
 /// Tag associated to file
-#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Tag {
@@ -128,7 +182,7 @@ pub struct Tag {
 
 
 /// Badlist Model
-#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Badlist {

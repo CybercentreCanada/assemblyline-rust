@@ -3,7 +3,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
-use rand::{thread_rng, Rng};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
@@ -74,7 +73,7 @@ impl std::error::Error for ModelError {}
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 /// Uppercase String
-#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="keyword")]
 pub struct UpperString {
@@ -270,6 +269,10 @@ impl<const USER: bool> ExpandingClassification<USER> {
                 __access_grp2__: vec!["__EMPTY__".to_owned()],
             })
         }
+    }
+
+    pub fn unrestricted(parser: &ClassificationParser) -> Self {
+        Self::new(parser.unrestricted().to_string(), parser).unwrap()
     }
 
     pub fn as_str(&self) -> &str {

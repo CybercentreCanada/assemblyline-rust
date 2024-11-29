@@ -168,6 +168,8 @@ impl Identify {
 
     async fn watch_reloads(self: Arc<Self>, mut messages: mpsc::Receiver<Option<redis_objects::Msg>>) {
         while let Some(msg) = messages.recv().await {
+            debug!("Reloading identify.");
+
             // check if we are the only one still holding this reference
             if Arc::strong_count(&self) <= 1 {
                 return

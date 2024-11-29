@@ -229,34 +229,6 @@ impl Core {
         use parking_lot::Mutex;
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
 
-        // #[cfg(feature = "deadlock_detection")]
-        // { // only for #[cfg]
-        // use std::thread;
-        // use std::time::Duration;
-        // use parking_lot::deadlock;
-
-        // // Create a background thread which checks for deadlocks every 10s
-        // thread::spawn(move || {
-        //     loop {
-        //         thread::sleep(Duration::from_secs(10));
-        //         println!("deadlock check...");
-        //         let deadlocks = deadlock::check_deadlock();
-        //         if deadlocks.is_empty() {
-        //             continue;
-        //         }
-
-        //         println!("{} deadlocks detected", deadlocks.len());
-        //         for (i, threads) in deadlocks.iter().enumerate() {
-        //             println!("Deadlock #{}", i);
-        //             for t in threads {
-        //                 println!("Thread Id {:#?}", t.thread_id());
-        //                 println!("{:#?}", t.backtrace());
-        //             }
-        //         }
-        //     }
-        // });
-        // } // only for #[cfg]
-
         static USED_DB: LazyLock<Arc<Mutex<Vec<i64>>>> = LazyLock::new(|| {
             let out = Vec::from_iter(1..16);
             Arc::new(Mutex::new(out))
@@ -312,6 +284,7 @@ impl Core {
         let prefix = rand::thread_rng().r#gen::<u128>().to_string();
         let core = Self::setup(Arc::new(config), &prefix).await.unwrap();
         let elastic = core.datastore.clone();
+        elastic.apply_test_settings().await.unwrap();
         let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone() };
         (core, guard)
     }

@@ -57,7 +57,7 @@ pub struct TaskingClient {
 }
 
 impl TaskingClient {
-    async fn new(core: &Core) -> Result<Self> {
+    pub async fn new(core: &Core) -> Result<Self> {
 //     def __init__(self, datastore: AssemblylineDatastore = None, filestore: FileStore = None,
 //                  config=None, redis=None, redis_persist=None, identify=None, register_only=False):
         // self.config = config or forge.CachedObject(forge.get_config)
@@ -77,17 +77,16 @@ impl TaskingClient {
             .subscribe("changes.heuristics".to_owned())
             .listen();
 
-        let heuristics = Arc::new(Mutex::new(HashMap::new()));
+        // get the initial hearustic data
+        let new_heuristics = core.datastore.list_all_heuristics().await?;
+        let new_heuristics: HashMap<String, Heuristic> = new_heuristics.into_iter().map(|heur|(heur.heur_id.clone(), heur)).collect();
+        let heuristics = Arc::new(Mutex::new(new_heuristics));
 
         tokio::spawn({
             let datastore = core.datastore.clone();
             let heuristics = heuristics.clone();
             
             async move {
-                if true {
-                    todo!("init")
-                }
-
                 while Arc::strong_count(&heuristics) > 1 {
                     let message = match event_listener.recv().await {
                         Some(message) => message,

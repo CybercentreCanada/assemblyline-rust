@@ -7,7 +7,7 @@ use assemblyline_models::ElasticMeta;
 
 pub fn flat_fields(data: struct_metadata::Descriptor<ElasticMeta>) -> Result<HashMap<String, struct_metadata::Descriptor<ElasticMeta>>> {
     use struct_metadata::Kind;
-    if let Kind::Struct { name, children } = data.kind {
+    if let Kind::Struct { children, .. } = data.kind {
         Ok(_flat_fields(children))
     } else {
         anyhow::bail!("Only structs have fields")
@@ -19,11 +19,11 @@ fn _flat_fields(children: Vec<struct_metadata::Entry<ElasticMeta>>) -> HashMap<S
     let mut fields = HashMap::new();
     for child in children {
         let child_fields = match child.type_info.kind {
-            Kind::Struct { name, children } => Child::Struct(_flat_fields(children)),
-            Kind::Aliased { name, kind } => _child_flat_fields(*kind),
+            Kind::Struct { children, .. } => Child::Struct(_flat_fields(children)),
+            Kind::Aliased { kind, .. } => _child_flat_fields(*kind),
             Kind::Sequence(descriptor) => _child_flat_fields(*descriptor),
             Kind::Option(descriptor) => _child_flat_fields(*descriptor),
-            Kind::Mapping(descriptor, descriptor1) => continue,
+            Kind::Mapping(_, _) => continue,
             _ => {
                 Child::Single(child.type_info)
             }
@@ -51,11 +51,11 @@ enum Child {
 fn _child_flat_fields(child: struct_metadata::Descriptor<ElasticMeta>) -> Child {
     use struct_metadata::Kind;
     match child.kind {
-        Kind::Struct { name, children } => Child::Struct(_flat_fields(children)),
-        Kind::Aliased { name, kind } => _child_flat_fields(*kind),
+        Kind::Struct { children, .. } => Child::Struct(_flat_fields(children)),
+        Kind::Aliased { kind, .. } => _child_flat_fields(*kind),
         Kind::Sequence(descriptor) => _child_flat_fields(*descriptor),
         Kind::Option(descriptor) => _child_flat_fields(*descriptor),
-        Kind::Mapping(descriptor, descriptor1) => Child::Struct(Default::default()),
+        Kind::Mapping(_, _) => Child::Struct(Default::default()),
         _ => {
             Child::Single(child)
         }

@@ -7,7 +7,7 @@ use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable
 
 use super::badlist::SourceTypes;
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum SafehashTypes {
@@ -17,7 +17,7 @@ pub enum SafehashTypes {
 }
 
 /// Hashes of a safelisted file
-#[derive(Debug, Serialize, Deserialize, Described, Default)]
+#[derive(Debug, Serialize, Deserialize, Described, Default, PartialEq, Eq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
@@ -34,7 +34,7 @@ pub struct Hashes {
 }
 
 /// File Details
-#[derive(Debug, Serialize, Deserialize, Described, Default)]
+#[derive(Debug, Serialize, Deserialize, Described, Default, PartialEq, Eq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
@@ -50,7 +50,7 @@ pub struct File {
 }
 
 /// Safelist source
-#[derive(Debug, Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Source {
@@ -67,7 +67,7 @@ pub struct Source {
 }
 
 /// Tag associated to file
-#[derive(Debug, Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Tag {
@@ -80,7 +80,7 @@ pub struct Tag {
 }
 
 /// Signature
-#[derive(Debug, Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Signature {
@@ -90,13 +90,14 @@ pub struct Signature {
 }
 
 /// Safelist Model
-#[derive(Debug, Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Safelist {
     /// Date when the safelisted hash was added
     pub added: DateTime<Utc>,
     /// Computed max classification for the safe hash
+    #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Is safe hash enabled or not?
     #[serde(default="default_enabled")]

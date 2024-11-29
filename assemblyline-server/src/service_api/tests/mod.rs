@@ -1,4 +1,4 @@
-use std::net::TcpListener;
+use tokio::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,24 +19,23 @@ mod tasking;
 
 const AUTH_KEY: &str = "test_key_abc_123";
 
-pub fn launch(core: Arc<Core>) -> u16 {
-    let listener = TcpListener::bind("0.0.0.0:0").unwrap();
-    let acceptor = TcpAcceptor::from_std(listener).unwrap();
+pub async fn launch(core: Arc<Core>) -> u16 {
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+    let acceptor = TcpAcceptor::from_tokio(listener).unwrap();
     let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
 
-    let app = crate::service_api::api(core.clone());
+    let app = crate::service_api::api(core.clone()).await.unwrap();
 
     tokio::spawn(async move {
         info!("Starting test server on {:?}", acceptor.local_addr());
         let result = Server::new_with_acceptor(acceptor)
-            .run(
-                app, 
-
-            // .run_with_graceful_shutdown(
+            // .run(
             //     app, 
-            //     async move {
-            //         core.running.wait_for(false).await
-            //     }, None
+            .run_with_graceful_shutdown(
+                app, 
+                async move {
+                    core.running.wait_for(false).await
+                }, None
             ).await;
         if let Err(err) = result {
             error!("test server crashed: {err}");
@@ -54,7 +53,7 @@ pub async fn setup(headers: http::HeaderMap) -> (reqwest::Client, Arc<Core>, Tes
     std::env::set_var("SERVICE_API_KEY", AUTH_KEY);
     let (core, guard) = Core::test_setup().await;
     let core = Arc::new(core);
-    let port = launch(core.clone());
+    let port = launch(core.clone()).await;
     let client = reqwest::Client::builder()
         .default_headers(headers)
         .timeout(Duration::from_secs(30))

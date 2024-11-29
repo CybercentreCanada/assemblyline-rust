@@ -1,7 +1,9 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use log::{debug, warn};
+use poem::http::HeaderName;
 use poem::IntoResponse;
 use poem::{Endpoint, Middleware, Request, Response, Result, http::StatusCode};
 
@@ -56,6 +58,21 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
 
     async fn call(&self, mut req: Request) -> Result<Self::Output> {
         debug!("authenicating request");
+        // normalize headers, they are already case insensitive, but lets also normalize _
+        let mut new_headers = vec![];
+        for (name, value) in req.headers() {
+            if name.as_str().contains("_") {
+                new_headers.push((name.as_str().replace("_", "-"), value.clone()));
+            }
+        }
+        for (name, value) in new_headers {
+            let name = match HeaderName::from_str(&name) {
+                Ok(name) => name,
+                _ => continue,
+            };
+            req.headers_mut().insert(name, value);
+        }
+
         // Before anything else, check that the API key is set
         let apikey = match req.header("X-APIKEY") {
             Some(key) => key,
@@ -65,14 +82,18 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
         if self.auth_key != apikey {
             let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
             let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
-            // let wsgi_dump = "; ".join(format!("{k}={v}") for k, v in request.environ.items());
             warn!("Client [{client_id}] provided wrong api key [{apikey}] headers: {header_dump}");
             return Ok(make_empty_api_error(StatusCode::UNAUTHORIZED, "Unauthorized access denied"));
         }
 
         let client_info = match ClientInfo::new(&req) {
             Ok(info) => info,
-            Err(key) => return Ok(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("missing required key {key}"))),
+            Err(key) => {
+                let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
+                let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
+                debug!("Client [{client_id}] missing required header [{key}] headers: {header_dump}");        
+                return Ok(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("missing required key {key}")))
+            },
         };
         req.extensions_mut().insert(client_info);
         req.extensions_mut().insert(self.core.clone());
@@ -96,10 +117,10 @@ pub struct ClientInfo {
 impl ClientInfo {
     fn new(req: &Request) -> Result<Self, &'static str> {
         Ok(ClientInfo {
-            client_id: read_required_header(req, "CONTAINER_ID")?.to_owned(),
-            service_name: read_required_header(req, "SERVICE_NAME")?.to_owned(),
-            service_version: read_required_header(req, "SERVICE_VERSION")?.to_owned(),
-            service_tool_version: read_required_header(req, "SERVICE_TOOL_VERSION")?.to_owned(),
+            client_id: read_required_header(req, "CONTAINER-ID")?.to_owned(),
+            service_name: read_required_header(req, "SERVICE-NAME")?.to_owned(),
+            service_version: read_required_header(req, "SERVICE-VERSION")?.to_owned(),
+            service_tool_version: read_required_header(req, "SERVICE-TOOL-VERSION")?.to_owned(),
         })
     }
 }

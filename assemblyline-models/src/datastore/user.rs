@@ -36,7 +36,7 @@ pub enum UserType {
 pub enum Scope {R, W, RW, C}
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, strum::EnumIter, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, strum::EnumIter, Described, Clone, Copy, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
 pub enum UserRole {

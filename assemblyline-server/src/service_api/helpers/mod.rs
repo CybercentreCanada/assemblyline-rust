@@ -8,15 +8,12 @@ use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
+use crate::common::version::get_version;
+
 pub mod auth;
 pub mod badlist;
 pub mod tasking;
 pub mod metrics;
-
-pub fn get_version() -> &'static String {
-    todo!()
-    // VERSION = os.environ.get('ASSEMBLYLINE_VERSION', f"{FRAMEWORK_VERSION}.{SYSTEM_VERSION}.{BUILD_MINOR}.dev0")
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct APIResponse<'a, B: Send> {

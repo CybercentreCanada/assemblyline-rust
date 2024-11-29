@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -113,7 +113,24 @@ impl FileStore {
     }
 
     pub async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
-        todo!()
+        let mut last_error = None;
+        for transport in &self.transports {
+            match transport.stream(name).await {
+                Ok((size, stream)) => return Ok((size, stream)),
+                Err(err) => last_error = Some(err),
+            }
+        }
+        match last_error {
+            Some(err) => Err(err),
+            None => bail!("No transports could stream file"),
+        }
+    }
+
+    pub async fn delete(&self, name: &str) -> Result<()> { 
+        for transport in &self.transports {
+            transport.delete(name).await?;
+        }
+        Ok(())
     }
 }
 
@@ -127,6 +144,8 @@ trait Transport: Send + Sync {
     async fn exists(&self, name: &str) -> Result<bool>;
     async fn download(&self, name: &str, path: &Path) -> Result<()>;
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)>;
+
+    async fn delete(&self, name: &str) -> Result<()>;
 }
 
 struct LocalTransport {
@@ -242,5 +261,16 @@ impl Transport for LocalTransport {
             }
         });
         Ok((metadata.len(), recv))
+    }
+
+    async fn delete(&self, name: &str) -> Result<()> {
+        let path = self.make_path(name)?;
+        if let Err(err) = tokio::fs::remove_file(path).await {
+            if err.kind() == ErrorKind::NotFound {
+                return Ok(())
+            }
+            return Err(err.into())
+        }
+        Ok(())
     }
 }

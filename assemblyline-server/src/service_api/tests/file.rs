@@ -1,20 +1,12 @@
-// import hashlib
-// from unittest.mock import patch, MagicMock
+use std::sync::Arc;
 
-// import pytest
+use assemblyline_models::datastore::File;
+use rand::thread_rng;
 
-// from assemblyline.common import forge
-// from assemblyline.odm import randomizer
-// from assemblyline_service_server.config import AUTH_KEY
-// from assemblyline_service_server import app
+use crate::common::sha256_data;
+use crate::Core;
 
 use super::{setup, AUTH_KEY, random_hash};
-
-// @pytest.fixture()
-// def client():
-//     client = app.app.test_client()
-//     yield client
-
 
 fn headers() -> http::HeaderMap {
     [
@@ -25,126 +17,114 @@ fn headers() -> http::HeaderMap {
         ("Service-Tool-Version", random_hash(64)),
         ("X-Forwarded-For", "127.0.0.1".to_owned()),
     ].into_iter()
-    .map(|(name, value)|(reqwest::header::HeaderName::from_static(name), reqwest::header::HeaderValue::from_str(&value).unwrap()))
+    .map(|(name, value)|(reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(), reqwest::header::HeaderValue::from_str(&value).unwrap()))
     .collect()
 }
 
 
-// @pytest.fixture(scope='function')
-// def file_datastore():
-//     ds = MagicMock()
-//     with patch('assemblyline_service_server.config.TASKING_CLIENT.datastore', ds):
-//         yield ds
 
+async fn setup_file(core: &Arc<Core>, body: &[u8]) -> String {
+    let sha = sha256_data(body);
+    core.filestore.put(&sha, body).await.unwrap();
+
+    core.datastore.file.save(&sha, &File::gen_for_sample(body, &mut thread_rng()), None, None).await.unwrap();
+    sha
+}
 
 #[tokio::test]
 async fn test_download_file() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // # Put the file in place
-    // fs = forge.get_filestore()
-    // file_size = 12345
-    // fs.put('test_file', b'x' * file_size)
-    // try:
-    //     response = client.get('/api/v1/file/test_file/', headers=headers)
-    //     assert response.status_code == 200
-    //     assert response.data == (b'x' * file_size)
-    // finally:
-    //     fs.delete('test_file')
 
-    // # Try getting it again where the datastore thinks its there but its missing from the filestore
-    // response = client.get('/api/v1/file/test_file/', headers=headers)
-    // assert response.status_code == 404
+    // Put the file in place
+    let file_size = 12345;
+    let hash = setup_file(&core, &b"x".repeat(file_size)).await;
 
-    // # Have the datastore say it doesn't exist
-    // file_datastore.file.get.return_value = None
-    // response = client.get('/api/v1/file/test_file/', headers=headers)
-    // assert response.status_code == 404
+    // check that we can fetch it
+    let response = client.get(format!("{address}/api/v1/file/{hash}/")).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.bytes().await.unwrap(), (b"x".repeat(file_size)));
+
+    core.filestore.delete(&hash).await.unwrap();
+
+    // Try getting it again where the datastore thinks its there but its missing from the filestore
+    let response = client.get(format!("{address}/api/v1/file/{hash}/")).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 404);
+
+    // Have the datastore say it doesn"t exist
+    assert!(core.datastore.file.delete(&hash, None).await.unwrap());
+    let response = client.get(format!("{address}/api/v1/file/{hash}/")).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 404);
 }
 
 #[tokio::test]
 async fn test_upload_new_file() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // fs = forge.get_filestore()
 
-    // file_size = 10003
-    // file_data = b'x'*file_size
-    // file_hash = hashlib.sha256(file_data).hexdigest()
+    let file_size = 10003;
+    let file_data = b"x".repeat(file_size);
+    let file_hash = sha256_data(&file_data);
 
-    // fs.delete(file_hash)
+    use reqwest::header::HeaderValue;
+    let mut file_headers = headers();
+    file_headers.insert("sha256", HeaderValue::from_str(&file_hash).unwrap());
+    file_headers.insert("classification", HeaderValue::from_str(core.classification_parser.unrestricted()).unwrap());
+    file_headers.insert("ttl", HeaderValue::from_static("1"));
+    file_headers.insert("Content-Type", HeaderValue::from_static("application/octet-stream"));
 
-    // file_headers = dict(headers)
-    // file_headers['sha256'] = file_hash
-    // file_headers['classification'] = 'U'
-    // file_headers['ttl'] = 1
-    // file_headers['Content-Type'] = 'application/octet-stream'
-
-    // try:
-    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
-    //     assert response.status_code == 200
-    //     assert fs.exists(file_hash)
-    //     assert file_datastore.save_or_freshen_file.call_count == 1
-    // finally:
-    //     fs.delete(file_hash)
+    let response = client.put(format!("{address}/api/v1/file/")).headers(file_headers).body(file_data).send().await.unwrap();
+    let status = response.status();
+    let body = response.bytes().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "{status} - {}", String::from_utf8_lossy(&body));
+    assert!(core.filestore.exists(&file_hash).await.unwrap());
+    assert!(core.datastore.file.exists(&file_hash, None).await.unwrap());
 }
 
 #[tokio::test]
 async fn test_upload_section_image() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // fs = forge.get_filestore()
 
-    // file_size = 10003
-    // file_data = b'x'*file_size
-    // file_hash = hashlib.sha256(file_data).hexdigest()
+    let file_size = 10003;
+    let file_data = b"x".repeat(file_size);
+    let file_hash = sha256_data(&file_data);
 
-    // fs.delete(file_hash)
+    use reqwest::header::HeaderValue;
+    let mut file_headers = headers();
+    file_headers.insert("sha256", HeaderValue::from_str(&file_hash).unwrap());
+    file_headers.insert("classification", HeaderValue::from_str(core.classification_parser.unrestricted()).unwrap());
+    file_headers.insert("ttl", HeaderValue::from_static("1"));
+    file_headers.insert("Content-Type", HeaderValue::from_static("application/octet-stream"));
+    file_headers.insert("Is-Section-Image", HeaderValue::from_static("true"));
 
-    // file_headers = dict(headers)
-    // file_headers['sha256'] = file_hash
-    // file_headers['classification'] = 'U'
-    // file_headers['ttl'] = 1
-    // file_headers['Content-Type'] = 'application/octet-stream'
-    // file_headers['Is-Section-Image'] = 'true'
-
-    // try:
-    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
-    //     assert response.status_code == 200
-    //     assert fs.exists(file_hash)
-    //     assert file_datastore.save_or_freshen_file.call_count == 1
-    //     assert file_datastore.file.get("sha256").is_section_image
-    // finally:
-    //     fs.delete(file_hash)
+    let response = client.put(format!("{address}/api/v1/file/")).headers(file_headers).body(file_data).send().await.unwrap();
+    let status = response.status();
+    let body = response.bytes().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "{status} - {}", String::from_utf8_lossy(&body));
+    assert!(core.filestore.exists(&file_hash).await.unwrap());
+    assert!(core.datastore.file.get(&file_hash, None).await.unwrap().unwrap().is_section_image);
 }
 
 #[tokio::test]
 async fn test_upload_file_bad_hash() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // fs = forge.get_filestore()
 
-    // file_size = 10003
-    // file_data = b'x'*file_size
-    // file_hash = hashlib.sha256(file_data).hexdigest()
-    // bad_hash = '0000' + file_hash[4:]
+    let file_size = 10003;
+    let file_data = b"x".repeat(file_size);
+    let file_hash = sha256_data(&file_data);
+    let bad_hash = "0000".to_string() + &file_hash[4..];
 
-    // fs.delete(file_hash)
-    // fs.delete(bad_hash)
+    use reqwest::header::HeaderValue;
+    let mut file_headers = headers();
+    file_headers.insert("sha256", HeaderValue::from_str(&bad_hash).unwrap());
+    file_headers.insert("classification", HeaderValue::from_str(core.classification_parser.unrestricted()).unwrap());
+    file_headers.insert("ttl", HeaderValue::from_static("1"));
+    file_headers.insert("Content-Type", HeaderValue::from_static("application/octet-stream"));
 
-    // file_headers = dict(headers)
-    // file_headers['sha256'] = bad_hash
-    // file_headers['classification'] = 'U'
-    // file_headers['ttl'] = 1
-    // file_headers['Content-Type'] = 'application/octet-stream'
-
-    // try:
-    //     response = client.put('/api/v1/file/', headers=file_headers, data=file_data)
-    //     assert response.status_code in range(400, 500)
-    //     assert not fs.exists(file_hash)
-    //     assert not fs.exists(bad_hash)
-    //     assert file_datastore.save_or_freshen_file.call_count == 0
-    // finally:
-    //     fs.delete(file_hash)
-    //     fs.delete(bad_hash)
+    let response = client.put(format!("{address}/api/v1/file/")).headers(file_headers).body(file_data).send().await.unwrap();
+    let status = response.status();
+    
+    assert!(status.is_client_error());
+    assert!(!core.filestore.exists(&file_hash).await.unwrap());
+    assert!(!core.filestore.exists(&bad_hash).await.unwrap());
+    assert!(!core.datastore.file.exists(&file_hash, None).await.unwrap());
+    assert!(!core.datastore.file.exists(&bad_hash, None).await.unwrap());
 }

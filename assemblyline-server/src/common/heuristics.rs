@@ -47,7 +47,7 @@ pub async fn get_safelist_signatures(ds: &Elastic) -> Result<HashSet<String>> {
     let mut out: HashSet<String> = Default::default();
     let mut cursor = ds.safelist.stream_search::<PartialSafelist>("type:signature AND enabled:true", "signature.name".to_owned(), vec![], None, None, None).await?;
     while let Some(sl) = cursor.next().await? {
-        out.insert(get_safelist_key("signature", &sl.signature.name));
+        out.insert(sl.signature.name);
     }
     Ok(out)
 }
@@ -262,7 +262,7 @@ impl Heuristic {
 
         // Calculate the score for the signatures
         new.signatures = srv.signatures;
-        if new.signatures.len() > 0 {
+        if !new.signatures.is_empty() {
             new.score = 0;
             for (sig_name, freq) in &new.signatures {
                 let sig_score = match definition.signature_score_map.get(sig_name) {

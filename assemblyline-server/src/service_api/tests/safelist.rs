@@ -1,12 +1,11 @@
 
-// import pytest
+use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::datastore::safelist::Safelist;
+use assemblyline_models::ExpandingClassification;
+use chrono::Utc;
 
-// from unittest.mock import MagicMock, patch
-
-// from assemblyline.odm import randomizer
-// from assemblyline.odm.models.safelist import Safelist
-// from assemblyline_service_server import app
-// from assemblyline_service_server.config import AUTH_KEY
+use crate::common::tagging::SafelistFile;
+use crate::service_api::helpers::APIResponse;
 
 use super::{setup, AUTH_KEY, random_hash};
 
@@ -20,93 +19,106 @@ fn headers() -> http::HeaderMap {
         ("Timeout", "1".to_owned()),
         ("X-Forwarded-For", "127.0.0.1".to_owned()),
     ].into_iter()
-    .map(|(name, value)|(reqwest::header::HeaderName::from_static(name), reqwest::header::HeaderValue::from_str(&value).unwrap()))
+    .map(|(name, value)|(reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(), reqwest::header::HeaderValue::from_str(&value).unwrap()))
     .collect()
 }
 
-
-// @pytest.fixture(scope='function')
-// def storage():
-//     ds = MagicMock()
-//     with patch('assemblyline_service_server.config.SAFELIST_CLIENT.datastore', ds):
-//         yield ds
-
-
-// @pytest.fixture()
-// def client():
-//     client = app.app.test_client()
-//     yield client
-
+fn build_safelist(ce: &ClassificationParser) -> Safelist {
+    Safelist {
+        added: Utc::now(),
+        classification: ExpandingClassification::unrestricted(ce),
+        enabled: true,
+        expiry_ts: None,
+        hashes: Default::default(),
+        file: None,
+        sources: vec![],
+        tag: None,
+        signature: None,
+        type_: assemblyline_models::datastore::safelist::SafehashTypes::File,
+        updated: Utc::now(),
+    }
+}
 
 #[tokio::test]
 async fn test_safelist_exist() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // valid_hash = randomizer.get_random_hash(64)
-    // valid_resp = randomizer.random_model_obj(Safelist, as_json=True)
-    // valid_resp['hashes']['sha256'] = valid_hash
-    // storage.safelist.get_if_exists.return_value = valid_resp
 
-    // resp = client.get(f'/api/v1/safelist/{valid_hash}/', headers=headers)
-    // assert resp.status_code == 200
-    // assert resp.json['api_response'] == valid_resp
+    let valid_hash = random_hash(64);
+    let mut valid_resp = build_safelist(&core.classification_parser);
+    valid_resp.hashes.sha256 = Some(valid_hash.parse().unwrap());
+    core.datastore.safelist.save(&valid_hash, &valid_resp, None, None).await.unwrap();
+
+    let resp = client.get(format!("{address}/api/v1/safelist/{valid_hash}/")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = resp.bytes().await.unwrap();
+    let body: APIResponse<Safelist> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body.api_response, valid_resp);
 }
 
 #[tokio::test]
 async fn test_safelist_missing() {
-    let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // invalid_hash = randomizer.get_random_hash(64)
-    // storage.safelist.get_if_exists.return_value = None
+    let (client, _core, _guard, address) = setup(headers()).await;
 
-    // resp = client.get(f'/api/v1/safelist/{invalid_hash}/', headers=headers)
-    // assert resp.status_code == 404
-    // assert resp.json['api_response'] is None
+    let invalid_hash = random_hash(64);
+
+    let resp = client.get(format!("{address}/api/v1/safelist/{invalid_hash}/")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 404);
+    let body = resp.bytes().await.unwrap();
+    let body: APIResponse<Option<Safelist>> = serde_json::from_slice(&body).unwrap();
+    assert!(body.api_response.is_none());
 }
 
 #[tokio::test]
 async fn test_get_full_safelist() {
-    let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // storage.safelist.stream_search.return_value = []
+    let (client, _core, _guard, address) = setup(headers()).await;
 
-    // resp = client.get('/api/v1/safelist/', headers=headers)
-    // assert resp.status_code == 200
-    // assert 'match' in resp.json['api_response']
-    // assert 'regex' in resp.json['api_response']
-    // assert isinstance(resp.json['api_response']['match'], dict)
-    // assert isinstance(resp.json['api_response']['regex'], dict)
+    let resp = client.get(format!("{address}/api/v1/safelist/")).send().await.unwrap();
+
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = resp.bytes().await.unwrap();
+    let body: APIResponse<SafelistFile> = serde_json::from_slice(&body).unwrap();
+
+    assert!(!body.api_response.match_.is_empty());
+    assert!(!body.api_response.regex.is_empty());
 }
 
 #[tokio::test]
 async fn test_get_full_safelist_specific() {
-    let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // storage.safelist.stream_search.return_value = []
+    let (client, _core, _guard, address) = setup(headers()).await;
 
-    // tag_type = "network.dynamic.domain"
-    // resp = client.get(f'/api/v1/safelist/?tag_types={tag_type}', headers=headers)
-    // assert resp.status_code == 200
-    // assert 'match' in resp.json['api_response']
-    // assert 'regex' in resp.json['api_response']
-    // assert isinstance(resp.json['api_response']['match'], dict)
-    // assert isinstance(resp.json['api_response']['regex'], dict)
+    const TAG_TYPE: &str = "network.dynamic.domain";
+    let resp = client.get(format!("{address}/api/v1/safelist/?tag_types={TAG_TYPE}")).send().await.unwrap();
 
-    // for k in resp.json['api_response']['match']:
-    //     assert k == tag_type
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = resp.bytes().await.unwrap();
+    let body: APIResponse<SafelistFile> = serde_json::from_slice(&body).unwrap();
 
-    // for k in resp.json['api_response']['regex']:
-    //     assert k == tag_type
+    assert!(!body.api_response.match_.is_empty());
+    assert!(!body.api_response.regex.is_empty());
+
+    for key in body.api_response.match_.keys() {
+        assert_eq!(key, TAG_TYPE);
+    }
+    for key in body.api_response.regex.keys() {
+        assert_eq!(key, TAG_TYPE);
+    }
 }
 
 #[tokio::test]
 async fn test_get_signature_safelist() {
     let (client, core, _guard, address) = setup(headers()).await;
-    todo!();
-    // storage.safelist.stream_search.return_value = [{"signature": {"name": "test"}}]
 
-    // resp = client.get('/api/v1/safelist/signatures/', headers=headers)
-    // assert resp.status_code == 200
-    // assert isinstance(resp.json['api_response'], list)
-    // assert resp.json['api_response'] == ['test']
+    let key = random_hash(16);
+    let mut resp = build_safelist(&core.classification_parser);
+    resp.signature = Some(assemblyline_models::datastore::safelist::Signature { name: "test".to_string() });
+    resp.type_ = assemblyline_models::datastore::safelist::SafehashTypes::Signature;
+    core.datastore.safelist.save(&key, &resp, None, None).await.unwrap();
+    core.datastore.safelist.commit(None).await.unwrap();
+
+    let resp = client.get(format!("{address}/api/v1/safelist/signatures")).send().await.unwrap();
+
+    assert_eq!(resp.status().as_u16(), 200);
+    let body = resp.bytes().await.unwrap();
+    let body: APIResponse<Vec<String>> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body.api_response, vec!["test"]);
 }

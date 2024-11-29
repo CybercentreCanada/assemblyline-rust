@@ -525,32 +525,46 @@ impl Default for Dispatcher {
 }
 
 
-// # Configuration options regarding data expiry
-// @odm.model(index=False, store=False)
-// class Expiry(odm.Model):
-//     batch_delete = odm.Boolean(
-//         description="Perform expiry in batches?<br>"
-//         "Delete queries are rounded by day therefore all delete operation happen at the same time at midnight")
-//     delay = odm.Integer(description="Delay, in hours, that will be applied to the expiry query so we can keep"
-//                         "data longer then previously set or we can offset deletion during non busy hours")
-//     delete_storage = odm.Boolean(description="Should we also cleanup the file storage?")
-//     sleep_time = odm.Integer(description="Time, in seconds, to sleep in between each expiry run")
-//     workers = odm.Integer(description="Number of concurrent workers")
-//     delete_workers = odm.Integer(description="Worker processes for file storage deletes.")
-//     iteration_max_tasks = odm.Integer(description="How many query chunks get run per iteration.")
-//     delete_batch_size = odm.Integer(description="How large a batch get deleted per iteration.")
+// Configuration options regarding data expiry
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Expiry {
+    /// Perform expiry in batches?<br>Delete queries are rounded by day therefore all delete operation happen at the same time at midnight
+    pub batch_delete: bool,
+    /// Delay, in hours, that will be applied to the expiry query so we can keep data longer then previously set or we can offset deletion during non busy hours
+    pub delay: u32,
+    /// Should we also cleanup the file storage?
+    pub delete_storage: bool,
+    /// Time, in seconds, to sleep in between each expiry run
+    pub sleep_time: u32,
+    /// Number of concurrent workers
+    pub workers: u32,
+    /// Worker processes for file storage deletes.
+    pub delete_workers: u32,
+    /// How many query chunks get run per iteration.
+    pub iteration_max_tasks: u32,
+    /// How large a batch get deleted per iteration.
+    pub delete_batch_size: u32,
+    /// The default period, in days, before tags expire from Badlist
+    pub badlisted_tag_dtl: u32,
+}
 
+impl Default for Expiry {
+    fn default() -> Self {
+        Self { 
+            batch_delete: false, 
+            delay: 0, 
+            delete_storage: true, 
+            sleep_time: 15, 
+            workers: 20, 
+            delete_workers: 2, 
+            iteration_max_tasks: 20, 
+            delete_batch_size: 200, 
+            badlisted_tag_dtl: 0 
+        }
+    }
+}
 
-// DEFAULT_EXPIRY = {
-//     'batch_delete': False,
-//     'delay': 0,
-//     'delete_storage': True,
-//     'sleep_time': 15,
-//     'workers': 20,
-//     'delete_workers': 2,
-//     'iteration_max_tasks': 20,
-//     'delete_batch_size': 2000,
-// }
 
 #[derive(strum::EnumIter, strum::Display, strum::EnumString, SerializeDisplay, DeserializeFromStr, PartialEq, Eq, Hash)]
 #[strum(serialize_all = "kebab-case")]
@@ -947,9 +961,8 @@ pub struct Core {
     pub archiver: Archiver,
     /// Configuration for Dispatcher
     pub dispatcher: Dispatcher,
-    // /// Configuration for Expiry
-    // #[serde(default)]
-    // pub expiry: Expiry,
+    /// Configuration for Expiry
+    pub expiry: Expiry,
     /// Configuration for Ingester
     pub ingester: Ingester,
     /// Configuration for Metrics Collection

@@ -21,7 +21,7 @@ fn headers() -> http::HeaderMap {
         ("Service-Tool-Version", random_hash(64)),
         ("X-Forwarded-For", "127.0.0.1".to_owned()),
     ].into_iter()
-    .map(|(name, value)|(reqwest::header::HeaderName::from_static(name), reqwest::header::HeaderValue::from_str(&value).unwrap()))
+    .map(|(name, value)|(reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(), reqwest::header::HeaderValue::from_str(&value).unwrap()))
     .collect()
 }
 
