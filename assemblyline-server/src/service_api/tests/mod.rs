@@ -1,3 +1,5 @@
+use assemblyline_models::datastore::service::{DockerConfig, RegistryType};
+use assemblyline_models::datastore::{Service, ServiceDelta};
 use tokio::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
@@ -68,4 +70,58 @@ pub fn random_hash(length: usize) -> String {
         out.push(*HEXCHARS.choose(&mut rng).unwrap());
     }
     out
+}
+
+
+fn build_service() -> Service {
+    Service {
+        accepts: Default::default(),
+        rejects: Some("empty|metadata/.*".to_owned()),
+        category: Default::default(),
+        classification: Default::default(),
+        config: Default::default(),
+        description: "A service".into(),
+        default_result_classification: Default::default(),
+        enabled: Default::default(),
+        is_external: Default::default(),
+        licence_count: Default::default(),
+        min_instances: Default::default(),
+        max_queue_length: Default::default(),
+        uses_tags: Default::default(),
+        uses_tag_scores: Default::default(),
+        uses_temp_submission_data: Default::default(),
+        uses_metadata: Default::default(),
+        monitored_keys: Default::default(),
+        name: "TestSvice".to_string(),
+        version: "100".to_string(),
+        privileged: Default::default(),
+        disable_cache: Default::default(),
+        stage: Default::default(),
+        submission_params: Default::default(),
+        timeout: Default::default(),
+        docker_config: DockerConfig {
+            allow_internet_access: Default::default(),
+            command: Default::default(),
+            cpu_cores: Default::default(),
+            environment: Default::default(),
+            image: Default::default(),
+            registry_username: Default::default(),
+            registry_password: Default::default(),
+            registry_type: RegistryType::Docker,
+            ports: Default::default(),
+            ram_mb: Default::default(),
+            ram_mb_min: Default::default(),
+            service_account: Default::default(),
+        },
+        dependencies: Default::default(),
+        update_channel: assemblyline_models::datastore::service::ChannelKinds::Beta,
+        update_config: Default::default(),
+        recursion_prevention: Default::default(),
+    }
+}
+
+fn empty_delta(service: &Service) -> ServiceDelta {
+    serde_json::from_value(serde_json::json!({
+        "version": service.version,
+    })).unwrap()
 }

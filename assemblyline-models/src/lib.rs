@@ -208,7 +208,7 @@ impl rand::distributions::Distribution<Sid> for rand::distributions::Standard {
     }
 }
 
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text")]
 pub struct Text(pub String);

@@ -25,6 +25,7 @@ struct-metadata = { version = "1.1", features = ["serde_json"] }
 assemblyline-markings = { version = "0.1.8", path = "../assemblyline-markings" }
 
 rand = { version = "0.8", optional = true }
+log = "*"
 
 [dev-dependencies]
 pretty_assertions = { version= "1.4" }

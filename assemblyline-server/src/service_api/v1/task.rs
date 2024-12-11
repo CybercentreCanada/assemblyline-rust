@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assemblyline_models::messages::task::Task;
+use log::debug;
 use poem::http::{HeaderMap, StatusCode};
 use poem::{get, handler, Endpoint, EndpointExt, Response, Route};
 use poem::web::{Data, Json};
@@ -48,7 +49,7 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// {'keep_alive': true}
 #[handler]
 async fn get_task(    
-    tasking: Data<&TaskingClient>,
+    tasking: Data<&Arc<TaskingClient>>,
     headers: &HeaderMap,
     Data(client_info): Data<&ClientInfo>, 
 ) -> Response {
@@ -58,6 +59,8 @@ async fn get_task(
         service_tool_version,
         client_id
     } = client_info;
+    debug!("Getting task for {service_name} {service_version} [{service_tool_version}]");
+
     let timeout_string = require_header!(headers, "timeout", "30");
     let timeout = match timeout_string.parse() {
         Ok(timeout) => Duration::from_secs_f64(timeout),
@@ -66,12 +69,15 @@ async fn get_task(
 
     let status_expiry = (chrono::Utc::now() + timeout).timestamp();
     let start_time = std::time::Instant::now();
-    
+    let mut attempts = 0;
+
     loop {
-        let remaining = start_time.elapsed().saturating_sub(timeout);
+        let remaining = timeout.saturating_sub(start_time.elapsed());
         if remaining.is_zero() {
+            debug!("get task timeout ({timeout:?}) after {attempts} attempts");
             break
         }
+        attempts += 1;
 
         let result = tasking.get_task(
             client_id, 
@@ -119,14 +125,13 @@ async fn get_task(
 #[handler]
 async fn task_finished(
     Data(client_info): Data<&ClientInfo>, 
-    tasking: Data<&TaskingClient>,
+    tasking: Data<&Arc<TaskingClient>>,
     Json(body): Json<FinishedBody>,
 ) -> Response {
     let service_name = &client_info.service_name;
-        
     match tasking.task_finished(body, &client_info.client_id, service_name).await {
         Ok(response) => make_api_response(response),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string())
+        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}"))
     }
 }
 
@@ -135,12 +140,14 @@ async fn task_finished(
 pub enum FinishedBody {
     Success {
         task: Task,
+        #[serde(default)]
         exec_time: u64,
         freshen: bool,
         result: models::Result,
     },
     Error {
         task: Task,
+        #[serde(default)]
         exec_time: u64,
         error: assemblyline_models::datastore::error::Error,
     }
@@ -166,6 +173,7 @@ pub mod models {
         #[serde(default="chrono::Utc::now")]
         pub created: DateTime<Utc>,
         /// Expiry timestamp
+        #[serde(default)]
         pub expiry_ts: Option<DateTime<Utc>>,
         /// The body of the response from the service
         pub response: ResponseBody,
@@ -185,7 +193,7 @@ pub mod models {
         /// Invalidate the current result cache creation
         #[serde(default)]
         pub partial: bool,
-
+        #[serde(default)]
         pub temp_submission_data: JsonMap,
     }
 

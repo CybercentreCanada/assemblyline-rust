@@ -10,7 +10,7 @@ use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInf
 
 
 /// File Information
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct FileInfo {
     /// The output from libmagic which was used to determine the tag
     pub magic: String,
@@ -36,7 +36,7 @@ pub struct FileInfo {
 }
 
 /// Tag Item
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct TagItem {
     /// Type of tag item
     #[serde(rename="type")]
@@ -56,7 +56,7 @@ pub struct DataItem {
 }
 
 /// Service Task Model
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct Task {
     /// A random ID to differentiate this task
     pub task_id: u64,
@@ -136,7 +136,7 @@ impl rand::distributions::Distribution<Task> for rand::distributions::Standard {
             service_config: Default::default(),
             depth: rng.gen(),
             max_files: rng.gen(),
-            ttl: rng.gen(),
+            ttl: rng.gen_range(0..100),
             tags: Default::default(),
             temporary_submission_data: Default::default(),
             deep_scan: rng.gen(),

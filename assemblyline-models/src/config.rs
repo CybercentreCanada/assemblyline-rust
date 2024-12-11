@@ -1194,7 +1194,7 @@ fn default_service_stages() -> Vec<String> {
     ]
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy, PartialEq, Eq)]
 // #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum SafelistHashTypes {
@@ -1210,7 +1210,7 @@ pub enum RegistryTypes {
 
 /// Service's Safelisting Configuration
 // @odm.model(index=False, store=False, description="")
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ServiceSafelist {
     /// Should services be allowed to check extracted files against safelist?

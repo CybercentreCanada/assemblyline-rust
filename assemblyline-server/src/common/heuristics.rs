@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assemblyline_models::datastore::heuristic::Heuristic as DatastoreHeuristic;
 use crate::service_api::v1::task::models::Heuristic as ServiceHeuristic;
 use assemblyline_models::datastore::result::Heuristic as ResultHeuristic;
@@ -103,7 +103,7 @@ impl HeuristicHandler {
         // let score_map = srv_heuristic.score_map;
 
         // Validate the heuristic and recalculate its score
-        let heuristic = Heuristic::new(srv_heuristic, heuristics)?;
+        let heuristic = Heuristic::new(srv_heuristic, heuristics).context("validation")?;
 
         // Assign the newly computed heuristic to the section
         let mut output = ResultHeuristic {
@@ -206,7 +206,7 @@ impl Heuristic {
             }
         };
 
-        let attack = load_attack_map()?;
+        let attack = load_attack_map().context("load_attack_map")?;
         let attack_map = &attack.attack_map;
         let revoke_map = &attack.revoke_map;
         let group_map = &attack.group_map;

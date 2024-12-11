@@ -942,7 +942,16 @@ pub fn flatten_tags(data: JsonMap, parent_key: Option<&str>) -> FlatTags {
         if let serde_json::Value::Object(obj) = v {
             items.extend(flatten_tags(obj, Some(&cur_key)).into_iter())
         } else if let serde_json::Value::Array(arr) = v {
-            items.push((cur_key, arr.into_iter().map(into_string).collect()));
+            let mut mapped = vec![];
+            for item in arr {
+                if item.is_null() { continue }
+                mapped.push(into_string(item))
+            }
+            if !mapped.is_empty() {
+                items.push((cur_key, mapped));
+            }
+        } else if v.is_null() {
+
         } else {
             items.push((cur_key, vec![into_string(v)]));
         }
@@ -985,7 +994,7 @@ impl Tagging {
 }
 
 // MARK: Flat tags
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FlatTags(HashMap<String, Vec<String>>);
 
 impl From<HashMap<String, Vec<String>>> for FlatTags {

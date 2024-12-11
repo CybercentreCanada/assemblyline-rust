@@ -220,14 +220,29 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
     /// :return: true/false depending if the document exists or not
     pub async fn exists(&self, key: &str, index_type: Option<Index>) -> Result<bool> {
         let index_list = self.get_index_list(index_type)?;
+        debug!("Checking for existance: {key} in {:?}", index_list);
+        let mut last_error = None;
 
         for index in index_list {
-            let response = self.make_request(&Request::head_doc(&self.database.host, &index, key)?).await?;
-            if response.status().is_success() {
-                return Ok(true)
+            debug!("Exist at {index}");
+            match self.make_request(&Request::head_doc(&self.database.host, &index, key)?).await {
+                Ok(response) => { 
+                    if response.status().is_success() {
+                        return Ok(true)
+                    }
+                },
+                Err(err) => {
+                    if err.is_document_not_found() {
+                        return Ok(false)
+                    }
+                    last_error = Some(err);
+                }
             }
         }
 
+        if let Some(err) = last_error {
+            return Err(err)
+        }
         return Ok(false)
     }
 
@@ -266,6 +281,16 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
             // track which ones we have found
             outstanding.clear();
             for row in response.docs {
+                // handle partial results for when the document isn't found at all
+                let row = match row {
+                    responses::MaybeGet::Get(get) => get,
+                    responses::MaybeGet::Empty { _id, .. } => {
+                        outstanding.push(_id);
+                        continue
+                    },
+                };
+
+                // handle full results, which may or may not actually have what we requested in them
                 let _id = row._id.clone();
                 if let Some(mut body) = row._source {
                     // If this index has an archive, check is the document was found in it.

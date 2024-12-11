@@ -141,7 +141,7 @@ impl Readable for File {
 }
 
 /// URI Information Model
-#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct URIInfo {

@@ -57,7 +57,7 @@ use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::{JsonMap, Sid};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde_json::json;
 use tokio::sync::Mutex;
 

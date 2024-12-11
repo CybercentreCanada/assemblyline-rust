@@ -1,8 +1,5 @@
-// This file is generated using generate_attack_map.py script
-// DO NOT EDIT! Re-run the script instead...
-// Last ran: 2024-11-21 22:03:42.891783
-
 {
+    "comment": "This file is generated using generate_attack_map.py script. DO NOT EDIT! Re-run the script instead... Last ran: 2024-11-21 22:03:42.891783",
     "attack_map": {
         "T1001": {
             "attack_id": "T1001",

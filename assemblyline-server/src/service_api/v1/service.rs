@@ -12,7 +12,7 @@ use assemblyline_models::JsonMap;
 use poem::http::StatusCode;
 use poem::web::{Data, Json};
 use poem::{handler, put, Endpoint, EndpointExt, Response, Route};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_response, make_empty_api_error};
@@ -39,7 +39,7 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 ///     'service_config': < APPLIED SERVICE CONFIG >
 /// }
 #[handler]
-async fn register_service(tasking: Data<&TaskingClient>, Json(body): Json<JsonMap>, client_info: Data<&ClientInfo>) -> Response {
+async fn register_service(tasking: Data<&Arc<TaskingClient>>, Json(body): Json<JsonMap>, client_info: Data<&ClientInfo>) -> Response {
     match tasking.register_service(body, &format!("{} - ", client_info.client_id)).await {
         Ok(output) => make_api_response(output),
         Err(err) if err.is_input_error() => make_empty_api_error(StatusCode::BAD_REQUEST, &err.to_string()),
@@ -47,7 +47,7 @@ async fn register_service(tasking: Data<&TaskingClient>, Json(body): Json<JsonMa
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterResponse {
     pub keep_alive: bool, 
     pub new_heuristics: Vec<String>, 

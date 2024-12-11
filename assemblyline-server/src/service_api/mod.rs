@@ -19,11 +19,12 @@ pub async fn api(core: Arc<Core>) -> Result<impl Endpoint> {
     Ok(
         Route::new()
         .nest("/api/v1/badlist", v1::badlist::api(core.clone()))
-        .nest("/api/v1/file", v1::file::api(core.clone(), tasking_client))
+        .nest("/api/v1/file", v1::file::api(core.clone()))
         .nest("/api/v1/service", v1::service::api(core.clone()))
         .nest("/api/v1/task", v1::task::api(core.clone()))
         .nest("/api/v1/safelist", v1::safelist::api(core.clone()))
         .nest("/healthz", v1::health::api(core.clone()))
+        .data(tasking_client)
         .with(LoggerMiddleware)
         .with(NormalizePath::new(poem::middleware::TrailingSlash::Trim))
     )

@@ -29,8 +29,22 @@ pub struct Get<Source, Field> {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+pub enum MaybeGet<Source, Field> {
+    Get(Get<Source, Field>),
+    Empty {
+        /// The name of the index the document belongs to. 
+        _index: String,
+        /// The unique identifier for the document. 
+        _id: String,
+        /// Indicates whether the document exists: true or false. 
+        found: bool,
+    }
+}
+
+#[derive(Deserialize)]
 pub struct Multiget<Source, Field> {
-    pub docs: Vec<Get<Source, Field>>
+    pub docs: Vec<MaybeGet<Source, Field>>
 }
 
 #[derive(Deserialize)]
@@ -366,13 +380,14 @@ pub struct Bulk {
 
 /// (object) The parameter name is an action associated with the operation. Possible values are create, delete, index, and update.
 #[derive(Debug, Deserialize)]
-#[serde(rename="lowercase")]
+#[serde(rename_all="lowercase")]
 pub enum BulkItem {
     Create(BulkItemData),
     Delete(BulkItemData),
     Index(BulkItemData),
     Update(BulkItemData),
 }
+
 
 impl std::ops::Deref for BulkItem {
     type Target = BulkItemData;
@@ -434,11 +449,12 @@ pub struct BulkItemData {
     //     (string) ID of the shard associated with the failed operation. 
     // index
     //     (string) Name of the index associated with the failed operation. If the operation targeted a data stream, this is the backing index into which the document was attempted to be written. 
+    #[serde(default)]
     pub error: serde_json::Value,
 }
 
 #[derive(Debug, Display, Deserialize, PartialEq, Eq)]
-#[serde(rename="lower_snake_case")]
+#[serde(rename_all="snake_case")]
 pub enum BulkResult {
     Created,
     Deleted,

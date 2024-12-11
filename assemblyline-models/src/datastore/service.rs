@@ -7,7 +7,7 @@ use struct_metadata::Described;
 use crate::{ElasticMeta, JsonMap, Readable, Text};
 
 /// Environment Variable Model
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct EnvironmentVariable {
@@ -19,7 +19,7 @@ pub struct EnvironmentVariable {
 
 
 /// Docker Container Configuration
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct DockerConfig {
@@ -65,7 +65,7 @@ fn default_registry_type() -> RegistryType { RegistryType::Docker }
 fn default_ram_mb() -> u64 { 512 }
 fn default_ram_mb_min() -> u64 { 256 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum RegistryType {
@@ -74,7 +74,7 @@ pub enum RegistryType {
 }
 
 /// Container's Persistent Volume Configuration
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct PersistentVolume {
@@ -91,14 +91,14 @@ pub struct PersistentVolume {
 
 fn default_access_mode() -> AccessMode { AccessMode::ReadWriteOnce }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 pub enum AccessMode {
     ReadWriteOnce, ReadWriteMany
 }
 
 /// Container's Dependency Configuration
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct DependencyConfig {
@@ -114,7 +114,7 @@ pub struct DependencyConfig {
 
 
 /// Update Source Configuration
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct UpdateSource {
@@ -157,7 +157,7 @@ pub struct UpdateSource {
 }
 
 /// Update Configuration for Signatures
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct UpdateConfig {
@@ -182,7 +182,7 @@ pub struct UpdateConfig {
 
 fn default_signature_delimiter() -> SignatureDelimiter { SignatureDelimiter::DoubleNewLine }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
 pub enum SignatureDelimiter {
@@ -212,7 +212,7 @@ impl SignatureDelimiter {
 }
 
 /// Submission Parameters for Service
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct SubmissionParams {
@@ -232,7 +232,7 @@ pub struct SubmissionParams {
     pub hide: bool,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum ParamKinds {
@@ -243,7 +243,7 @@ pub enum ParamKinds {
 }
 
 /// Service Configuration
-#[derive(Serialize, Deserialize, Described, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Service {
@@ -362,7 +362,7 @@ impl Service {
     }
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum ChannelKinds {

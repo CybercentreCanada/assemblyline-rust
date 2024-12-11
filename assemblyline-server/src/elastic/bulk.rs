@@ -96,6 +96,6 @@ impl<T: Serialize> TypedBulkPlan<T> {
     //             self.operations.append(json.dumps({"doc": saved_doc}))
 
     pub fn get_plan_data(&self) -> String {
-        return self.operations.join("\n")
+        return self.operations.join("\n") + "\n"
     }
 }

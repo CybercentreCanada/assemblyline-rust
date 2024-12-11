@@ -8,7 +8,7 @@ use std::time::Duration;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
-use log::{error, warn};
+use log::{debug, error, warn};
 
 pub mod responses;
 pub mod collection;
@@ -164,7 +164,9 @@ struct Request {
     method: reqwest::Method, 
     url: reqwest::Url,
     index_name: Option<String>,
+    document_key: Option<String>,
     raise_conflicts: bool,
+    // raise_not_found: bool,
 }
 
 // impl From<(reqwest::Method, reqwest::Url)> for Request {
@@ -178,6 +180,39 @@ struct Request {
 // }wait_for_completion
 
 impl Request {
+    fn new(method: Method, url: reqwest::Url, index: Option<String>) -> Self {
+        Self {
+            method,
+            url,
+            index_name: index,
+            document_key: None,
+            raise_conflicts: false,
+            // raise_not_found: false,
+        }
+    }
+
+    // fn new_on_index(method: Method, url: reqwest::Url) -> Self {
+    //     Self {
+    //         method,
+    //         url,
+    //         index_name: Some(index),
+    //         // document_key: None,
+    //         raise_conflicts: false,
+    //         // raise_not_found: false,
+    //     }
+    // }
+
+    fn new_on_document(method: Method, url: reqwest::Url, index: String, document: String) -> Self {
+        Self {
+            method,
+            url,
+            index_name: Some(index),
+            document_key: Some(document),
+            raise_conflicts: false,
+            // raise_not_found: false,
+        }
+    }
+
     pub fn get_task(host: &reqwest::Url, task_id: &str, wait_for_completion: bool, timeout: &str) -> Result<Self> {
         let mut url = host.join(&format!("/_tasks/{task_id}"))?;
 
@@ -185,12 +220,7 @@ impl Request {
             .append_pair("wait_for_completion", &wait_for_completion.to_string().to_lowercase())
             .append_pair("timeout", timeout);
 
-        Ok(Self {
-            method: Method::GET,
-            url,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, url, None))
     }
 
     pub fn delete_by_query(host: &reqwest::Url, name: &str, wait_for_completion: bool, conflicts: &str, max_docs: Option<u64>) -> Result<Self> {
@@ -203,203 +233,98 @@ impl Request {
             url.query_pairs_mut().append_pair("max_docs", &max_docs.to_string());
         }
 
-        Ok(Self {
-            method: Method::POST,
-            url,
-            index_name: Some(name.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, url, Some(name.to_owned())))
     }
     
     pub fn post_user(host: &reqwest::Url, name: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join(&format!("_security/user/{name}"))?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join(&format!("_security/user/{name}"))?, None))
     }
 
     pub fn put_role(host: &reqwest::Url, name: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join(&format!("_security/role/{name}"))?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join(&format!("_security/role/{name}"))?, None))
     }
 
     pub fn put_index_settings(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::PUT,
-            url: host.join(&format!("{index}/_settings"))?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::PUT, host.join(&format!("{index}/_settings"))?, Some(index.to_owned())))
     }
     
     pub fn put_index(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::PUT,
-            url: host.join(index)?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::PUT, host.join(index)?, Some(index.to_owned())))
     }
 
     pub fn get_indices(host: &reqwest::Url, prefix: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::GET,
-            url: host.join(&(prefix.to_string() + "*"))?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, host.join(&(prefix.to_string() + "*"))?, None))
     }
 
     pub fn head_doc(host: &reqwest::Url, index: &str, id: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::HEAD,
-            url: host.join(&format!("{index}/_doc/{id}"))?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new_on_document(Method::HEAD, host.join(&format!("{index}/_doc/{id}"))?, index.to_owned(), id.to_owned()))
     }    
 
     pub fn head_index(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::HEAD,
-            url: host.join(index)?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::HEAD, host.join(index)?, Some(index.to_owned())))
     }    
     
     pub fn delete_index(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::DELETE,
-            url: host.join(index)?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::DELETE, host.join(index)?, Some(index.to_owned())))
     }
 
     pub fn get_search_on(host: &reqwest::Url, target: &str, params: Vec<(&str, Cow<str>)>) -> Result<Self> {
         let mut url = host.join(&format!("{target}/_search"))?;  
         url.query_pairs_mut().extend_pairs(params);
-        Ok(Self {
-            method: Method::GET,
-            url,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, url, None))
     }
 
     pub fn get_search(host: &reqwest::Url, params: Vec<(&str, Cow<str>)>) -> Result<Self> {
         let mut url = host.join("_search")?;  
         url.query_pairs_mut().extend_pairs(params);
-        Ok(Self {
-            method: Method::GET,
-            url,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, url, None))
     }
 
     pub fn post_aliases(host: &reqwest::Url) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join("_aliases")?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join("_aliases")?, None))
     }
 
     pub fn head_alias(host: &reqwest::Url, name: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::HEAD,
-            url: host.join("_alias/")?.join(name)?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::HEAD, host.join("_alias/")?.join(name)?, None))
     }    
     
     pub fn put_alias(host: &reqwest::Url, index: &str, alias: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::PUT,
-            url: host.join(&format!("{index}/_alias/{alias}"))?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::PUT, host.join(&format!("{index}/_alias/{alias}"))?, None))
     }
 
     pub fn post_refresh_index(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join(&format!("{index}/_refresh"))?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join(&format!("{index}/_refresh"))?, Some(index.to_owned())))
     }
 
     pub fn post_clear_index_cache(host: &reqwest::Url, index: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join(&format!("{index}/_cache/clear"))?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join(&format!("{index}/_cache/clear"))?, Some(index.to_owned())))
     }
 
     pub fn bulk(host: &reqwest::Url) -> Result<Self> {
-        Ok(Self {
-            method: Method::POST,
-            url: host.join("_bulk")?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, host.join("_bulk")?, None))
     }
 
     pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str) -> Result<Self> {
         let mut url = host.join(&format!("{}/_pit", index))?;
         url.query_pairs_mut().append_pair("keep_alive", keep_alive);
-        Ok(Self {
-            method: Method::POST,
-            url,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, url, Some(index.to_owned())))
     }
 
     pub fn delete_doc(host: &reqwest::Url, index: &str, key: &str) -> Result<Self> {
-        Ok(Self {
-            method: Method::DELETE,
-            url: host.join(&format!("{index}/_doc/{key}"))?,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::DELETE, host.join(&format!("{index}/_doc/{key}"))?, Some(index.to_owned())))
     }
 
     pub fn get_doc(host: &reqwest::Url, index: &str, key: &str) -> Result<Self> {
         // prepare the url
         let mut url = host.join(&format!("{index}/_doc/{key}"))?;
         url.query_pairs_mut().append_pair("_source", "true");
-        Ok(Self {
-            method: Method::GET,
-            url,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, url, Some(index.to_owned())))
     }
 
     pub fn mget_doc(host: &reqwest::Url, index: &str) -> Result<Self> {
         let mut url = host.join(&format!("{index}/_mget"))?;
         url.query_pairs_mut().append_pair("_source", "true");
-        Ok(Self {
-            method: Method::GET,
-            url,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::GET, url, Some(index.to_owned())))
     }    
     
     pub fn update_doc(host: &reqwest::Url, index: &str, key: &str, retry_on_conflict: Option<i64>) -> Result<Self> {
@@ -407,42 +332,24 @@ impl Request {
         if let Some(retry_on_conflict) = retry_on_conflict {
             url.query_pairs_mut().append_pair("retry_on_conflict", &retry_on_conflict.to_string());
         }
-        Ok(Self {
-            method: Method::POST,
-            url,
-            index_name: Some(index.to_owned()),
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, url, Some(index.to_owned())))
     }
 
     pub fn index_copy(host: &reqwest::Url, src: &str, target: &str, copy_method: CopyMethod) -> Result<Self> {    
         let mut url = host.join(&format!("{src}/{copy_method}/{target}"))?;
         url.query_pairs_mut().append_pair("timeout", "60s");
 
-        Ok(Self {
-            method: Method::POST,
-            url,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::POST, url, None))
     }    
 
     pub fn delete_pit(host: &reqwest::Url) -> Result<Self> {
-        Ok(Self {
-            method: Method::DELETE,
-            url: host.join("/_pit")?,
-            index_name: None,
-            raise_conflicts: false,
-        })
+        Ok(Self::new(Method::DELETE, host.join("/_pit")?, None))
     }
 
     pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url, index: String) -> Self {
-        Self {
-            method,
-            url,
-            index_name: Some(index),
-            raise_conflicts: true
-        }
+        let mut item = Self::new(method, url, Some(index));
+        item.raise_conflicts = true;
+        item
     }
 }
 
@@ -705,7 +612,7 @@ fn get_transport_timeout() -> std::time::Duration {
 
 /// Wrapper around the elasticsearch client for helper methods used across contexts
 /// This struct is deliberately private to this module
-struct ElasticHelper {
+pub struct ElasticHelper {
     pub client: reqwest::Client,
     // pub es: tokio::sync::RwLock<elasticsearch::Elasticsearch>,
     pub host: url::Url,
@@ -835,6 +742,7 @@ impl ElasticHelper {
 
         // At this point we have a response from the server, but it may be describing an error.
         let status = response.status();
+        // debug!("elastic response status: {status}");
         
         // handle non-errors
         if status.is_success() {
@@ -843,8 +751,7 @@ impl ElasticHelper {
 
         // Since we know we have an error, load the body, for some errors this will have more information
         let headers = response.headers().clone();
-        let url = response.url().clone();
-        let body = match response.text().await {
+        let body = match response.bytes().await {
             Ok(body) => body,
             Err(err) => {
                 // always retry for connect and timeout errors
@@ -857,7 +764,21 @@ impl ElasticHelper {
             }
         };
 
+        // handle specific HTTP status codes we want particular actions for
         if StatusCode::NOT_FOUND == status {
+            if request.method == Method::HEAD {
+                if let Some(index) = &request.index_name {
+                    if let Some(doc) = &request.document_key {
+                        return Err(ElasticErrorInner::DocumentNotFound{
+                            index: index.to_string(),
+                            id: doc.to_string(),
+                        }.into())
+                    } 
+                    return Err(ElasticErrorInner::IndexNotFound(index.to_string()).into());
+                }
+            }
+
+            // debug!("not found {} {} {} {:?}", request.url, String::from_utf8_lossy(&body), body.len(), headers);
             if body.is_empty() {
                 return Err(ElasticErrorInner::IndexNotFound("".to_string()).into())
             }
@@ -875,7 +796,7 @@ impl ElasticHelper {
                 found: Option<bool>,
             }
 
-            if let Ok(body) = serde_json::from_str::<NotFoundResponse>(&body) {
+            if let Ok(body) = serde_json::from_slice::<NotFoundResponse>(&body) {
                 if body.result == Some("not_found") || body.found == Some(false) {
                     return Err(ElasticErrorInner::DocumentNotFound{
                         index: body._index,
@@ -889,7 +810,7 @@ impl ElasticHelper {
                 tokio::time::sleep(tokio::time::Duration::from_secs_f64(rand::random::<f64>() * 0.1)).await;
 
                 // try to pull out a sensible error message from the response
-                if let Ok(response) = serde_json::from_str::<responses::Error>(&body) {
+                if let Ok(response) = serde_json::from_slice::<responses::Error>(&body) {
                     return Err(ElasticErrorInner::VersionConflict(response.error.reason).into())
                 }
 
@@ -909,60 +830,32 @@ impl ElasticHelper {
             return Err(ElasticErrorInner::Timeout.into())
         } else if StatusCode::INTERNAL_SERVER_ERROR == status {
             // some errors don't have a status code assigned to them, try to read them from the body
-            if let Ok(body) = serde_json::from_str::<responses::Error>(&body) {
+            if let Ok(body) = serde_json::from_slice::<responses::Error>(&body) {
                 if body.error._type == "timeout_exception" {
                     return Err(ElasticErrorInner::Timeout.into())
                 }
                 return Err(ElasticError::fatal("server error: ".to_owned() + &body.error._type))
             }
             return Err(ElasticError::fatal("server error"))
+        } else if StatusCode::FORBIDDEN == status {
+            if let Some(index_name) = &request.index_name {
+                log::warn!("Elasticsearch cluster is preventing writing operations on index {index_name}, retrying...");
+                return Ok(None)
+            }
+            return Err(ElasticError::fatal("request forbidden"))
+        } else if StatusCode::TOO_MANY_REQUESTS == status {
+            let index = request.index_name.as_deref().unwrap_or("UNKNOWN").to_uppercase();
+            log::warn!("Elasticsearch is too busy to perform the requested task on index {}, retrying...", index);
+            return Ok(None)
+        } else if StatusCode::UNAUTHORIZED == status {
+            // authentication errors
+            // let hosts = $helper.get_hosts_safe().join(" | ");
+            // warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, message, stringify!($expression));
+            warn!("No connection to Elasticsearch server(s) retrying...");
+            return Ok(None)
         }
 
-        todo!("{url} {status:?} {body:?} {headers:?}");
-                
-        // // handle specific HTTP status codes we want particular actions for
-        // if StatusCode::NOT_FOUND == status {
-            
-        //     // let err_message = err.to_string();
-
-        //     // Validate exception type
-        //     if $index_name.is_some() || !body.contains("No search context found") {
-        //         break Err(ElasticError::NotFound(Box::new(message)))
-        //     }
-
-        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-        //     warn!("Index {} was removed while a query was running, retrying...", index);
-        //     continue
-
-
-        // } else if http::StatusCode::FORBIDDEN == status {
-        //     match $index_name {
-        //         None => break Err(ElasticError::fatal(message)),
-        //         Some(index) => {
-        //             log::warn!("Elasticsearch cluster is preventing writing operations on index {}, retrying...", index);
-        //         }
-        //     }
-        //     continue
-        // } else if http::StatusCode::SERVICE_UNAVAILABLE == status {
-        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-
-        //     // Display proper error message
-        //     log::warn!("Looks like index {} is not ready yet, retrying...", index);
-        //     continue
-        // } else if http::StatusCode::TOO_MANY_REQUESTS == status {
-        //     let index = $index_name.map(|x|x.to_string()).unwrap_or_default().to_uppercase();
-        //     log::warn!("Elasticsearch is too busy to perform the requested task on index {}, retrying...", index);
-        //     continue
-        // } else if http::StatusCode::UNAUTHORIZED == status {
-        //     // authentication errors
-        //     let hosts = $helper.get_hosts_safe().join(" | ");
-        //     warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, message, stringify!($expression));
-        //     continue
-        // } else {
-        //     break Err(ElasticError::fatal(message))
-        // }
-
-        // return if status.is_server_error() {
+            // return if status.is_server_error() {
         //     let body = response.text().await.unwrap_or(status.to_string());
         //     error!("Server error in datastore: {body}");
         //     let delay = MAX_RETRY_DELAY.min(Duration::from_secs_f64((*attempt as f64).powf(2.0)/5.0));
@@ -975,6 +868,9 @@ impl ElasticHelper {
         // } else {
         //     Ok(Some(response))
         // }
+
+        error!("unexpected elastic error: {}", String::from_utf8_lossy(&body));
+        return Err(ElasticError::fatal(format!("Unexpected elastic error [status: {status}]")))
     }
 
     /// Start an http request with an empty body
@@ -985,7 +881,7 @@ impl ElasticHelper {
             // Build and dispatch the request
             let result = self.client.request(request.method.clone(), request.url.clone())
                 .send().await;
-            
+
             // Handle connection errors with a retry, let other non http errors bubble up
             match Self::handle_result(attempt, request, result).await? {
                 Some(response) => return Ok(response),

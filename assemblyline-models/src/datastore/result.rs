@@ -16,7 +16,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
-use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256};
+use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256};
 
 use super::tagging::Tagging;
 

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::datastore::heuristic::Heuristic;
@@ -13,7 +13,7 @@ use assemblyline_models::messages::changes::{HeuristicChange, Operation, Service
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
 use chrono::{TimeDelta, Utc};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use redis_objects::{increment, Hashmap, RedisObjects};
 use serde_json::json;
@@ -188,6 +188,7 @@ impl TaskingClient {
     }
 
     pub async fn register_service(&self, mut service_data: JsonMap, log_prefix: &str) -> Result<RegisterResponse, RegisterError> {
+        debug!("Registring service: {:?}", service_data.get("name"));
         let mut keep_alive = true;
 
         // Get heuristics list
@@ -220,25 +221,35 @@ impl TaskingClient {
 
         // Create Service registration object
         let mut service: Service = serde_json::from_value(serde_json::Value::Object(service_data))?;
+        if service.name.is_empty() || service.version.is_empty() {
+            return Err(RegisterError::Formatting("Service name and version must be supplied".to_string()));
+        }
 
         // Fix service version, we don't need to see the stable label
         service.version = service.version.replace("stable", "");
 
         // Save service if it doesn't already exist
         let key = format!("{}_{}", service.name, service.version);
+        debug!("Registering service: storing version manifest");
         if !self.datastore.service.exists(&key, None).await? {
+            debug!("Registering service: saving {key}");
             self.datastore.service.save(&key, &service, None, None).await?;
             self.datastore.service.commit(None).await?;
             info!("{log_prefix}{} registered", service.name);
             keep_alive = false;
+        } else {
+            debug!("Registering service: manifest exists, skipping");
         }
 
         // Save service delta if it doesn't already exist
+        debug!("Registering service: setting version");
         if !self.datastore.service_delta.exists(&service.name, None).await? {
             let mut doc = [("version".to_string(), json!(service.version))].into_iter().collect();
             self.datastore.service_delta.save_json(&service.name, &mut doc, None, None).await?;
             self.datastore.service_delta.commit(None).await?;
             info!("{log_prefix}{} version ({}) registered", service.name, service.version);
+        } else {
+            debug!("Registering service: version already set");
         }
 
         let mut new_heuristics = vec![];
@@ -398,6 +409,7 @@ impl TaskingClient {
             Some(task) => task,
             None => {
                 // We've reached the timeout and no task found in service queue
+                debug!("TaskingClient::get_task timeout for {client_id} running {service_name}");
                 return Ok((None, false))
             }
         };
@@ -477,7 +489,7 @@ impl TaskingClient {
         // Checking for previous empty results for this key
         let empty_key = format!("{result_key}.e");
         match self.datastore.emptyresult.get_if_exists(&empty_key, None).await {
-            Ok(Some(_empty)) => {
+            Ok(Some(_)) => {
                 increment!(metric_factory, cache_hit);
                 increment!(metric_factory, not_scored);
                 let result = create_empty_result_from_key(&result_key, self.config.submission.emptyresult_dtl.into(), &self.classification_engine)?;
@@ -486,7 +498,6 @@ impl TaskingClient {
             },
             Ok(None) => {},
             Err(err) if err.is_json() => {
-            // except ValueError:
                 warn!("Got poisoned empty result cache record for key {result_key}.e, cleaning up...");
                 self.datastore.emptyresult.delete(&empty_key, None).await?;
             },
@@ -515,7 +526,7 @@ impl TaskingClient {
     pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: &str) -> Result<serde_json::Value> {
         match service_task {
             FinishedBody::Success { task, exec_time, freshen, result } => {
-                let missing_files = self._handle_task_result(exec_time, task, result, client_id, service_name, freshen).await?;
+                let missing_files = self._handle_task_result(exec_time, task, result, client_id, service_name, freshen).await.context("_handle_task_result")?;
                 if !missing_files.is_empty() {
                     return Ok(json!({"success": false, "missing_files": missing_files}))
                 }
@@ -557,7 +568,7 @@ impl TaskingClient {
             file_info.is_section_image |= item.is_section_image;
             file_info.is_supplementary |= is_supplementary;
             
-            let serde_json::Value::Object(info) = serde_json::to_value(&file_info)? else {
+            let serde_json::Value::Object(info) = serde_json::to_value(&file_info).context("freshen_file::to_value")? else {
                 bail!("Object must serialize to object");
             };
     
@@ -567,7 +578,7 @@ impl TaskingClient {
                 file_info.expiry_ts, 
                 file_info.classification.as_str().to_owned(),
                 &cl_engine,
-            ).await?;
+            ).await.context("save_or_freshen_file")?;
             Ok(())
         }
 
@@ -590,10 +601,10 @@ impl TaskingClient {
             let mut file_exists_check: HashMap<Sha256, bool> = Default::default();
             for h in hashes {
                 let hash_str = h.to_string();
-                file_exists_check.insert(h, self.filestore.exists(&hash_str).await?);
+                file_exists_check.insert(h, self.filestore.exists(&hash_str).await.context("exists")?);
             }
 
-            let file_infos = self.datastore.file.multiget::<assemblyline_models::datastore::File>(&hash_strings, Some(false), None).await?;
+            let file_infos = self.datastore.file.multiget::<assemblyline_models::datastore::File>(&hash_strings, Some(false), None).await.context("multiget")?;
             let mut missing_files = vec![];
 
             let mut pool = tokio::task::JoinSet::new();
@@ -639,10 +650,10 @@ impl TaskingClient {
             section.tags = Default::default();
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
-                heuristic.heur_id = heur_id;
+                heuristic.heur_id = heur_id.clone();
 
                 match self.heuristic_handler.service_heuristic_to_result_heuristic(heuristic, self.heuristics.clone(), zeroize_on_sig_safe) {
-                    Ok((heuristic, new_tags)) => {
+                     Ok((heuristic, new_tags)) => {
                         total_score += heuristic.score;
                         section_heuristics.insert(index, heuristic);
                         for (tag_key, tag_value) in new_tags {
@@ -654,9 +665,10 @@ impl TaskingClient {
                     },
                     Err(err) => {
                         if err.downcast_ref::<InvalidHeuristicException>().is_some() {
+                            debug!("Dropped heuristic: {heur_id} {err:?}");
                             section.heuristic = None;
                         } else {
-                            return Err(err)
+                            return Err(err.context("service_heuristic_to_result_heuristic"))
                         }
                     }
                 }
@@ -713,8 +725,8 @@ impl TaskingClient {
             // Perform tag safelisting
             let (tags, safelisted_tags) = self.tag_safelister.lock().get_validated_tag_map(tags);
             
-            let formatted_tags = tags.to_tagging()?;
-            let passed_tags = formatted_tags.flatten()?;
+            let formatted_tags = tags.to_tagging().context("to_tagging")?;
+            let passed_tags = formatted_tags.flatten().context("flatten")?;
 
             let mut dropped  = vec![];
             for (tag, values) in tags.iter() {
@@ -772,7 +784,7 @@ impl TaskingClient {
         };
         let score = result.result.score;
         let result_key = result.build_key(Some(&task))?;
-        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None).await?;
+        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None).await.context("service_finished")?;
 
         // Metrics
         let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
