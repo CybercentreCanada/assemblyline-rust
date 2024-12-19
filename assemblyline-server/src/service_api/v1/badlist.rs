@@ -152,7 +152,6 @@ async fn tags_exists(
     Json(data): Json<HashMap<String, Vec<String>>>, 
     client: Data<&Arc<BadlistClient>>
 ) -> Response {
-    log::info!("tags_exists");
     match client.exists_tags(data).await {
         Ok(items) => make_api_response(items),
         Err(err) => make_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string(), EMPTY)

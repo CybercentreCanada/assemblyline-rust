@@ -51,6 +51,15 @@ pub struct ElasticMeta {
 }
 
 impl MetadataKind for ElasticMeta {
+    fn forward_propagate_child_defaults(&mut self, kind: &ElasticMeta) {
+        self.index = self.index.or(kind.index);
+        self.store = self.store.or(kind.store);
+        self.copyto = self.copyto.or(kind.copyto);
+        self.mapping = self.mapping.or(kind.mapping);
+        self.analyzer = self.analyzer.or(kind.analyzer);
+        self.normalizer = self.normalizer.or(kind.normalizer);
+    }
+
     fn forward_propagate_entry_defaults(&mut self, context: &ElasticMeta, kind: &ElasticMeta) {
         self.index = self.index.or(kind.index).or(context.index);
         self.store = self.store.or(kind.store).or(context.store);

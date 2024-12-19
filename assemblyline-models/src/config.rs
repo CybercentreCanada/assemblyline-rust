@@ -1675,6 +1675,7 @@ pub struct Submission {
     // pub verdicts: Verdicts,
 
     /// Set the operation that will be used to update values using this key in the temporary submission data.
+    pub default_temporary_keys: HashMap<String, TemporaryKeyType>,
     pub temporary_keys: HashMap<String, TemporaryKeyType>,
 }
 
@@ -1693,9 +1694,11 @@ impl Default for Submission {
             // sha256_sources: Default::default(),
             // tag_types: Default::default(),
             // verdicts: Default::default()
-            temporary_keys: [
+            default_temporary_keys: [
                 ("passwords".to_owned(), TemporaryKeyType::Union),
-            ].into_iter().collect()
+                ("email_body".to_owned(), TemporaryKeyType::Union),
+            ].into_iter().collect(),
+            temporary_keys: Default::default()
         }
     }
 }

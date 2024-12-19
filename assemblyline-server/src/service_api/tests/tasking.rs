@@ -183,7 +183,8 @@ fn build_task() -> Task {
 
 #[tokio::test]
 async fn test_task_timeout() {
-    let (client, _core, _guard, address) = setup(headers()).await;
+    let (client, core, _guard, address) = setup(headers()).await;
+    let service = setup_service(&core).await;
 
     let response = client.get(format!("{address}/api/v1/task/")).send().await.unwrap();
 

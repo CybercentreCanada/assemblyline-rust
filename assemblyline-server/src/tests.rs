@@ -230,13 +230,32 @@ impl MockService {
             }
 
             let result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
-            debug!("result: {result:?}");
-            let result_key: String = instructions
-                .get("result_key")
-                .and_then(|x|x.as_str())
-                .map(|x|x.to_string())
-                .unwrap_or_else(|| thread_rng().gen::<u64>().to_string());
-            self.dispatch_client.service_finished(task, result_key, result, None, None).await.unwrap();
+
+            let result_key = if let Some(key) = instructions.get("result_key") {
+                key.as_str().unwrap().to_owned()
+            } else {
+                result.build_key(Some(&task)).unwrap()
+            };
+
+            // let mut result_key: String = instructions
+            //     .get("result_key")
+            //     .and_then(|x|x.as_str())
+            //     .map(|x|x.to_string())
+            //     .unwrap_or_else(|| thread_rng().gen::<u64>().to_string());
+            // if !instructions.contains_key("result_key") && result.is_empty() {
+            //     result_key = result_key + 
+            // }
+
+            let temporary_data = match instructions.get("temporary_data") {
+                Some(data) => match data.as_object() {
+                    Some(data) => data.clone(),
+                    None => Default::default(),
+                },
+                None => Default::default()
+            };
+
+            debug!("result: {result_key} -> {result:?}");
+            self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None).await.unwrap();
         }
     }
 }
@@ -328,7 +347,7 @@ impl MockService {
 
 fn test_services() -> HashMap<String, Service> {
     return [
-        ("pre", dummy_service("pre", "pre", None, None, None, None)),
+        ("pre", dummy_service("pre", "pre", None, None, None, Some(true))),
         ("core-a", dummy_service("core-a", "core", None, None, None, None)),
         ("core-b", dummy_service("core-b", "core", None, None, None, None)),
         ("finish", dummy_service("finish", "post", None, None, None, None)),
@@ -358,17 +377,25 @@ async fn setup() -> TestContext {
     // Register services
     let mut services = HashMap::new();
     let stages = core.services.get_service_stage_hash();
-    for (name, _service) in test_services() {
-        // ds.service.save(f'{svc}_0', dummy_service(svc, stage, docid=f'{svc}_0'))
-        // ds.service_delta.save(svc, ServiceDelta({
-        //     'name': svc,
-        //     'version': '0',
-        //     'enabled': True
-        // }))
+    for (name, mut service) in test_services() {
+        let count = if name == "core-a" { 
+            service.timeout = 100;
+            2 
+        } else { 1 };
+
+        core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
+        core.datastore.service_delta.save_json(&name, json!({
+            "name": name,
+            "version": service.version,
+            "enabled": true
+        }).as_object_mut().unwrap(), None, None).await.unwrap();
         stages.set(&name, &ServiceStage::Running).await.unwrap();
-        let service_agent = MockService::new(&name, signal.clone(), &core).await;
-        components.spawn(service_agent.clone().run());
-        services.insert(name, service_agent);
+
+        for _ in 0..count {
+            let service_agent = MockService::new(&name, signal.clone(), &core).await;
+            components.spawn(service_agent.clone().run());
+            services.insert(name.clone(), service_agent);
+        }
     }
 
     // setup test user
@@ -1382,7 +1409,6 @@ async fn test_tag_filter() {
 // MARK: partial
 #[tokio::test(flavor = "multi_thread")]
 async fn test_partial() {
-    todo!();
     let context = setup().await;
     // Have pre produce a partial result, then have core-a update a monitored key
     let (sha, size) = ready_body(&context.core, json!({
@@ -1410,160 +1436,179 @@ async fn test_partial() {
         scan_key: None,
     }).await.unwrap();
 
-    // notification_queue = NamedQueue('nq-temp-data-monitor', core.redis)
-    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-    // assert dropped_task
-    // dropped_task = IngestTask(dropped_task)
-    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
-    // assert len(sub.errors) == 0
-    // assert len(sub.results) == 4, 'results'
-    // assert core.pre_service.hits[sha] == 1, 'pre_service.hits'
+    let notification_queue = context.core.notification_queue("temp-data-monitor");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-    // # Wait until we get feedback from the metrics channel
-    // metrics.expect('ingester', 'submissions_ingested', 1)
-    // metrics.expect('ingester', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'files_completed', 1)
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
 
-    // partial_results = 0
-    // for res in sub.results:
-    //     result = core.ds.get_single_result(res, as_obj=True)
-    //     assert result is not None, res
-    //     if result.partial:
-    //         partial_results += 1
-    // assert partial_results == 1, 'partial_results'
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.errors.len(), 0);
+    assert_eq!(sub.results.len(), 4);
+    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 1);
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
+    let mut partial_results = 0;
+    for res in sub.results {
+        info!("loading result: {res}");
+        let result = context.core.datastore.get_single_result(&res, 
+            context.core.config.submission.emptyresult_dtl.into(),
+            &context.core.classification_parser).await.unwrap().unwrap();
+        if result.partial {
+            partial_results += 1;
+        }
+    }
+    assert_eq!(partial_results, 1, "partial_results");
 }
 
 // MARK: monitoring
 #[tokio::test(flavor = "multi_thread")]
-async fn test_temp_data_monitoring() {
-    todo!()
-    // # Have pre produce a partial result, then have core-a update a monitored key
-    // sha, size = ready_body(core, {
-    //     'pre': {'partial': {'passwords': 'test_temp_data_monitoring'}},
-    //     'core-a': {'temporary_data': {'passwords': ['test_temp_data_monitoring']}},
-    //     'final': {'temporary_data': {'passwords': ['some other password']}},
-    // })
+async fn test_temp_data_monitoring() {    
+    let context = setup().await;
 
-    // core.ingest_queue.push(SubmissionInput(dict(
-    //     metadata={},
-    //     params=dict(
-    //         description="file abc123",
-    //         services=dict(selected=[]),
-    //         submitter='user',
-    //         groups=['user'],
-    //         max_extracted=10000
-    //     ),
-    //     notification=dict(
-    //         queue='temp-data-monitor',
-    //         threshold=0
-    //     ),
-    //     files=[dict(
-    //         sha256=sha,
-    //         size=size,
-    //         name='abc123'
-    //     )]
-    // )).as_primitives())
+    // Have pre produce a partial result, then have core-a update a monitored key
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {"partial": {"passwords": "test_temp_data_monitoring"}},
+        "core-a": {"temporary_data": {"passwords": ["test_temp_data_monitoring"]}},
+        "final": {"temporary_data": {"passwords": ["some other password"]}},
+    })).await;
 
-    // notification_queue = NamedQueue('nq-temp-data-monitor', core.redis)
-    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-    // assert dropped_task
-    // dropped_task = IngestTask(dropped_task)
-    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
-    // assert len(sub.errors) == 0
-    // assert len(sub.results) == 4, 'results'
-    // assert core.pre_service.hits[sha] >= 2, f'pre_service.hits {core.pre_service.hits}'
+    context.ingest_queue.push(&MessageSubmission {
+        sid: thread_rng().gen(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("temp-data-monitor".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-    // # Wait until we get feedback from the metrics channel
-    // metrics.expect('ingester', 'submissions_ingested', 1)
-    // metrics.expect('ingester', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'files_completed', 1)
+    let notification_queue = context.core.notification_queue("temp-data-monitor");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-    // partial_results = 0
-    // for res in sub.results:
-    //     result = core.ds.get_single_result(res, as_obj=True)
-    //     assert result is not None, res
-    //     if result.partial:
-    //         partial_results += 1
-    // assert partial_results == 0, 'partial_results'
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.errors.len(), 0);
+    assert_eq!(sub.results.len(), 4);
+    assert!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap() >= 2, "{:?}", context.services.get("pre").unwrap().hits.lock());
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
+    let mut partial_results = 0;
+    for res in sub.results {
+        info!("loading result: {res}");
+        let result = context.core.datastore.get_single_result(&res, 
+            context.core.config.submission.emptyresult_dtl.into(),
+            &context.core.classification_parser).await.unwrap().unwrap();
+        if result.partial {
+            partial_results += 1;
+        }
+    }
+    assert_eq!(partial_results, 0, "partial_results");
 }
 
 // MARK: tag filter
 #[tokio::test(flavor = "multi_thread")]
 async fn test_complex_extracted() {
-    todo!();
-    // # stages to this processing when everything goes well
-    // # 1. extract a file that will process to produce a partial result
-    // # 2. hold a few seconds on the second stage of the root file to let child start
-    // # 3. on the last stage of the root file produce the password
+    // stages to this processing when everything goes well
+    // 1. extract a file that will process to produce a partial result
+    // 2. hold a few seconds on the second stage of the root file to let child start
+    // 3. on the last stage of the root file produce the password
     // dispatcher.TIMEOUT_EXTRA_TIME = 10
+    let context = setup().await;
 
-    // child_sha, _ = ready_body(core, {
-    //     'pre': {'partial': {'passwords': 'test_temp_data_monitoring'}},
-    // })
+    let (child_sha, _) = ready_body(&context.core, json!({
+        "pre": {"partial": {"passwords": "test_temp_data_monitoring"}}
+    })).await;
 
-    // sha, size = ready_body(core, {
-    //     'pre': {
-    //         'response': {
-    //             'extracted': [{
-    //                 'name': child_sha,
-    //                 'sha256': child_sha,
-    //                 'description': 'abc',
-    //                 'classification': 'U'
-    //             }]
-    //         }
-    //     },
-    //     'core-a': {'lock': 5},
-    //     'finish': {'temporary_data': {'passwords': ['test_temp_data_monitoring']}},
-    // })
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {
+            "response": {
+                "extracted": [{
+                    "name": child_sha,
+                    "sha256": child_sha,
+                    "description": "abc",
+                    "classification": "U"
+                }]
+            }
+        },
+        "core-a": {"lock": 500},
+        "finish": {"temporary_data": {"passwords": ["test_temp_data_monitoring"]}},
+    })).await;
 
-    // core.ingest_queue.push(SubmissionInput(dict(
-    //     metadata={},
-    //     params=dict(
-    //         description="file abc123",
-    //         services=dict(selected=''),
-    //         submitter='user',
-    //         groups=['user'],
-    //         max_extracted=10000
-    //     ),
-    //     notification=dict(
-    //         queue='complex-extracted-file',
-    //         threshold=0
-    //     ),
-    //     files=[dict(
-    //         sha256=sha,
-    //         size=size,
-    //         name='abc123'
-    //     )]
-    // )).as_primitives())
+    let sid = thread_rng().gen();
+    context.ingest_queue.push(&MessageSubmission {
+        sid,
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("complex-extracted-file".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-    // # Wait for the extract file to finish
-    // metrics.expect('dispatcher', 'files_completed', 1)
-    // _global_semaphore.release()
+    // Wait for the extract file to finish
+    context.metrics.assert_metrics("dispatcher", &[("files_completed", 1)]).await;
+    // check that there is a pending result in the dispatcher
+    // task = next(iter(core.dispatcher.tasks.values()))
+    // assert 1 == sum(int(summary.partial) for summary in task.service_results.values())
+    log::warn!("load test report for {sid}");
+    let report = context.dispatcher.get_test_report(sid).await.unwrap();
+    let partial_count: u32 = report.service_results.values().map(|row| if row.partial {1} else {0}).sum();
+    assert_eq!(partial_count, 1);
 
-    // # Wait for the entire submission to finish
-    // notification_queue = NamedQueue('nq-complex-extracted-file', core.redis)
-    // dropped_task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-    // assert dropped_task
-    // dropped_task = IngestTask(dropped_task)
-    // sub: Submission = core.ds.submission.get(dropped_task.submission.sid)
-    // assert len(sub.errors) == 0
-    // assert len(sub.results) == 8, 'results'
-    // assert core.pre_service.hits[sha] == 1, 'pre_service.hits[root]'
-    // assert core.pre_service.hits[child_sha] >= 2, 'pre_service.hits[child]'
+    context.signal.notify_waiters();
 
-    // # Wait until we get feedback from the metrics channel
-    // metrics.expect('ingester', 'submissions_ingested', 1)
-    // metrics.expect('ingester', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'submissions_completed', 1)
-    // metrics.expect('dispatcher', 'files_completed', 2)
+    // Wait for the entire submission to finish
+    let notification_queue = context.core.notification_queue("complex-extracted-file");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
 
-    // partial_results = 0
-    // for res in sub.results:
-    //     result = core.ds.get_single_result(res, as_obj=True)
-    //     assert result is not None, res
-    //     if result.partial:
-    //         partial_results += 1
-    // assert partial_results == 0, 'partial_results'
+    assert!(sub.errors.is_empty());
+    assert_eq!(sub.results.len(), 8, "results");
+    assert!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap() == 1, "{:?}", context.services.get("pre").unwrap().hits.lock());
+    assert!(*context.services.get("pre").unwrap().hits.lock().get(&child_sha.to_string()).unwrap() >= 1, "{:?}", context.services.get("pre").unwrap().hits.lock());
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await; // only one file completed because we asserted one earlier
+
+    let mut partial_results = 0;
+    for res in sub.results {
+        info!("loading result: {res}");
+        let result = context.core.datastore.get_single_result(&res, 
+            context.core.config.submission.emptyresult_dtl.into(),
+            &context.core.classification_parser).await.unwrap().unwrap();
+        if result.partial {
+            partial_results += 1;
+        }
+    }
+    assert_eq!(partial_results, 0, "partial_results");
 }

@@ -378,6 +378,13 @@ pub mod test {
     use serde_json::json;
 
     pub fn dummy_service(name: &str, stage: &str, category: Option<&str>, accepts: Option<&str>, rejects: Option<&str>, extra_data: Option<bool>) -> Service {
+        let extra_data = extra_data.unwrap_or_default();
+        let monitored = if extra_data {
+            vec!["passwords"]
+        } else {
+            vec![]
+        };
+
         return serde_json::from_value(json!({
             "classification": "",
             "default_result_classification": "",
@@ -385,15 +392,16 @@ pub mod test {
             "stage": stage,
             "category": category.unwrap_or("static"),
             "accepts": accepts.unwrap_or_default(),
-            "uses_temp_submission_data": extra_data.unwrap_or_default(),
-            "uses_tags": extra_data.unwrap_or_default(),
+            "uses_temp_submission_data": extra_data,
+            "uses_tags": extra_data,
             "rejects": rejects,
             "version": "0",
             "enabled": true,
             "timeout": 2,
             "docker_config": {
                 "image": "somefakedockerimage:latest".to_string(),
-            }
+            },
+            "monitored_keys": monitored
         })).unwrap()
     }
 

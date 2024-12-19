@@ -360,6 +360,7 @@ impl DispatchClient {
             self.datastore.emptyresult.save(&result_key, &EmptyResult { expiry_ts }, None, None).await?;
         } else {
             loop {
+                debug!("Saving result: {result_key}");
                 let save_res = self.datastore.result.save(&result_key, &result, version, None).await;
 
                 match save_res {

@@ -103,9 +103,9 @@ enum DispatchAction {
 }
 
 pub struct TestReport {
-    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
-    service_results: HashMap<(Sha256, String), ResultSummary>,
-    service_errors: HashMap<(Sha256, String), String>,
+    pub queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
+    pub service_results: HashMap<(Sha256, String), ResultSummary>,
+    pub service_errors: HashMap<(Sha256, String), String>,
 }
 
 impl DispatchAction {
@@ -143,6 +143,7 @@ struct AncestoryEntry {
 }
 
 /// Tracks whether a task needs to be rerun based on
+#[derive(Debug)]
 struct MonitorTask {
     /// Service name
     service: String,
@@ -772,7 +773,8 @@ impl Dispatcher {
         components.spawn(retry!("Global Timeout Backstop", self, timeout_backstop));
     }
 
-    async fn get_test_report(&self, sid: Sid) -> Result<TestReport> {
+    #[cfg(test)]
+    pub async fn get_test_report(&self, sid: Sid) -> Result<TestReport> {
         let (send, resp) = oneshot::channel();
         self.send_dispatch_action(DispatchAction::TestReport(sid, send)).await;
         Ok(resp.await?)
@@ -1286,7 +1288,9 @@ impl Dispatcher {
         }
 
         // Apply initial data parameter
-        let mut temporary_data = TemporaryFileData::new(self.core.config.submission.temporary_keys.clone());
+        let mut temp_data_config = self.core.config.submission.default_temporary_keys.clone();
+        temp_data_config.extend(&mut self.core.config.submission.temporary_keys.clone().into_iter());
+        let mut temporary_data = TemporaryFileData::new(temp_data_config);
         let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
         if let Some(initial) = &task.submission.params.initial_data {
             match serde_json::from_str::<JsonMap>(&initial.0) {
@@ -2219,6 +2223,7 @@ impl Dispatcher {
 
         // Update the temporary data table for this file
         let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
+        debug!("temporary data: {:?}", temporary_data);
         let mut changed_keys = vec![];
         if let Some(existing) = task.file_temporary_data.get_mut(&sha256) {
             for (key, value) in temporary_data {
@@ -2228,13 +2233,16 @@ impl Dispatcher {
                 }
             }
         }
+        debug!("changed keys: {:?}", changed_keys);
 
         let mut force_redispatch = HashSet::new();
+        debug!("monitoring: {:?}", task.monitoring);
         for key in changed_keys {
             for hash in task.temporary_data_changed(&key) {
                 force_redispatch.insert(hash);
             }
         }
+        debug!("force redispatch: {force_redispatch:?}");
 
         // // Update children to include parent_relation, likely EXTRACTED
         // if summary.children and isinstance(summary.children[0], str):

@@ -88,19 +88,19 @@ impl Attribution {
 #[metadata(index=true, store=true)]
 pub struct Hashes {
     /// MD5
-    #[metadata(copyto="text")]
+    #[metadata(copyto="__text__")]
     pub md5: Option<MD5>,
     /// SHA1
-    #[metadata(copyto="text")]
+    #[metadata(copyto="__text__")]
     pub sha1: Option<Sha1>,
     /// SHA256
-    #[metadata(copyto="text")]
+    #[metadata(copyto="__text__")]
     pub sha256: Option<Sha256>,
     /// SSDEEP
-    #[metadata(copyto="text")]
+    #[metadata(copyto="__text__")]
     pub ssdeep: Option<SSDeepHash>,
     /// TLSH
-    #[metadata(copyto="text")]
+    #[metadata(copyto="__text__")]
     pub tlsh: Option<String>,
 }
 

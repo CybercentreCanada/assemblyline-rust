@@ -78,6 +78,7 @@ mod python {
     use serde_json::json;
 
     use super::{RetrohuntHit, Retrohunt, File};
+    use crate::datastore::badlist::Badlist;
     use crate::datastore::Submission;
     use crate::meta::Mappings;
 
@@ -166,6 +167,15 @@ mod python {
         let mapping = build_mapping::<Submission>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
+
+    #[test]
+    fn badlist_schema() {
+        let py_mappings = load_mapping("badlist", "Badlist");
+        // py_mappings.properties.remove("archive_ts");
+        let mapping = build_mapping::<Badlist>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
 
     // // Test that the classification components get expanded as expected
     // #[test]

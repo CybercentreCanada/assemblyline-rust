@@ -359,6 +359,6 @@ impl Result {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.response.extracted.is_empty() && self.response.supplementary.is_empty() && self.result.sections.is_empty() && self.result.score == 0
+        self.response.extracted.is_empty() && self.response.supplementary.is_empty() && self.result.sections.is_empty() && self.result.score == 0 && !self.partial
     }
 }

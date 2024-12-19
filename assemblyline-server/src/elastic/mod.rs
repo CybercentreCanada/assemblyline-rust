@@ -20,7 +20,7 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
-use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, File, Service, ServiceDelta, Submission};
+use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, Result as ResultModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
@@ -1456,7 +1456,17 @@ impl Elastic {
         self.es.client.put(self.es.host.join("/_cluster/settings")?).json(&body).send().await?.error_for_status()?;
         Ok(())
     }
+
+    pub async fn get_single_result(&self, key: &str, dtl: i64, cl_engine: &ClassificationParser) -> anyhow::Result<Option<ResultModel>> {
+        if key.ends_with(".e") {
+            Ok(Some(create_empty_result_from_key(key, dtl, cl_engine)?))
+        } else {
+            Ok(self.result.get(key, None).await?)
+        }
+    }
+
 }
+
 
 fn extract_number(container: &JsonMap, name: &str) -> u64 {
     match container.get(name) {

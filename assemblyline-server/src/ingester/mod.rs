@@ -313,6 +313,10 @@ impl Ingester {
 
         // setup the task object and spawn a new task to handle it
         let task = Box::new(IngestTask::new(message));
+
+        // Reset to new random uuid
+        // task.submission.sid = rand::thread_rng().gen(); 
+
         self.spawn_ingest(task);
         Ok(())
     }
@@ -575,10 +579,7 @@ impl Ingester {
         Ok(())
     }
 
-    fn spawn_ingest(self: &Arc<Self>, mut task: Box<IngestTask>) -> tokio::task::JoinHandle<()> {
-        // Reset to new random uuid
-        task.submission.sid = rand::thread_rng().gen(); 
-
+    fn spawn_ingest(self: &Arc<Self>, task: Box<IngestTask>) -> tokio::task::JoinHandle<()> {
         // spawn a task to process this
         let this = self.clone();
         tokio::spawn(async move {
