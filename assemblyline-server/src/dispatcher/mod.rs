@@ -2223,7 +2223,6 @@ impl Dispatcher {
 
         // Update the temporary data table for this file
         let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
-        debug!("temporary data: {:?}", temporary_data);
         let mut changed_keys = vec![];
         if let Some(existing) = task.file_temporary_data.get_mut(&sha256) {
             for (key, value) in temporary_data {
@@ -2233,16 +2232,13 @@ impl Dispatcher {
                 }
             }
         }
-        debug!("changed keys: {:?}", changed_keys);
 
         let mut force_redispatch = HashSet::new();
-        debug!("monitoring: {:?}", task.monitoring);
         for key in changed_keys {
             for hash in task.temporary_data_changed(&key) {
                 force_redispatch.insert(hash);
             }
         }
-        debug!("force redispatch: {force_redispatch:?}");
 
         // // Update children to include parent_relation, likely EXTRACTED
         // if summary.children and isinstance(summary.children[0], str):
