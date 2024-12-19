@@ -330,7 +330,8 @@ async fn test_ingest_size_error() {
 
     // A file was dropped
     let queue = core.notification_queue("test_ingest_size_error");
-    let _task = queue.pop_timeout(std::time::Duration::from_secs(2)).await.unwrap().unwrap();
+    let task = queue.pop_timeout(std::time::Duration::from_secs(2)).await.unwrap().unwrap();
+    assert!(!task.failure.is_empty());
 }
 
 #[tokio::test]

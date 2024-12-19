@@ -323,17 +323,18 @@ impl Result {
             &self.response.service_name,
             &self.response.service_version,
             self.is_empty(),
+            self.partial,
             self.response.service_tool_version.as_deref(),
             task
         )
     }
 
-    pub fn help_build_key(sha256: &Sha256, service_name: &str, service_version: &str, is_empty: bool, service_tool_version: Option<&str>, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
+    pub fn help_build_key(sha256: &Sha256, service_name: &str, service_version: &str, is_empty: bool, partial: bool, service_tool_version: Option<&str>, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
         let mut key_list = vec![
             sha256.to_string(),
             service_name.replace('.', "_"),
             format!("v{}", service_version.replace('.', "_")),
-            format!("c{}", generate_conf_key(service_tool_version, task)?),
+            format!("c{}", generate_conf_key(service_tool_version, task, Some(partial))?),
         ];
 
         if is_empty {

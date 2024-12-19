@@ -1408,8 +1408,8 @@ impl Elastic {
             //     },
             //     Err(err) => return Err(err)
             // }
-            let file: File = serde_json::from_value(serde_json::Value::Object(current_fileinfo))?;
-            let result = self.file.save(sha256, &file, Some(version), None).await;
+            // let file: File = serde_json::from_value(serde_json::Value::Object(current_fileinfo))?;
+            let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(()),
                 Err(err) if err.is_version_conflict() => {

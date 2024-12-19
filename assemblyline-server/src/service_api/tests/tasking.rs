@@ -216,6 +216,7 @@ async fn test_task_ignored_then_timeout() {
         &service.name,
         &service.version,
         true,
+        false,
         Some(TOOL_VERSION),
         Some(&task)
     ).unwrap();
