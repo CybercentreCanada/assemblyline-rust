@@ -1,0 +1,30 @@
+[package]
+name = "assemblyline-filestore"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# framework
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+
+# System utilities
+async-trait = "0.1"
+bytes = "1.9"
+safe-path = "0.1"
+log = "0.4"
+url = "2.5"
+
+# Error handling utilities
+anyhow = "1.0"
+thiserror = "*"
+
+# Azure cloud service libraries
+azure_core = { version = "0.21", features = ["tokio-fs"]}
+azure_identity = "0.21"
+azure_storage = "0.21"
+azure_storage_blobs = "0.21"
+
+[dev-dependencies]
+tempfile = "3.15"
+env_logger = "0.11"

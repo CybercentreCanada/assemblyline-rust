@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "assemblyline-client",
+    "assemblyline-client", 
+    "assemblyline-filestore",
     "assemblyline-markings",
     "assemblyline-models",
     "assemblyline-server", 
