@@ -165,13 +165,20 @@ async fn setup_service(core: &Core) -> Service {
     let service_delta = empty_delta(&service);
     core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
     core.datastore.service_delta.save(&service.name, &service_delta, None, None).await.unwrap();
+
     core.datastore.service.commit(None).await.unwrap();
     core.datastore.service_delta.commit(None).await.unwrap();
     core.redis_volatile.publish_json(&format!("changes.services.{name}"), &ServiceChange {
         name: name.clone(),
         operation: assemblyline_models::messages::changes::Operation::Added,
     }).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() > TIMEOUT { panic!(); }
+        if core.services.get(&name).is_some() { break }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     service
 }
 

@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assemblyline_models::config::Config;
+use assemblyline_filestore::FileStore;
 
 use crate::cachestore::CacheStore;
 use crate::common::tagging::{SafelistFile, TagSafelister};
 use crate::elastic::Elastic;
-use crate::filestore::FileStore;
 use crate::Core;
 
 

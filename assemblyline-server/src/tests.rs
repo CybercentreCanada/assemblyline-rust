@@ -14,6 +14,7 @@ use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_filestore::FileStore;
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -27,7 +28,6 @@ use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
 use crate::dispatcher::client::DispatchClient;
 use crate::dispatcher::Dispatcher;
 
-use crate::filestore::FileStore;
 use crate::ingester::Ingester;
 use crate::plumber::Plumber;
 use crate::postprocessing::SubmissionFilter;

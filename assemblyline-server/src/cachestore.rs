@@ -16,8 +16,9 @@ static COMPONENT_VALIDATOR: LazyLock<regex::Regex> = LazyLock::new(|| {
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
+use assemblyline_filestore::FileStore;
+
 use crate::elastic::Elastic;
-use crate::filestore::FileStore;
 
 #[derive(Clone)]
 pub struct CacheStore {

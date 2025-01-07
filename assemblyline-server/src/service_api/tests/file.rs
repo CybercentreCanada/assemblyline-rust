@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use assemblyline_models::datastore::File;
+use bytes::Bytes;
 use rand::thread_rng;
 
 use crate::common::sha256_data;
@@ -25,7 +26,7 @@ fn headers() -> http::HeaderMap {
 
 async fn setup_file(core: &Arc<Core>, body: &[u8]) -> String {
     let sha = sha256_data(body);
-    core.filestore.put(&sha, body).await.unwrap();
+    core.filestore.put(&sha, &Bytes::copy_from_slice(body)).await.unwrap();
 
     core.datastore.file.save(&sha, &File::gen_for_sample(body, &mut thread_rng()), None, None).await.unwrap();
     sha
