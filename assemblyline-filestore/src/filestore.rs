@@ -37,15 +37,21 @@ impl FileStore {
     async fn create_transport(address: &str, connection_attempts: Option<usize>) -> Result<Box<dyn Transport>> {
         let url: url::Url = address.parse()?;
 
-        // base = parsed.path or '/'
-        // host = parsed.hostname
-        // if host == ".":
-        //     base = "%s%s" % (host, base)
-        // port = parsed.port
-        // if parsed.password:
-        //     password = unquote(parsed.password)
-        // else:
-        //     password = ''
+        let mut base = match url.path() {
+            "" => "/",
+            other => other,
+        }.to_string();
+
+        let host = url.host_str();
+        if host == Some(".") {
+            base = format!(".{base}");
+        }
+        let port = url.port();
+
+        let password = url.password().map(|password|{
+            percent_encoding::percent_decode_str(password).decode_utf8_lossy().to_string()
+        });
+
         // user = parsed.username or ''
     
 
@@ -63,7 +69,7 @@ impl FileStore {
 
                 // t = TransportLocal(base=base, **extras)
 
-                let path = url.path().parse()?;
+                let path = base.parse()?;
                 Ok(Box::new(LocalTransport::new(path)))
             }
             "azure" => {
@@ -73,9 +79,9 @@ impl FileStore {
                     match name.as_ref() {
                         "allow_directory_access" => parameters.allow_directory_access = read_bool(&value), 
                         "use_default_credentials" => parameters.use_default_credentials = read_bool(&value),
+                        "emulator" => parameters.emulator = read_bool(&value),
                         "access_key" => parameters.access_key = value.to_string(), 
                         "tenant_id" => parameters.tenant_id = value.to_string(), 
-                        "emulator" => parameters.emulator = read_bool(&value),
                         "client_id" => parameters.client_id = value.to_string(), 
                         "client_secret" => parameters.client_secret = value.to_string(),
                         _ => {}
@@ -89,9 +95,29 @@ impl FileStore {
                 };
                 let base = url.path().to_owned();
 
-                println!("host/base: {host}  {base}");
-
                 Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts).await?))
+            }
+            "s3" => {
+                use crate::transport::s3::{S3Parameters, TransportS3};
+                let mut parameters = S3Parameters::default();
+                for (name, value) in url.query_pairs() {
+                    match name.as_ref() {
+                        "use_ssl" => parameters.use_ssl = read_bool(&value), 
+                        "verify" => parameters.verify = read_bool(&value),
+                        "boto_defaults" => parameters.boto_defaults = read_bool(&value),
+                        "aws_region" => parameters.aws_region = Some(value.to_string()), 
+                        "s3_bucket" => parameters.s3_bucket = value.to_string(), 
+                        _ => {}
+                    }
+                }
+        
+                // If user/password not specified, access might be dictated by IAM roles
+                let user = match url.username() {
+                    "" => None,
+                    value => Some(value.to_owned())
+                };
+        
+                Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters).await?))
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());

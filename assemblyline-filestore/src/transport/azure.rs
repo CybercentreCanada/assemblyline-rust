@@ -25,12 +25,11 @@
 // """
 
 use std::borrow::Cow;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use azure_core::auth::TokenCredential;
 use azure_identity::DefaultAzureCredentialBuilder;
@@ -100,9 +99,6 @@ impl TransportAzure {
             None => (base.trim_matches('/'), None)
         };
 
-        println!("{host}");
-        println!("{blob_container}");
-        println!("{base_path:?}");
         let host = host.to_lowercase();
 
         let account = match host.strip_suffix(".blob.core.windows.net") {
@@ -137,8 +133,6 @@ impl TransportAzure {
             } else {
                 StorageCredentials::anonymous()
             };
-
-            println!("{credentials:?}");
 
             // open clients
             let service_client = BlobServiceClient::builder(account, credentials).blob_service_client();
@@ -276,25 +270,25 @@ impl Transport for TransportAzure {
         // })
     }
 
-    async fn download(&self, name: &str, dest: &Path) -> Result<()> {
-        // create dst_path if it doesn't exist
-        if let Some(parent) = dest.parent() {
-            if !tokio::fs::try_exists(parent).await.context("download::try_exists")? {
-                tokio::fs::create_dir_all(parent).await.context("download::create_dir_all")?;
-            }
-        }
+    // async fn download(&self, name: &str, dest: &Path) -> Result<()> {
+    //     // create dst_path if it doesn't exist
+    //     if let Some(parent) = dest.parent() {
+    //         if !tokio::fs::try_exists(parent).await.context("download::try_exists")? {
+    //             tokio::fs::create_dir_all(parent).await.context("download::create_dir_all")?;
+    //         }
+    //     }
 
-        // download the key from azure
-        let (_, mut stream) = self.stream(name).await.context("download::stream")?;
-        let dest = dest.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let mut file = std::fs::File::options().write(true).truncate(true).create(true).open(dest)?;
-            while let Some(data) = stream.blocking_recv() {
-                file.write_all(&data?)?;
-            }
-            return anyhow::Ok(())
-        }).await?
-    }
+    //     // download the key from azure
+    //     let (_, mut stream) = self.stream(name).await.context("download::stream")?;
+    //     let dest = dest.to_owned();
+    //     tokio::task::spawn_blocking(move || {
+    //         let mut file = std::fs::File::options().write(true).truncate(true).create(true).open(dest)?;
+    //         while let Some(data) = stream.blocking_recv() {
+    //             file.write_all(&data?)?;
+    //         }
+    //         return anyhow::Ok(())
+    //     }).await?
+    // }
 
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let key = self.normalize(name);
@@ -431,14 +425,16 @@ macro_rules! retry {
                 }
 
                 let ret_val = $body;
-
-                if retries > 0 {
-                    log::info!("Reconnected to Azure transport!")
-                }
                 retries += 1;
 
                 match ret_val {
-                    Ok(value) => break Ok(value),
+                    Ok(value) => {
+                        if retries > 1 {
+                            log::info!("Reconnected to Azure transport!")
+                        }
+
+                        break Ok(value)
+                    },
                     Err(err) => {
                         if matches!(err.kind(), azure_core::error::ErrorKind::Io) {
                             log::warn!("Filestore IO error: {err:?}");
@@ -466,44 +462,3 @@ macro_rules! retry {
 }
 pub (crate) use retry;
 
-// macro_rules! with_retries {
-//     ($client:ident, $func:ident, $connection_attempts: expr) => {
-//         with_retries!($client, $func, $connection_attempts, )
-//     };
-
-//     ($client:ident, $func:ident, $connection_attempts: expr, $($args:expr),*) => {
-//         {
-//             let mut retries = 0;
-//             loop {
-//                 if let Some(limit) = $connection_attempts {
-//                     if retries > limit {
-//                         break Err(ConnectionError)
-//                     }
-//                 }
-
-//                 let ret_val = $client.$func($($args),*).await;
-
-//                 if retries > 0 {
-//                     log::info!("Reconnected to Azure transport!")
-//                 }
-
-//                 match ret_val {
-//                     Ok(value) => break Ok(value),
-//                     Err(err) => {
-
-//                         // except (ServiceRequestError, DecodeError, ResourceExistsError, ResourceNotFoundError,
-//                         //     ClientAuthenticationError, ResourceModifiedError, ResourceNotModifiedError,
-//                         //     TooManyRedirectsError, ODataV4Error):
-//                         //     // These errors will be wrapped by TransportException
-//                         //     raise
-    
-//                         log::warn!("No connection to Azure transport, retrying... [{err:?}]");
-//                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-//                         retries += 1;    
-//                     }
-//                 }
-//             }
-//         }
-//     };
-// }
-// pub (crate) use with_retries;

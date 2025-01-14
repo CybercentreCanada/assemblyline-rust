@@ -14,6 +14,7 @@ bytes = "1.9"
 safe-path = "0.1"
 log = "0.4"
 url = "2.5"
+percent-encoding = "2.3"
 
 # Error handling utilities
 anyhow = "1.0"
@@ -24,6 +25,18 @@ azure_core = { version = "0.21", features = ["tokio-fs"]}
 azure_identity = "0.21"
 azure_storage = "0.21"
 azure_storage_blobs = "0.21"
+
+# Amazon cloud service libraries
+aws-config = "1.5"
+aws-sdk-s3 = "1.68"
+aws-types = "1.3"
+aws-smithy-runtime = { version = "1.5", features = [ "tls-rustls" ] }
+# aws-smithy-runtime-api = "1.7"
+
+# Http client used internally to AWS, version must match one used by above crates
+hyper-rustls = { version = "0.24", features = ["http2", "rustls-native-certs"] }
+rustls = { version = "0.21.8", features = ["dangerous_configuration"] }
+
 
 [dev-dependencies]
 tempfile = "3.15"

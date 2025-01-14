@@ -182,20 +182,19 @@ async fn test_file() {
     common_actions(fs).await
 }
 
-// def test_s3():
-//     """
-//     Test S3 FileStore using Minio by pushing and fetching back content from it.
-//     """
-//     content = b"THIS IS A MINIO TEST"
+/// Test S3 FileStore using Minio by pushing and fetching back content from it.
+#[tokio::test]
+async fn test_s3() {
+    let content = Bytes::copy_from_slice(b"THIS IS A MINIO TEST");
 
-//     fs = FileStore('s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000/?s3_bucket=test&use_ssl=False')
-//     assert fs.delete('al4_minio_pytest.txt') is None
-//     assert fs.put('al4_minio_pytest.txt', content) != []
-//     assert fs.exists('al4_minio_pytest.txt') != []
-//     assert fs.get('al4_minio_pytest.txt') == content
-//     assert fs.delete('al4_minio_pytest.txt') is None
-//     common_actions(fs)
-
+    let fs = FileStore::with_limit_retries("s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000/?s3_bucket=test&use_ssl=False").await.unwrap();
+    assert!(fs.delete("al4_minio_pytest.txt").await.is_ok());
+    assert!(fs.put("al4_minio_pytest.txt", &content).await.is_ok());
+    assert!(fs.exists("al4_minio_pytest.txt").await.unwrap());
+    assert_eq!(fs.get("al4_minio_pytest.txt").await.unwrap().unwrap(), content);
+    assert!(fs.delete("al4_minio_pytest.txt").await.is_ok());
+    common_actions(fs).await;
+}
 
 async fn common_actions(fs: Arc<FileStore>) {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -207,6 +206,7 @@ async fn common_actions(fs: Arc<FileStore>) {
     assert!(fs.stream("__missing_file__").await.is_err());
     assert!(fs.upload(&temp_dir.path().join("__missing_file__"), "not-to-be-created").await.is_err());
     assert!(!fs.exists("not-to-be-created").await.unwrap());
+    fs.delete("__missing_file__").await.unwrap();
 
     // Write and read file body directly
     let temp_body_a = Bytes::copy_from_slice(TEMP_BODY_A);
@@ -237,6 +237,7 @@ async fn common_actions(fs: Arc<FileStore>) {
     }
 
     assert!(fs.exists("put").await.unwrap());
+    fs.delete("put").await.unwrap();
     fs.delete("put").await.unwrap();
     assert!(!fs.exists("put").await.unwrap());
 
