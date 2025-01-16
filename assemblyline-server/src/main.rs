@@ -81,6 +81,9 @@ enum Commands {
     },
     Plumber {
 
+    },
+    ServiceAPI {
+
     }
 }
 
@@ -117,6 +120,9 @@ async fn main() -> ExitCode {
         }
         Commands::Plumber {  } => {
             crate::plumber::main(core).await
+        }
+        Commands::ServiceAPI { } => {  
+            crate::service_api::main(core).await
         }
     };
 

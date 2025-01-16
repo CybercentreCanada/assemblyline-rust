@@ -37,12 +37,13 @@ pub async fn main(core: Core) -> Result<()> {
     let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
     
     // Build the interface
+    let running = core.running.clone();
     let core = Arc::new(core);
     let app = api(core).await?;
 
     // launch the interface
     Server::new_with_acceptor(tcp)
-        .run(app)
+        .run_with_graceful_shutdown(app, running.wait_for(false), None)
         .await?;
     Ok(())
 }

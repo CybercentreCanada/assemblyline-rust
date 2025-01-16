@@ -29,6 +29,7 @@ const TASK_DELETE_CHUNK: u64 = 10000;
 pub async fn main(core: Core) -> Result<()> {
     let mut tasks = tokio::task::JoinSet::new();
     let plumber = Plumber::new(core, None, None).await?;
+    plumber.core.running.install_terminate_handler(false);
     plumber.start(&mut tasks);
     while let Some(task) = tasks.join_next().await {
         task?;

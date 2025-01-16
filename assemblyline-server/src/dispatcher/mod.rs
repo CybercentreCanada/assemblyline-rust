@@ -85,6 +85,7 @@ macro_rules! retry {
                     error!("Error in {name}: {err:?}");
                     dispatcher.core.sleep(ERROR_BACKOFF).await;
                 }
+                info!("Stopped {name} worker");
             }
         }
     };
