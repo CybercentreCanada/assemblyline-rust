@@ -437,16 +437,16 @@ async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize)
     let body = {
         let out = body.as_object_mut().unwrap();
         out.insert("salt".to_owned(), json!(thread_rng().gen::<u64>().to_string()));
-        serde_json::to_string(&body).unwrap()
+        bytes::Bytes::from(serde_json::to_string(&body).unwrap())
     };
 
     let mut hasher = sha2::Sha256::default();
-    hasher.update(body.as_bytes());
+    hasher.update(&body);
     let sha256 = Sha256::try_from(hasher.finalize().as_slice()).unwrap();
-    core.filestore.put(&sha256, body.as_bytes()).await.unwrap();
+    core.filestore.put(&sha256, &body).await.unwrap();
 
     let temporary_file = tempfile::NamedTempFile::new().unwrap();
-    tokio::fs::write(temporary_file.path(), body.as_bytes()).await.unwrap();
+    tokio::fs::write(temporary_file.path(), &body).await.unwrap();
     let fileinfo = core.identify.fileinfo(temporary_file.path().to_owned(), None, None, None).await.unwrap();
     let serde_json::Value::Object(fileinfo) = serde_json::to_value(&fileinfo).unwrap() else { panic!() };
     let expiry = Some(chrono::Utc::now() + chrono::TimeDelta::seconds(500));
@@ -669,6 +669,7 @@ async fn test_deduplication() {
 /// MARK: ingest retry
 #[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_retry() {
+    // return;
     todo!()
 //     let context = setup().await;
 //     let (sha, size) = ready_body(&context.core, json!({})).await;
@@ -732,6 +733,7 @@ async fn test_ingest_retry() {
 /// MARK: ingest timeout
 #[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_timeout() {
+    // return;
     todo!()
 //     # -------------------------------------------------------------------------------
 //     #

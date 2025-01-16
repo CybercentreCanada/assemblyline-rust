@@ -134,7 +134,7 @@ impl<'a, T: Serialize + Readable + Described<ElasticMeta> + Debug> SearchBuilder
                 Request::get_search(&self.collection.database.host, params)?
             },
             Target::Index(index) => {
-                Request::get_search_on(&self.collection.database.host, &index, params)?
+                Request::get_search_on(&self.collection.database.host, index, params)?
             },
             Target::IndexType(index) => {
                 let index = self.collection.get_joined_index(Some(*index))?;

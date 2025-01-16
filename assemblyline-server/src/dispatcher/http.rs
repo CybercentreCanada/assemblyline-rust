@@ -1,22 +1,16 @@
-use std::net::{SocketAddr};
 use std::sync::Arc;
 
-use crate::config::TLSConfig;
 use crate::dispatcher::ServiceStartMessage;
 use crate::http::TlsAcceptor;
 use crate::logging::LoggerMiddleware;
 
 use super::Dispatcher;
 
-use anyhow::{Context, Result};
 use assemblyline_models::messages::task::{ServiceError, ServiceResponse, ServiceResult};
-use assemblyline_models::{Sha256, Sid};
 use log::error;
-use poem::listener::{Acceptor, Listener, OpensslTlsConfig, TcpListener};
 use poem::web::{Data, Json};
 use poem::{get, handler, post, EndpointExt, Route, Server};
 use serde::{Serialize, Deserialize};
-use tokio::task::JoinHandle;
 
 
 /// API endpoint for starting a task
@@ -53,7 +47,7 @@ async fn handle_task_result (
 
 
 #[derive(Serialize, Deserialize)]
-enum Component {
+pub enum Component {
     Dispatcher
 }
 

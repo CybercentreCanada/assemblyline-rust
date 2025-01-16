@@ -57,7 +57,7 @@ use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::{JsonMap, Sid};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -253,7 +253,7 @@ impl DispatchClient {
         return Ok(None)
     }
 
-    async fn _request_work(&self, worker_id: &str, service_name: &str, service_version: &str,
+    async fn _request_work(&self, worker_id: &str, service_name: &str, _service_version: &str,
                       timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
     {
         // For when we repeatedly retry on bad task dequeue-ing

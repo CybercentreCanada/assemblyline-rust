@@ -498,7 +498,7 @@ pub struct Classification {
 impl Default for Classification {
     fn default() -> Self {
         Self { 
-            path: Some("/etc/assemblyline/config.yml".into()), 
+            path: Some("/etc/assemblyline/classification.yml".into()), 
             config: None,
         }
     }
@@ -669,6 +669,7 @@ pub struct RedisServer {
     /// Port of Redis instance
     pub port: u16,
     /// Which db to connect to
+    #[serde(default)]
     pub db: i64,
 }
 
@@ -1129,6 +1130,7 @@ pub enum SyslogTransport {
 
 /// Model Definition for the Logging Configuration
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Logging {
     /// What level of logging should we have?
     pub log_level: LogLevel,
@@ -1194,14 +1196,14 @@ fn default_service_stages() -> Vec<String> {
     ]
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy, PartialEq, Eq)]
 // #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum SafelistHashTypes {
     Sha1, Sha256, Md5
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Debug, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy)]
 #[strum(serialize_all = "lowercase")]
 pub enum RegistryTypes {
     Docker, 
@@ -1630,7 +1632,7 @@ impl Default for UI {
 //     'malicious': 1000
 // }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy)]
 // #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum TemporaryKeyType {

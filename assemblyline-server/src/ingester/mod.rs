@@ -198,7 +198,7 @@ macro_rules! retry {
 pub async fn main(core: Core) -> Result<()> {
     // Initialize ingester Internal state
     let ingester = Arc::new(Ingester::new(core).await?);
-    ingester.core.running.install_terminate_handler();
+    ingester.core.running.install_terminate_handler(false);
 
     // launch the assorted daemons within the ingester
     let mut components = tokio::task::JoinSet::new();

@@ -27,7 +27,7 @@ use clap::{Parser, Subcommand};
 use elastic::Elastic;
 use identify::Identify;
 use redis_objects::RedisObjects;
-use log::error;
+use log::{error, info};
 use services::ServiceHelper;
 
 use crate::logging::configure_logging;
@@ -63,6 +63,8 @@ mod tests;
 #[command(name="assemblyline")]
 #[command(bin_name="assemblyline")]
 struct Args {
+    /// Path to the assemblyline configuration file
+    #[arg(short, long)]
     config: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -89,11 +91,12 @@ async fn main() -> ExitCode {
     let args = Args::parse();
 
     // Load configuration
-    let config = load_configuration(args.config).await.expect("Could not load configuration");
+    let (config, config_path) = load_configuration(args.config).await.expect("Could not load configuration");
 
     // configure logging, the object returned here owns the log processing internals
     // and needs to be held until the program ends
     let _log_manager = configure_logging(&config).expect("Could not configure logging");
+    info!("Configuration loaded from: {config_path:?}");
 
     // Connect to all the supporting components
     let core = match Core::setup(config, "").await {
@@ -128,7 +131,7 @@ async fn main() -> ExitCode {
 }
 
 
-async fn load_configuration(path: Option<PathBuf>) -> Result<Arc<Config>> {
+async fn load_configuration(path: Option<PathBuf>) -> Result<(Arc<Config>, PathBuf)> {
     // figure out which file path to use
     let path = match path {
         Some(path) => path,
@@ -140,11 +143,11 @@ async fn load_configuration(path: Option<PathBuf>) -> Result<Arc<Config>> {
     };
 
     // load environment variables into config
-    let body = tokio::fs::read_to_string(path).await?;
+    let body = tokio::fs::read_to_string(&path).await?;
     let body = environment_template::apply_env(&body)?;
 
     // parse the configuration
-    Ok(Arc::new(serde_yaml::from_str(&body)?))
+    Ok((Arc::new(serde_yaml::from_str(&body)?), path))
 }
 
 /// Common components, connections, and utilities that every core daemon is going to end up needing
@@ -196,12 +199,18 @@ impl Core {
         let mut classification_config = config.classification.config.clone();
         if classification_config.is_none() {
             if let Some(path) = &config.classification.path {
+                info!("Loading classification config from: {path:?}");
                 classification_config = Some(tokio::fs::read_to_string(path).await?);
             }
+        } else {
+            info!("Loading classification configuration embedded in assemblyline configuration.");
         }
         let classification_config = match classification_config {
             Some(config) => serde_yaml::from_str(&config)?,
-            None => ClassificationConfig::default(),
+            None => {
+                info!("Loading hardcoded default classification configuration.");
+                ClassificationConfig::default()
+            },
         };
         let classification_parser = Arc::new(ClassificationParser::new(classification_config)?);
 
@@ -367,8 +376,14 @@ impl Flag {
         }
     }
 
-    pub fn install_terminate_handler(self: &Arc<Self>) {
-        todo!()
+    pub fn install_terminate_handler(self: &Arc<Self>, value: bool) {
+        let flag = self.clone();
+        tokio::spawn(async move {
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => flag.set(value),
+                Err(err) => error!("Error installing signal handler: {err}"),
+            }
+        });
     }
 }
 

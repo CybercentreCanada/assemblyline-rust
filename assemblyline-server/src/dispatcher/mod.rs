@@ -581,7 +581,7 @@ pub async fn main(core: Core) -> Result<()> {
 
     // Initialize Internal state
     let dispatcher = Dispatcher::new(core, tcp).await?;
-    dispatcher.finalizing.install_terminate_handler();
+    dispatcher.finalizing.install_terminate_handler(true);
 
     let mut components = tokio::task::JoinSet::new();
     dispatcher.start(&mut components);

@@ -26,15 +26,18 @@ pub (super) const DEFAULT_SORT: &str = "_id asc";
 pub (super) const PIT_KEEP_ALIVE: &str = "5m";
 pub (super) const DEFAULT_ROW_SIZE: u64 = 25;
 
+pub trait CollectionType: Serialize + DeserializeOwned + Readable + Described<ElasticMeta> { }
+impl<T: Serialize + DeserializeOwned + Readable + Described<ElasticMeta>> CollectionType for T {}
 
-pub struct Collection<T: Serialize + DeserializeOwned> {
+
+pub struct Collection<T: CollectionType> {
     pub(super) database: Arc<ElasticHelper>,
     name: String,
     archive_name: Option<String>,
     _data: PhantomData<T>,
 }
 
-impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
+impl<T: CollectionType> Collection<T> {
 
     pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String) -> Result<Self> {
         let collection = Collection {
@@ -483,7 +486,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta>> Collection<T> {
         let item_buffer_size = item_buffer_size.unwrap_or(200);
         let index_type = index_type.unwrap_or(Index::Hot);
 
-        if item_buffer_size > 2000 || item_buffer_size < 50 {
+        if !(50..2000).contains(&item_buffer_size) {
             return Err(ElasticError::fatal("Variable item_buffer_size must be between 50 and 2000."))
         }
 
@@ -997,7 +1000,7 @@ pub (super) struct PitGuard {
 
 impl PitGuard {
     async fn open(helper: Arc<ElasticHelper>, index: &str) -> Result<Self> {
-        let response = helper.make_request(&mut 0, &Request::create_pit(&helper.host, &index, PIT_KEEP_ALIVE)?).await?;
+        let response = helper.make_request(&mut 0, &Request::create_pit(&helper.host, index, PIT_KEEP_ALIVE)?).await?;
         let pit: responses::OpenPit = response.json().await?;
         Ok(Self { helper, id: pit.id })
     }
@@ -1026,7 +1029,7 @@ impl Drop for PitGuard {
     }
 }
 
-pub struct ScrollCursor<'a, T: Serialize + DeserializeOwned, RT> {
+pub struct ScrollCursor<'a, T: CollectionType, RT> {
     collection: &'a Collection<T>,
     pit: PitGuard,
     batch_size: i64,
@@ -1041,7 +1044,7 @@ pub struct ScrollCursor<'a, T: Serialize + DeserializeOwned, RT> {
     finished: bool,
 }
 
-impl<'a, T: Serialize + DeserializeOwned + Readable + Described<ElasticMeta>, RT: Debug + Readable> ScrollCursor<'a, T, RT> {
+impl<'a, T: CollectionType, RT: Debug + Readable> ScrollCursor<'a, T, RT> {
 
     async fn new(
         collection: &'a Collection<T>,

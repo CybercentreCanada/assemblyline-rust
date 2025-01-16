@@ -1,0 +1,14 @@
+logging:
+  log_level: DEBUG
+  log_as_json: false
+classification:
+  path: null
+core:
+  redis:
+    nonpersistent:
+      host: localhost
+      port: 6379
+    persistent:
+      host: localhost
+      port: 6379
+    

@@ -94,7 +94,7 @@ impl HeuristicHandler {
     pub fn service_heuristic_to_result_heuristic(&self, 
         srv_heuristic: ServiceHeuristic,
         heuristics: Arc<Mutex<HashMap<String, DatastoreHeuristic>>>, 
-        zerioize_on_sig_safe: bool // =True
+        // zerioize_on_sig_safe: bool // =True
     ) -> Result<(ResultHeuristic, Vec<(String, String)>)> {
         // let heur_id = srv_heuristic.heur_id;
         // let attack_ids = srv_heuristic.attack_ids;
@@ -116,7 +116,6 @@ impl HeuristicHandler {
 
         let attack = load_attack_map()?;
         let attack_map = &attack.attack_map;
-        let revoke_map = &attack.revoke_map;
         let software_map = &attack.software_map;
         let group_map = &attack.group_map;
 

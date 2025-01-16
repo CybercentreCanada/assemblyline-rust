@@ -89,8 +89,8 @@ fn atom(input: &str) -> IResult<&str, Query> {
 fn term(input: &str) -> IResult<&str, Query> {
     // println!("term: {input}");
     alt((
-        map(string_query, |row|Query::MatchAny(row)),
-        map(pattern_term, |row|Query::RegexAny(row)),
+        map(string_query, Query::MatchAny),
+        map(pattern_term, Query::RegexAny),
     ))(input)
 }
 
@@ -103,8 +103,8 @@ fn number_term(input: &str) -> IResult<&str, FieldQuery> {
 fn field_term(input: &str) -> IResult<&str, FieldQuery> {
     // println!("field_term: {input}");
     alt((
-        map(string_query, |query|FieldQuery::Match(query)),
-        map(pattern_term, |query|FieldQuery::Regex(query)),
+        map(string_query, FieldQuery::Match),
+        map(pattern_term, FieldQuery::Regex),
     ))(input)
 }
 fn string_query(input: &str) -> IResult<&str, StringQuery> {
@@ -123,10 +123,7 @@ fn prefix_operator(input: &str) -> IResult<&str, PrefixOperator> {
 //              | "\\?" | "\\:" | "\\\\" | "*" | "?" | "_" | "-" | DIGIT | LETTER)+
 // (escaped (multi character | single character)) | special chars | alphanum
 fn is_special(value: char) -> bool {
-    match value {
-        '_' | '-' => true,
-        _ => false
-    }
+    matches!(value, '_' | '-')
 }
 fn simple_term(input: &str) -> IResult<&str, String> {
     // println!("simple_term: {input}");

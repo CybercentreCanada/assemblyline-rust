@@ -646,14 +646,14 @@ impl TaskingClient {
         // let mut section_tags = vec![];
         let mut section_heuristics = HashMap::new();
         for (index, mut section) in result.result.sections.into_iter().enumerate() {
-            let zeroize_on_sig_safe = section.zeroize_on_sig_safe;
+            // let zeroize_on_sig_safe = section.zeroize_on_sig_safe;
             let mut tags = flatten_tags(section.tags, None);
             section.tags = Default::default();
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
                 heuristic.heur_id = heur_id.clone();
 
-                match self.heuristic_handler.service_heuristic_to_result_heuristic(heuristic, self.heuristics.clone(), zeroize_on_sig_safe) {
+                match self.heuristic_handler.service_heuristic_to_result_heuristic(heuristic, self.heuristics.clone()) {
                      Ok((heuristic, new_tags)) => {
                         total_score += heuristic.score;
                         section_heuristics.insert(index, heuristic);
