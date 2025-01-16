@@ -7,7 +7,7 @@ use crate::logging::LoggerMiddleware;
 use super::Ingester;
 
 use anyhow::{Context, Result};
-use log::error;
+use log::{error, info};
 use poem::listener::{Listener, OpensslTlsConfig, TcpListener};
 use poem::web::{Data, Json};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
@@ -37,7 +37,7 @@ async fn _start(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, inge
     let app = Route::new()
         .at("/alive", get(get_status))
         .at("/ingest", post(start_ingest))
-        .data(ingester)
+        .data(ingester.clone())
         .with(LoggerMiddleware);
 
     let listener = TcpListener::bind(bind_address);
@@ -52,8 +52,9 @@ async fn _start(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, inge
     let listener = listener.openssl_tls(tls_config);
 
     Server::new(listener)
-        .run(app)
+        .run_with_graceful_shutdown(app, ingester.core.running.wait_for(false), None)
         .await.context("Error in server runtime.")?;
+    info!("HTTP interface stopped");
     Ok(())
 }
 

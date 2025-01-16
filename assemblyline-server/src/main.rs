@@ -380,7 +380,10 @@ impl Flag {
         let flag = self.clone();
         tokio::spawn(async move {
             match tokio::signal::ctrl_c().await {
-                Ok(()) => flag.set(value),
+                Ok(()) => {
+                    info!("Termination signal called");
+                    flag.set(value);
+                },
                 Err(err) => error!("Error installing signal handler: {err}"),
             }
         });

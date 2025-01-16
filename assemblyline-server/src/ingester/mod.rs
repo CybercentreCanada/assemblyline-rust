@@ -189,7 +189,8 @@ macro_rules! retry {
                 while let Err(err) = ingester.clone().$method().await {
                     error!("Error in {name}: {err}");
                     ingester.core.sleep(ERROR_BACKOFF).await;
-                }        
+                }
+                info!("{name} worker stopped");
             }
         }
     };

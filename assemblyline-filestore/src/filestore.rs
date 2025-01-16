@@ -176,21 +176,20 @@ impl FileStore {
     /// Download a blob and write it to a local file.
     /// If the file does not exist it will be created. If it does exist it will be replaced.
     pub async fn download(&self, name: &str, path: &Path) -> Result<()> {
-        let mut last_error = None;
+        let mut errors = vec![];
         for transport in &self.transports {
             match transport.download(name, path).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
-                    warn!("Could not download file: [{name}] from {transport:?}");
-                    last_error = Some(err);
+                    errors.push(format!("Could not download file: [{name}] from {transport:?}: {err}"));
                     continue
                 },
             }
         }
-        match last_error {
-            Some(error) => Err(error).context("All transports failed to fetch"),
-            None => bail!("All transports failed to fetch [{name}]")
+        if errors.is_empty() {
+            bail!("All transports failed to fetch [{name}]")
         }
+        Err(anyhow::anyhow!(errors.join("\n")).context("All transports failed to fetch"))
     }
 
     /// Upload a local file as a named blob.
