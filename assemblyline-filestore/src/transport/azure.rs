@@ -124,7 +124,8 @@ impl TransportAzure {
                     credentials.into()
                 }
             } else if !access_key.is_empty() {
-                StorageCredentials::access_key(client_id, access_key)
+                let account = if client_id.is_empty() { account } else { &client_id };
+                StorageCredentials::access_key(account, access_key)
             } else if !tenant_id.is_empty() && !client_id.is_empty() && !client_secret.is_empty() {
                 todo!()
                 // self.credential = ClientSecretCredential(tenant_id=tenant_id,
