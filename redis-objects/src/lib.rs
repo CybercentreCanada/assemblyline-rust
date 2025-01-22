@@ -53,6 +53,21 @@ impl RedisObjects {
         })
     }
    
+    pub fn open_host_native_tls(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
+        Self::open(redis::ConnectionInfo{
+            addr: redis::ConnectionAddr::TcpTls { 
+                host: host.to_string(), 
+                port, 
+                insecure: false, 
+                tls_params: None,
+            },
+            redis: redis::RedisConnectionInfo {
+                db,
+                ..Default::default()
+            },
+        })
+    }
+
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");

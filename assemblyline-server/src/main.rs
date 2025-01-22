@@ -17,9 +17,9 @@
 
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
-use assemblyline_markings::config::ClassificationConfig;
+use assemblyline_markings::config::{ready_classification, ClassificationConfig};
 use assemblyline_filestore::FileStore;
 use assemblyline_models::config::Config;
 use cachestore::CacheStore;
@@ -67,6 +67,10 @@ struct Args {
     #[arg(short, long)]
     config: Option<PathBuf>,
 
+    /// Try to secure outgoing connections
+    #[arg(short, long)]
+    secure_connections: bool,
+
     #[command(subcommand)]
     pub command: Commands
 }
@@ -102,10 +106,10 @@ async fn main() -> ExitCode {
     info!("Configuration loaded from: {config_path:?}");
 
     // Connect to all the supporting components
-    let core = match Core::setup(config, "").await {
+    let core = match Core::setup(config, "", args.secure_connections).await {
         Ok(core) => core,
         Err(err) => {
-            error!("Startup error: {err}");
+            error!("Startup error: {err:?}");
             return ExitCode::FAILURE;
         }
     };
@@ -130,7 +134,7 @@ async fn main() -> ExitCode {
     match result {
         Ok(_) => ExitCode::SUCCESS,
         Err(err) => {
-            error!("{err}");
+            error!("Module error: {err:?}");
             return ExitCode::FAILURE;
         },
     }
@@ -179,27 +183,41 @@ struct Core {
 
 impl Core {
     /// Initialize connections to resources that everything uses
-    pub async fn setup(config: Arc<Config>, elastic_prefix: &str) -> Result<Self> {
+    pub async fn setup(config: Arc<Config>, elastic_prefix: &str, secure: bool) -> Result<Self> {
         // connect to redis one
-        let redis_persistant = RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?;
+        let redis_persistant = if secure {
+            RedisObjects::open_host_native_tls(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?            
+        } else {
+            RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?
+        };
 
         // connect to redis two
-        let redis_volatile = RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?;
+        let redis_volatile = if secure { 
+            RedisObjects::open_host_native_tls(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?
+        } else {
+            RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?
+        };
 
         // connect to redis three
-        let redis_metrics = RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?;
+        let redis_metrics = if secure {
+            RedisObjects::open_host_native_tls(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?
+        } else {
+            RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?
+        };
 
         // connect to elastic
-        // TODO Fill in ca parameter
-        let datastore = Elastic::connect(&config.datastore.hosts[0], false, None, false, elastic_prefix).await?;
+        let datastore_ca = get_datastore_ca().await?;
+        let datastore_ca = datastore_ca.as_ref().map(|val|&val[..]);
+        let datastore_verify = get_datastore_verify()?;
+        let datastore = Elastic::connect(&config.datastore.hosts[0], false, datastore_ca, !datastore_verify, elastic_prefix).await?;
 
         // connect to filestore
-        let filestore = FileStore::open(&config.filestore.storage).await?;
+        let filestore = FileStore::open(&config.filestore.storage).await.context("initializing filestore")?;
 
         //
-        let file_cache = FileStore::open(&config.filestore.cache).await?;
-        let cachestore = CacheStore::new("system".to_owned(), datastore.clone(), file_cache)?;
-        let identify = Identify::new(Some(cachestore), redis_volatile.clone()).await?;
+        let file_cache = FileStore::open(&config.filestore.cache).await.context("initializing cache filestore")?;
+        let cachestore = CacheStore::new("system".to_owned(), datastore.clone(), file_cache).context("initializing cachestore")?;
+        let identify = Identify::new(Some(cachestore), redis_volatile.clone()).await.context("initializing identify")?;
 
         // load classification from given config blob or file
         let mut classification_config = config.classification.config.clone();
@@ -212,7 +230,7 @@ impl Core {
             info!("Loading classification configuration embedded in assemblyline configuration.");
         }
         let classification_config = match classification_config {
-            Some(config) => serde_yaml::from_str(&config)?,
+            Some(config) => ready_classification(Some(&config))?,
             None => {
                 info!("Loading hardcoded default classification configuration.");
                 ClassificationConfig::default()
@@ -220,9 +238,12 @@ impl Core {
         };
         let classification_parser = Arc::new(ClassificationParser::new(classification_config)?);
 
+        info!("Start service helper");
+        let services = ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), &config.services).await?;
+
         Ok(Core {
             // start a daemon that keeps an up-to-date local cache of service info
-            services: ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), &config.services).await?,
+            services,
             config,
             datastore,
             redis_persistant,
@@ -296,7 +317,7 @@ impl Core {
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
         let prefix = rand::thread_rng().r#gen::<u128>().to_string();
-        let core = Self::setup(Arc::new(config), &prefix).await.unwrap();
+        let core = Self::setup(Arc::new(config), &prefix, false).await.unwrap();
         let elastic = core.datastore.clone();
         elastic.apply_test_settings().await.unwrap();
         let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone() };
@@ -328,6 +349,43 @@ impl Core {
         self.running.read()
     }
 }
+
+const DEFAULT_DATASTORE_ROOT_CA_PATH: &str = "/etc/assemblyline/ssl/al_root-ca.crt";
+
+async fn get_datastore_ca() -> Result<Option<Vec<u8>>> {
+    let path = match std::env::var("DATASTORE_ROOT_CA_PATH") {
+        Ok(path) => path,
+        Err(std::env::VarError::NotPresent) => {
+            if tokio::fs::try_exists(&DEFAULT_DATASTORE_ROOT_CA_PATH).await? {
+                DEFAULT_DATASTORE_ROOT_CA_PATH.to_string()
+            } else {
+                return Ok(None)
+            }
+        },
+        Err(err) => return Err(err.into())
+    };
+
+    Ok(Some(tokio::fs::read(path).await?))
+}
+
+fn get_datastore_verify() -> Result<bool> {
+    match std::env::var("DATASTORE_VERIFY_CERTS") {
+        Ok(value) => Ok(value.to_lowercase() == "true"),
+        Err(std::env::VarError::NotPresent) => Ok(true),
+        Err(err) => Err(err.into())
+    }
+}
+
+
+// async fn get_redis_cert(kind: &str) -> Result<Option<Vec<u8>>> {
+//     let path = match std::env::var(format!("REDIS_{name}_CERT_PATH")) {
+//         Ok(path) => path,
+//         Err(std::env::VarError::NotPresent) => return Ok(None),
+//         Err(err) => return Err(err.into())
+//     };
+
+//     Ok(Some(tokio::fs::read(path).await?))
+// }
 
 
 /// While this struct is held prevent temporary core resources from being collected
@@ -382,10 +440,12 @@ impl Flag {
         }
     }
 
-    pub fn install_terminate_handler(self: &Arc<Self>, value: bool) {
+    pub fn install_terminate_handler(self: &Arc<Self>, value: bool) -> Result<()> {
+        use tokio::signal::{self, unix::SignalKind};
+
         let flag = self.clone();
         tokio::spawn(async move {
-            match tokio::signal::ctrl_c().await {
+            match signal::ctrl_c().await {
                 Ok(()) => {
                     info!("Termination signal called");
                     flag.set(value);
@@ -393,6 +453,15 @@ impl Flag {
                 Err(err) => error!("Error installing signal handler: {err}"),
             }
         });
+
+        let flag = self.clone();
+        let mut stream = signal::unix::signal(SignalKind::terminate())?;
+        tokio::spawn(async move {
+            stream.recv().await;
+            info!("Termination signal called");
+            flag.set(value);
+        });
+        Ok(())
     }
 }
 

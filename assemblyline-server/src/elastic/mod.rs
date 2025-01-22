@@ -76,15 +76,23 @@ const KEEP_ALIVE: &str = "5m";
 
 
 fn strip_nulls(d: serde_json::Value) -> serde_json::Value {
-    if let serde_json::Value::Object(d) = d {
-        let mut out = JsonMap::new();
-        for (key, value) in d {
-            if value.is_null() { continue }
-            out.insert(key, strip_nulls(value));
-        }
-        json!(out)
-    } else {
-        d
+    match d {
+        serde_json::Value::Array(vec) => {
+            let mut out = vec![];
+            for item in vec {
+                out.push(strip_nulls(item));
+            }
+            json!(out)
+        },
+        serde_json::Value::Object(d) => {
+            let mut out = JsonMap::new();
+            for (key, value) in d {
+                if value.is_null() { continue }
+                out.insert(key, strip_nulls(value));
+            }
+            json!(out)    
+        },
+        value => value
     }
 }
 
@@ -625,17 +633,19 @@ pub struct ElasticHelper {
 }
 
 impl ElasticHelper {
-    async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool) -> Result<Self> {
+    async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool) -> Result<Self> {
         let host: url::Url = url.parse()?;
         let mut builder = reqwest::Client::builder()
             .timeout(get_transport_timeout());
 
         if let Some(ca_cert) = ca_cert {
-            let cert = reqwest::Certificate::from_pem(ca_cert.as_bytes()).map_err(ElasticError::fatal)?;
+            info!("Datastore connecting with a configured CA certificate");
+            let cert = reqwest::Certificate::from_pem(ca_cert).map_err(ElasticError::fatal)?;
             builder = builder.add_root_certificate(cert);
         }
 
         if connect_unsafe {
+            info!("Datastore connecting without certificate verification");
             builder = builder.danger_accept_invalid_certs(true);
         }
 
@@ -1094,7 +1104,7 @@ pub struct Elastic {
 }
 
 impl Elastic {
-    pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&str>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
+    pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
         let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
         Self::setup(helper, prefix).await
     }
@@ -1312,7 +1322,8 @@ impl Elastic {
                     Some(&["config"]), 
                     None
                 );
-                services.push(serde_json::from_value(data)?);
+                let error_string = format!("Could not convert json into service: {data}");
+                services.push(serde_json::from_value(data).map_err(ElasticError::from).context(&error_string)?);
             }
         }
 

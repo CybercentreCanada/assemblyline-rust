@@ -14,7 +14,10 @@ bytes = "1.9"
 safe-path = "0.1"
 log = "0.4"
 url = "2.5"
+
+# Encoding tools
 percent-encoding = "2.3"
+# base64 = "0.22"
 
 # Error handling utilities
 anyhow = "1.0"

@@ -15,7 +15,7 @@ use std::time::Duration;
 use assemblyline_models::messages::task::Task;
 use log::debug;
 use poem::http::{HeaderMap, StatusCode};
-use poem::{get, handler, Endpoint, EndpointExt, Response, Route};
+use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
 use poem::web::{Data, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -52,7 +52,7 @@ async fn get_task(
     tasking: Data<&Arc<TaskingClient>>,
     headers: &HeaderMap,
     Data(client_info): Data<&ClientInfo>, 
-) -> Response {
+) -> Result<Response> {
     let ClientInfo {
         service_name,
         service_version,
@@ -64,7 +64,7 @@ async fn get_task(
     let timeout_string = require_header!(headers, "timeout", "30");
     let timeout = match timeout_string.parse() {
         Ok(timeout) => Duration::from_secs_f64(timeout),
-        Err(_) => return make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse [{timeout_string}] as number"))
+        Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse [{timeout_string}] as number")))
     };
 
     let status_expiry = (chrono::Utc::now() + timeout).timestamp();
@@ -91,21 +91,21 @@ async fn get_task(
         match result {
             Ok((task, retry)) => {
                 if let Some(task) = task {
-                    return make_api_response(json!({"task": task}))
+                    return Ok(make_api_response(json!({"task": task})))
                 } else if !retry {
-                    return make_api_response(json!({"task": false}))
+                    return Ok(make_api_response(json!({"task": false})))
                 }
             },
             Err(err) => if err.downcast_ref::<ServiceMissing>().is_some() {
-                return make_api_error(StatusCode::NOT_FOUND, &err.to_string(), json!({}))
+                return Err(make_api_error(StatusCode::NOT_FOUND, &err.to_string(), json!({})))
             } else {
-                return make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({}))
+                return Err(make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({})))
             }
         }
     }
 
     // We've been processing cache hit for the length of the timeout... bailing out!
-    return make_api_response(json!({"task": false}))
+    return Ok(make_api_response(json!({"task": false})))
 }
 
 /// Header:
@@ -127,11 +127,11 @@ async fn task_finished(
     Data(client_info): Data<&ClientInfo>, 
     tasking: Data<&Arc<TaskingClient>>,
     Json(body): Json<FinishedBody>,
-) -> Response {
+) -> Result<Response> {
     let service_name = &client_info.service_name;
     match tasking.task_finished(body, &client_info.client_id, service_name).await {
-        Ok(response) => make_api_response(response),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}"))
+        Ok(response) => Ok(make_api_response(response)),
+        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}")))
     }
 }
 

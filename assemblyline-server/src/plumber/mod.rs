@@ -23,14 +23,16 @@ use crate::dispatcher::client::DispatchClient;
 use crate::elastic::Elastic;
 use crate::{Core, Flag};
 
+mod http;
+
 const DAY: TimeDelta = TimeDelta::days(1);
 const TASK_DELETE_CHUNK: u64 = 10000;
 
 pub async fn main(core: Core) -> Result<()> {
     let mut tasks = tokio::task::JoinSet::new();
     let plumber = Plumber::new(core, None, None).await?;
-    plumber.core.running.install_terminate_handler(false);
-    plumber.start(&mut tasks);
+    plumber.core.running.install_terminate_handler(false)?;
+    plumber.start(&mut tasks).await?;
     while let Some(task) = tasks.join_next().await {
         task?;
     }
@@ -62,7 +64,12 @@ impl Plumber {
         }))
     }
 
-    pub fn start(self: &Arc<Self>, pool: &mut tokio::task::JoinSet<()>) {
+    pub async fn start(self: &Arc<Self>, pool: &mut tokio::task::JoinSet<()>) -> Result<()> {
+        // Launch the http interface
+        let bind_address = crate::config::load_bind_address()?;
+        let tls_config = crate::config::TLSConfig::load().await?;
+        pool.spawn(http::start(bind_address, tls_config, self.clone()));
+
         // Start a task cleanup thread
         let this = self.clone();
         pool.spawn(async move {
@@ -86,9 +93,11 @@ impl Plumber {
                 error!("Error in service queue cleanup: {err}");
             }
         });
+        Ok(())
     }
 
     async fn service_queue_plumbing(self: &Arc<Self>) -> Result<()> {
+        info!("Starting service queue plumbing.");
         // Get an initial list of all the service queues
         let mut service_queues: HashMap<String, Option<Service>> = Default::default();
         for queue_name in self.core.redis_volatile.keys(&service_queue_name("*")).await? {
@@ -101,6 +110,7 @@ impl Plumber {
         let service_stage_hash = self.core.services.get_service_stage_hash().clone();
 
         while self.core.running.read() {
+            info!("Plumber service queue sweep");
             // Reset the status of the service queues
             for row in service_queues.values_mut() {
                 *row = None;

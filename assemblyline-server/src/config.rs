@@ -2,6 +2,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use log::info;
 
 
 /// Information server can use to configure its tls binding
@@ -36,13 +37,14 @@ async fn load_file(direct_key: &str, path_key: &str) -> Result<Option<String>> {
     }
 
     // See if there are env variables defining a path to load certificates from
-    let path = match std::env::var(direct_key) {
+    let path = match std::env::var(path_key) {
         Ok(path) => PathBuf::from(path),
         Err(std::env::VarError::NotPresent) => return Ok(None),
         Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!("Could not parse {path_key} environment variable")
     };
 
     // Load the certificate file
+    info!("Loading {direct_key} from {path:?}");
     Ok(Some(tokio::fs::read_to_string(path).await?))
 }
 
@@ -74,6 +76,7 @@ pub fn hostname() -> Result<String> {
 
 
 pub fn generate_certificate() -> Result<poem::listener::OpensslTlsConfig> {
+    info!("Generating self signed TLS certificate");
     use openssl::{rsa::Rsa, x509::X509, pkey::PKey, asn1::{Asn1Integer, Asn1Time}, bn::BigNum};
 
     // Generate our keypair

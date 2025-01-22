@@ -29,6 +29,7 @@ use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
 
+use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
 use crate::http::TlsAcceptor;
 use crate::postprocessing::ActionWorker;
@@ -576,13 +577,13 @@ impl TemporaryFileData {
 
 pub async fn main(core: Core) -> Result<()> {
     // Bind the HTTP interface
-    let bind_address = crate::config::load_bind_address()?;
-    let tls_config = crate::config::TLSConfig::load().await?;
-    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
+    let bind_address = crate::config::load_bind_address().context("load_bind_address")?;
+    let tls_config = crate::config::TLSConfig::load().await.context("load_tls_config")?;
+    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await.context("create_tls_binding")?;
 
     // Initialize Internal state
     let dispatcher = Dispatcher::new(core, tcp).await?;
-    dispatcher.finalizing.install_terminate_handler(true);
+    dispatcher.finalizing.install_terminate_handler(true)?;
 
     let mut components = tokio::task::JoinSet::new();
     dispatcher.start(&mut components);
@@ -772,6 +773,19 @@ impl Dispatcher {
 
         // Process to protect against old dead tasks timing out
         components.spawn(retry!("Global Timeout Backstop", self, timeout_backstop));
+
+        // Daemon to report CPU usage
+        components.spawn(retry!("Metrics Reporter".to_string(), self, handle_metrics));
+    }
+
+    async fn handle_metrics(self: Arc<Self>) -> Result<()> {
+        let mut tracker = CPUTracker::new().await;
+        while self.core.is_running() {
+            let value =  tracker.read().await;
+            increment!(timer, self.counter, cpu_seconds, value);
+            self.core.sleep(Duration::from_secs(1)).await;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1169,7 +1183,7 @@ impl Dispatcher {
                 sid: Sid,
             }
 
-            impl Readable for FieldList { fn set_from_archive(&mut self, from_archive: bool) {} }
+            impl Readable for FieldList { fn set_from_archive(&mut self, _from_archive: bool) {} }
 
             // Look for unassigned submissions in the datastore if we don't have a
             // large number of outstanding things in the queue already.

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use log::{error, info, warn};
 use poem::http::{HeaderMap, StatusCode};
 use poem::web::{Data, Multipart, Path};
-use poem::{get, handler, put, Body, Endpoint, EndpointExt, Response, Route};
+use poem::{get, handler, put, Body, Endpoint, EndpointExt, Result, Response, Route};
 use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -55,21 +55,21 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// Result example:
 /// <THE FILE BINARY>
 #[handler]
-async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo>, core: Data<&Arc<Core>>) -> Response {
+async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo>, core: Data<&Arc<Core>>) -> Result<Response> {
     match core.filestore.stream(&sha256).await {
         Ok((size, stream)) => {
             let body = Body::from_bytes_stream(ReceiverStream::new(stream));
             let filename = format!("UTF-8''{}", urlencoding::encode(&safe_str(&sha256)));
-            Response::builder()
+            Ok(Response::builder()
                 .content_type("application/octet-stream")
                 .header("Content-Length", size.to_string())
                 .header("Content-Disposition", format!("attachment; filename=file.bin; filename*={filename}"))
-                .body(body)
+                .body(body))
         }, 
         Err(err) => {
             error!("[{}] {} couldn't find file {sha256} requested by service: {err}", 
                 client_info.client_id, client_info.service_name);
-            make_empty_api_error(StatusCode::NOT_FOUND, "The file was not found in the system.")
+            Err(make_empty_api_error(StatusCode::NOT_FOUND, "The file was not found in the system."))
         }
     }
 }
@@ -100,12 +100,12 @@ async fn upload_file(
     headers: &HeaderMap,
     multipart_body: Option<Multipart>,
     stream_body: Option<poem::Body>
-) -> Response {
+) -> Result<Response> {
     let sha256 = require_header!(headers, "sha256");
     let classification = require_header!(headers, "classification");
     let ttl: u32 = match require_header!(headers, "ttl").parse() {
         Ok(value) => value,
-        Err(_) => return make_empty_api_error(StatusCode::BAD_REQUEST, "Could not parse ttl header as a number")
+        Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "Could not parse ttl header as a number"))
     };
     let is_section_image = require_header!(headers, "is-section-image", "false").trim().to_ascii_lowercase() == "true";
     let is_supplementary = require_header!(headers, "is-supplementary", "false").trim().to_ascii_lowercase() == "true";
@@ -115,8 +115,8 @@ async fn upload_file(
             loop {
                 let field = match body.next_field().await {
                     Ok(Some(field)) => field,
-                    Ok(None) => return make_empty_api_error(StatusCode::BAD_REQUEST, "expected multipart with file named 'file'"),
-                    Err(err) => return make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Error reading multipart body: {err}")),
+                    Ok(None) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "expected multipart with file named 'file'")),
+                    Err(err) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Error reading multipart body: {err}"))),
                 };
 
                 if field.file_name() != Some("file") {
@@ -130,26 +130,26 @@ async fn upload_file(
         None => {
             match stream_body {
                 Some(stream) => copy_to_file(stream.into_async_read()).await,
-                None => return make_empty_api_error(StatusCode::BAD_REQUEST, "expected a file upload in body"),
+                None => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "expected a file upload in body")),
             }
         }
     };
 
     let temp_file = match temp_file {
         Ok(file) => file,
-        Err(err) => return make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not move file to temporary storage: {err}")),
+        Err(err) => return Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not move file to temporary storage: {err}"))),
     };
 
     let upload_result = tasking.upload_file(temp_file.path(), classification, ttl, is_section_image, is_supplementary, Some(sha256.to_owned())).await;
 
     if let Err(err) = upload_result {
         warn!("{} - {}: {err}", client_info.client_id, client_info.service_name);
-        return make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({"success": false}));
+        return Err(make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({"success": false})));
     }
 
     info!("{} - {}: Successfully uploaded file (SHA256: {sha256})", 
         client_info.client_id, client_info.service_name);
 
-    return make_api_response(json!({"success": true}))
+    return Ok(make_api_response(json!({"success": true})))
 }
 

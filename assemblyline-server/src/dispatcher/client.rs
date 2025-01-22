@@ -246,7 +246,7 @@ impl DispatchClient {
         while start.elapsed() < timeout {
             let remaining = timeout.saturating_sub(start.elapsed());
             let work = self._request_work(worker_id, service_name, service_version, remaining, blocking, low_priority).await?;
-            if blocking || work.is_some() {
+            if !blocking || work.is_some() {
                 return Ok(work);
             }
         }

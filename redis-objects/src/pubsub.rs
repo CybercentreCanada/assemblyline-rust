@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use futures::StreamExt;
 use log::error;
-use redis::{AsyncCommands, Msg, RedisError};
+use redis::{AsyncCommands, Msg};
 use serde::Serialize;
 use tokio::sync::mpsc;
 use serde::de::DeserializeOwned;
@@ -50,6 +50,7 @@ impl ListenerBuilder {
                 }
                 exponent = (exponent + 1.0).min(maximum);
 
+                // let connection = self.store.client.get_async_pubsub().await?;
                 let connection = match self.store.client.get_async_connection().await {
                     Ok(connection) => connection,
                     Err(connection_error) => {

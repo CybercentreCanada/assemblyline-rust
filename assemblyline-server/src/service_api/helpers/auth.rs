@@ -76,14 +76,14 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
         // Before anything else, check that the API key is set
         let apikey = match req.header("X-APIKEY") {
             Some(key) => key,
-            None => return Ok(make_empty_api_error(StatusCode::BAD_REQUEST, "missing required key X-APIKEY")),
+            None => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "missing required key X-APIKEY")),
         };
 
         if self.auth_key != apikey {
             let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
             let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
             warn!("Client [{client_id}] provided wrong api key [{apikey}] headers: {header_dump}");
-            return Ok(make_empty_api_error(StatusCode::UNAUTHORIZED, "Unauthorized access denied"));
+            return Err(make_empty_api_error(StatusCode::UNAUTHORIZED, "Unauthorized access denied"));
         }
 
         let client_info = match ClientInfo::new(&req) {
@@ -92,7 +92,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
                 let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
                 let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
                 debug!("Client [{client_id}] missing required header [{key}] headers: {header_dump}");        
-                return Ok(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("missing required key {key}")))
+                return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("missing required key {key}")))
             },
         };
         req.extensions_mut().insert(client_info);

@@ -1,9 +1,10 @@
 use std::io::Write;
 
 use anyhow::Result;
+use log::error;
 use poem::http::StatusCode;
 use poem::web::Json;
-use poem::IntoResponse;
+use poem::{Endpoint, IntoResponse, Middleware};
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -24,7 +25,7 @@ pub struct APIResponse<'a, B: Send> {
 }
 
 
-pub fn make_api_error(code: poem::http::StatusCode, err: &str, response: impl Serialize + Send) -> poem::Response {
+pub fn make_api_error(code: poem::http::StatusCode, err: &str, response: impl Serialize + Send) -> poem::error::Error {
     let mut response = Json(APIResponse {
         api_response: response,
         api_error_message: Some(err),
@@ -32,10 +33,12 @@ pub fn make_api_error(code: poem::http::StatusCode, err: &str, response: impl Se
         api_status_code: code.as_u16()
     }).into_response();
     response.set_status(code);
-    response
+    let mut error = poem::error::Error::from_response(response);
+    error.set_error_message(format!("[{code}] {err}"));
+    error
 }
 
-pub fn make_empty_api_error(code: poem::http::StatusCode, err: &str) -> poem::Response {
+pub fn make_empty_api_error(code: poem::http::StatusCode, err: &str) -> poem::error::Error {
     make_api_error(code, err, Option::<()>::None)
 }
 

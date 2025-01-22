@@ -30,6 +30,7 @@ use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Pub
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
+use crate::common::metrics::CPUTracker;
 use crate::constants::{COMPLETE_QUEUE_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL};
 use crate::postprocessing::ActionWorker;
 use crate::submit::SubmitManager;
@@ -199,7 +200,7 @@ macro_rules! retry {
 pub async fn main(core: Core) -> Result<()> {
     // Initialize ingester Internal state
     let ingester = Arc::new(Ingester::new(core).await?);
-    ingester.core.running.install_terminate_handler(false);
+    ingester.core.running.install_terminate_handler(false)?;
 
     // launch the assorted daemons within the ingester
     let mut components = tokio::task::JoinSet::new();
@@ -273,11 +274,24 @@ impl Ingester {
 
         // Launch missing handler
         components.spawn(retry!(format!("Missing Handler"), self, handle_missing));
+
+        // Daemon to report CPU usage
+        components.spawn(retry!("Metrics Reporter".to_string(), self, handle_metrics));
         Ok(())
     }
 
     pub fn clear_local_cache(&self) {
         self.cache.lock().clear();
+    }
+
+    async fn handle_metrics(self: Arc<Self>) -> Result<()> {
+        let mut tracker = CPUTracker::new().await;
+        while self.core.is_running() {
+            let value =  tracker.read().await;
+            increment!(timer, self.counter, cpu_seconds, value);
+            self.core.sleep(Duration::from_secs(1)).await;
+        }
+        Ok(())
     }
 
     async fn handle_ingest(self: Arc<Self>) -> Result<()> {

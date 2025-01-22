@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Services as ServiceConfig;
 use assemblyline_models::datastore::submission::SubmissionParams;
@@ -49,7 +49,7 @@ impl ServiceHelper {
             .listen();
 
         // Initialize the services
-        let services = datastore.list_all_services().await?;
+        let services = datastore.list_all_services().await.context("list_all_services")?;
         let inner = Arc::new(RwLock::new( ServiceInfo {
             services: services.into_iter()
                         .map(|service|(service.name.clone(), Arc::new(service)))

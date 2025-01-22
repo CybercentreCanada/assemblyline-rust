@@ -33,18 +33,45 @@ pub struct Metrics {
     /// Number of service timeouts
     pub service_timeouts: i32,
     /// CPU time
-    // pub cpu_seconds = PerformanceTimer()
+    #[serde(flatten)]
+    pub cpu_seconds: CPUSeconds,
     /// CPU count
-    pub cpu_seconds_count: i32,
+    // pub cpu_seconds_count: i32,
     /// Busy CPU time
-    // pub busy_seconds = PerformanceTimer()
-    /// Busy CPU count
-    pub busy_seconds_count: i32,
+    #[serde(flatten)]
+    pub busy_seconds: BusySeconds,
+    // pub busy_seconds_count: i32,
     /// Processed submissions waiting to be saved
     pub save_queue: i32,
     /// Errors waiting to be saved
     pub error_queue: i32,
 }
+
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub struct CPUSeconds {
+    #[serde(rename="cpu_seconds.c")]
+    pub count: i32,
+    #[serde(rename="cpu_seconds.t")]
+    pub total: f64,
+}
+
+impl CPUSeconds {
+    pub fn increment(&mut self, time: f64) {
+        self.count += 1;
+        self.total += time;
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+pub struct BusySeconds {
+    #[serde(rename="busy_seconds.c")]
+    pub count: i32,
+    #[serde(rename="busy_seconds.t")]
+    pub total: f64,
+}
+
 
 // @odm.model(description="Heartbeat Model")
 // class Heartbeat(odm.Model):

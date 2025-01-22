@@ -11,9 +11,9 @@ macro_rules! require_header {
         match $headers.get($name) {
             Some(value) => match value.to_str() {
                 Ok(value) => value,
-                Err(_) => return make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse value of header: {}", $name))
+                Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse value of header: {}", $name)))
             },
-            None => return make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Missing required header: {}", $name))
+            None => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Missing required header: {}", $name)))
         }
     }};
 
@@ -22,7 +22,7 @@ macro_rules! require_header {
         match $headers.get($name) {
             Some(value) => match value.to_str() {
                 Ok(value) => value,
-                Err(_) => return make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse value of header: {}", $name))
+                Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse value of header: {}", $name)))
             },
             None => $default
         }
@@ -30,3 +30,4 @@ macro_rules! require_header {
 }
 
 pub (crate) use require_header;
+

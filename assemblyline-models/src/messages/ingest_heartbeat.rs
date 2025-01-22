@@ -51,16 +51,49 @@ pub struct Metrics {
     pub timed_out: u32,
     /// Number of safelisted submissions
     pub whitelisted: u32,
-    // cpu_seconds = PerformanceTimer()
-    // cpu_seconds_count = odm.Integer()
-    // busy_seconds = PerformanceTimer()
-    // busy_seconds_count = odm.Integer()
+
+    /// Counter to track used cpu time
+    #[serde(flatten)]
+    pub cpu_seconds: CPUSeconds,
+
+    // /// Used on metrics output to represent part cpu_seconds by the python module.
+    // pub cpu_seconds_count: i32,
+
+    /// Depricated
+    #[serde(flatten)]
+    pub busy_seconds: BusySeconds,
+    // pub busy_seconds_count: i32,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct CPUSeconds {
+    #[serde(rename="cpu_seconds.c")]
+    pub count: i32,
+    #[serde(rename="cpu_seconds.t")]
+    pub total: f64,
+}
+
+impl CPUSeconds {
+    pub fn increment(&mut self, time: f64) {
+        self.count += 1;
+        self.total += time;
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct BusySeconds {
+    #[serde(rename="busy_seconds.c")]
+    pub count: i32,
+    #[serde(rename="busy_seconds.t")]
+    pub total: f64,
 }
 
 
 // @odm.model(description="Processing")
 // class Processing(odm.Model):
 //     inflight = odm.Integer(description="Number of inflight submissions")
+
 
 
 // @odm.model(description="Chance of Processing")

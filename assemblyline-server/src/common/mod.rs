@@ -8,6 +8,7 @@ pub mod tagging;
 pub mod odm;
 pub mod safelist_client;
 pub mod version;
+pub mod metrics;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Permission error: {0}")]

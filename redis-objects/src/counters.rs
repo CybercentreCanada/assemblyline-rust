@@ -104,6 +104,12 @@ macro_rules! increment {
     ($counter:expr, $field:ident, $value:expr) => {
         $counter.lock().$field += $value
     };
+    (timer, $counter:expr, $field:ident) => {
+        increment!(timer, $counter, $field, 0.0)
+    };
+    (timer, $counter:expr, $field:ident, $value:expr) => {
+        $counter.lock().$field.increment($value)
+    };
 }
 pub use increment;
 

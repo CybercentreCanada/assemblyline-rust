@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use poem::http::StatusCode;
 use poem::web::{Data, Path, Query};
-use poem::{get, handler, Endpoint, EndpointExt, Response, Route};
+use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
 use serde::Deserialize;
 
 use crate::common::safelist_client::SafelistClient;
@@ -47,11 +47,11 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// Result example:
 /// <Safelisting object>
 #[handler]
-async fn exists(Path(qhash): Path<String>, safelist_client: Data<&Arc<SafelistClient>>) -> Response {
+async fn exists(Path(qhash): Path<String>, safelist_client: Data<&Arc<SafelistClient>>) -> Result<Response> {
     match safelist_client.exists(&qhash).await {
-        Ok(Some(safelist)) => make_api_response(safelist),
-        Ok(None) => make_empty_api_error(StatusCode::NOT_FOUND, "The hash was not found in the safelist."),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+        Ok(Some(safelist)) => Ok(make_api_response(safelist)),
+        Ok(None) => Err(make_empty_api_error(StatusCode::NOT_FOUND, "The hash was not found in the safelist.")),
+        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string())),
     }
 }
 
@@ -82,10 +82,10 @@ async fn exists(Path(qhash): Path<String>, safelist_client: Data<&Arc<SafelistCl
 ///     }
 /// }
 #[handler]
-async fn get_safelisted_tags(safelist_client: Data<&Arc<SafelistClient>>, Query(query): Query<TagTypeQuery>) -> Response {
+async fn get_safelisted_tags(safelist_client: Data<&Arc<SafelistClient>>, Query(query): Query<TagTypeQuery>) -> Result<Response> {
     match safelist_client.get_safelisted_tags(query.tag_types.as_deref()).await {
-        Ok(response) => make_api_response(response),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+        Ok(response) => Ok(make_api_response(response)),
+        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string())),
     }
 }
 
@@ -112,9 +112,9 @@ struct TagTypeQuery {
 /// Result example:
 /// ["McAfee.Eicar", "Avira.Eicar", ...]
 #[handler]
-async fn get_safelisted_signatures(safelist_client: Data<&Arc<SafelistClient>>) -> Response {
+async fn get_safelisted_signatures(safelist_client: Data<&Arc<SafelistClient>>) -> Result<Response> {
     match safelist_client.get_safelisted_signatures().await {
-        Ok(list) => make_api_response(list),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+        Ok(list) => Ok(make_api_response(list)),
+        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string())),
     }
 }

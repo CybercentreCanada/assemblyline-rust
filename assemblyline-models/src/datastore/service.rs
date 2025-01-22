@@ -226,6 +226,7 @@ pub struct SubmissionParams {
     /// Default value (must match value in `default` field)
     pub value: serde_json::Value,
     /// List of values if `type: list`
+    #[serde(default)]
     pub list: Vec<serde_json::Value>,
     /// Should this parameter be hidden?
     #[serde(default)]

@@ -3300,6 +3300,7 @@ dependencies = [
  "sha1_smol",
  "socket2",
  "tokio",
+ "tokio-native-tls",
  "tokio-retry",
  "tokio-util",
  "url",

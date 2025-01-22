@@ -11,7 +11,7 @@ use assemblyline_models::datastore::Service;
 use assemblyline_models::JsonMap;
 use poem::http::StatusCode;
 use poem::web::{Data, Json};
-use poem::{handler, put, Endpoint, EndpointExt, Response, Route};
+use poem::{handler, put, Endpoint, EndpointExt, Result, Response, Route};
 use serde::{Deserialize, Serialize};
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
@@ -39,11 +39,11 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 ///     'service_config': < APPLIED SERVICE CONFIG >
 /// }
 #[handler]
-async fn register_service(tasking: Data<&Arc<TaskingClient>>, Json(body): Json<JsonMap>, client_info: Data<&ClientInfo>) -> Response {
+async fn register_service(tasking: Data<&Arc<TaskingClient>>, Json(body): Json<JsonMap>, client_info: Data<&ClientInfo>) -> Result<Response> {
     match tasking.register_service(body, &format!("{} - ", client_info.client_id)).await {
-        Ok(output) => make_api_response(output),
-        Err(err) if err.is_input_error() => make_empty_api_error(StatusCode::BAD_REQUEST, &err.to_string()),
-        Err(err) => make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string())
+        Ok(output) => Ok(make_api_response(output)),
+        Err(err) if err.is_input_error() => Err(make_empty_api_error(StatusCode::BAD_REQUEST, &err.to_string())),
+        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))
     }
 }
 
