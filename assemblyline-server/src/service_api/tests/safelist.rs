@@ -3,13 +3,14 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::safelist::Safelist;
 use assemblyline_models::ExpandingClassification;
 use chrono::Utc;
+use reqwest::header::HeaderMap;
 
 use crate::common::tagging::SafelistFile;
 use crate::service_api::helpers::APIResponse;
 
 use super::{setup, AUTH_KEY, random_hash};
 
-fn headers() -> http::HeaderMap {
+fn headers() -> HeaderMap {
     [
         ("Container-Id", random_hash(12)),
         ("X-APIKey", AUTH_KEY.to_owned()),

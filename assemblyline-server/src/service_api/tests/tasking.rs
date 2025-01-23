@@ -30,6 +30,7 @@ use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
+use reqwest::header::HeaderMap;
 
 use crate::http::create_tls_binding;
 use crate::service_api::helpers::APIResponse;
@@ -62,7 +63,7 @@ fn container_id() -> String {
     }).to_owned()
 }
 
-fn headers() -> http::HeaderMap {
+fn headers() -> HeaderMap {
     [
         ("Container-Id", container_id()),
         ("X-APIKey", AUTH_KEY.to_owned()),

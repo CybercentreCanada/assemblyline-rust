@@ -191,6 +191,14 @@ impl TaskingClient {
         debug!("Registring service: {:?}", service_data.get("name"));
         let mut keep_alive = true;
 
+        // Initialize the classification strings
+        if !service_data.contains_key("classification") {
+            service_data.insert("classification".to_string(), json!(self.classification_engine.unrestricted()));
+        }
+        if !service_data.contains_key("default_result_classification") {
+            service_data.insert("default_result_classification".to_string(), json!(self.classification_engine.unrestricted()));
+        }
+        
         // Get heuristics list
         let heuristics = service_data.remove("heuristics");
 
@@ -259,16 +267,31 @@ impl TaskingClient {
                 // Set heuristic id to it's position in the list for logging purposes
                 let heuristic_id = format!("#{index}");
 
-                async fn load_heuristic(plan: &mut TypedBulkPlan<Heuristic>, this: &TaskingClient, heuristic: serde_json::Value, service_name: &str) -> anyhow::Result<()> {
+                async fn load_heuristic(plan: &mut TypedBulkPlan<Heuristic>, this: &TaskingClient, mut heuristic: serde_json::Value, service_name: &str, ce: Arc<ClassificationParser>) -> anyhow::Result<()> {
                     // Attack_id field is now a list, make it a list if we receive otherwise
                     // attack_id = heuristic.get("attack_id", None)
                     // if isinstance(attack_id, str):
                     //     heuristic["attack_id"] = [attack_id]
 
-                    let mut heuristic: Heuristic = serde_json::from_value(heuristic)?;
+                    if let Some(heuristic) = heuristic.as_object_mut() {
+                        // Append service name to heuristic ID
+                        let original_id = match heuristic.get("heur_id") {
+                                Some(id) => id.to_string(),
+                            None => bail!("heur_id field is required")
+                        };
+                        let new_id = format!("{}.{original_id}", service_name.to_uppercase());
+                        heuristic.insert("heur_id".to_string(), json!(new_id));
 
-                    // Append service name to heuristic ID
-                    heuristic.heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
+                        // Set default classification
+                        if !heuristic.contains_key("classification") {
+                            ExpandingClassification::<false>::insert(&ce, heuristic, ce.unrestricted())?;
+                        }
+                
+                    } else {
+                        bail!("Heuristic data must be an object");
+                    }
+
+                    let mut heuristic: Heuristic = serde_json::from_value(heuristic)?;
 
                     let heuristic_id = heuristic.heur_id.clone();
                     if let Some((existing_heuristic_obj, _)) = this.datastore.heuristic.get_if_exists(&heuristic_id, None).await? {
@@ -279,7 +302,7 @@ impl TaskingClient {
                     anyhow::Ok(())
                 }
 
-                if let Err(e) = load_heuristic(&mut plan, self, heuristic, &service.name).await {
+                if let Err(e) = load_heuristic(&mut plan, self, heuristic, &service.name, self.classification_engine.clone()).await {
                     let msg = format!("{} has an invalid heuristic ({heuristic_id}): {e:?}", service.name);
                     error!("{log_prefix}{msg}");
                     return Err(RegisterError::BadHeuristic(msg))

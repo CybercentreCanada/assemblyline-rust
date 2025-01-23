@@ -747,8 +747,10 @@ impl Dispatcher {
 
             core,
             instance_id,
-            instance_address: format!("{}:{port}", crate::config::hostname()?),
+            instance_address: format!("{}:{port}", crate::config::address()?),
         });
+
+        info!("Dispatcher {} located at {}", disp.instance_id, disp.instance_address);
 
         tokio::spawn(http::start(tcp, disp.clone()));
         Ok(disp)

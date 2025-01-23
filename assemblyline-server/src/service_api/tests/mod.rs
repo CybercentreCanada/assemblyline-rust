@@ -4,6 +4,7 @@ use tokio::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
+use reqwest::header::HeaderMap;
 use assemblyline_models::HEXCHARS;
 use log::{error, info};
 use poem::listener::{Acceptor, TcpAcceptor};
@@ -51,7 +52,7 @@ pub async fn launch(core: Arc<Core>) -> u16 {
 
 
 
-pub async fn setup(headers: http::HeaderMap) -> (reqwest::Client, Arc<Core>, TestGuard, String) {
+pub async fn setup(headers: HeaderMap) -> (reqwest::Client, Arc<Core>, TestGuard, String) {
     std::env::set_var("SERVICE_API_KEY", AUTH_KEY);
     let (core, guard) = Core::test_setup().await;
     let core = Arc::new(core);

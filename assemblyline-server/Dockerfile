@@ -6,13 +6,40 @@ RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev
 # Copy in the source to build
 WORKDIR /usr/src/
 COPY ./Cargo.toml ./Cargo.lock ./
-COPY ./assemblyline-client/ ./assemblyline-client
-COPY ./assemblyline-filestore/ ./assemblyline-filestore
-COPY ./assemblyline-markings/ ./assemblyline-markings
-COPY ./assemblyline-models/ ./assemblyline-models
-COPY ./assemblyline-server/ ./assemblyline-server
-COPY ./environment_template/ ./environment_template
-COPY ./redis-objects/ ./redis-objects
+
+# COPY ./assemblyline-client/Cargo.toml ./assemblyline-client/Cargo.toml
+# COPY ./assemblyline-filestore/Cargo.toml ./assemblyline-filestore/Cargo.toml
+# COPY ./assemblyline-markings/Cargo.toml ./assemblyline-markings/Cargo.toml
+# COPY ./assemblyline-models/Cargo.toml ./assemblyline-models/Cargo.toml
+# COPY ./assemblyline-server/Cargo.toml ./assemblyline-server/Cargo.toml
+# COPY ./environment_template/Cargo.toml ./environment_template/Cargo.toml
+# COPY ./redis-objects/Cargo.toml ./redis-objects/Cargo.toml
+
+# RUN mkdir ./assemblyline-client/src; touch assemblyline-client/src/lib.rs
+# RUN mkdir ./assemblyline-filestore/src; touch assemblyline-filestore/src/lib.rs
+# RUN mkdir ./assemblyline-markings/src; touch assemblyline-markings/src/lib.rs
+# RUN mkdir ./assemblyline-models/src; touch assemblyline-models/src/lib.rs
+# RUN mkdir ./assemblyline-server/src; touch assemblyline-server/src/lib.rs
+# RUN mkdir ./environment_template/src; touch environment_template/src/lib.rs
+# RUN mkdir ./redis-objects/src; touch redis-objects/src/lib.rs
+
+# RUN cargo build --release --target-dir /out/
+
+# RUN rm -rf ./assemblyline-client
+# RUN rm -rf ./assemblyline-filestore
+# RUN rm -rf ./assemblyline-markings
+# RUN rm -rf ./assemblyline-models
+# RUN rm -rf ./assemblyline-server
+# RUN rm -rf ./environment_template
+# RUN rm -rf ./redis-objects
+
+COPY ./assemblyline-client ./assemblyline-client
+COPY ./assemblyline-filestore ./assemblyline-filestore
+COPY ./assemblyline-markings ./assemblyline-markings
+COPY ./assemblyline-models ./assemblyline-models
+COPY ./assemblyline-server ./assemblyline-server
+COPY ./environment_template ./environment_template
+COPY ./redis-objects ./redis-objects
 
 # Build the executable
 RUN cargo build --bin assemblyline-server --release --target-dir /out/

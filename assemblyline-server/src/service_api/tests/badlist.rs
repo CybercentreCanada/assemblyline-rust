@@ -14,7 +14,7 @@ use crate::service_api::helpers::APIResponse;
 use super::{setup, random_hash, AUTH_KEY};
 
 
-fn headers() -> http::HeaderMap {
+fn headers() -> reqwest::header::HeaderMap {
     [
         ("Container-Id", random_hash(12)),
         ("X-APIKey", AUTH_KEY.to_owned()),

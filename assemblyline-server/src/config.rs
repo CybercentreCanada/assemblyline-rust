@@ -74,6 +74,13 @@ pub fn hostname() -> Result<String> {
     }
 }
 
+pub fn address() -> Result<String> {
+    match std::env::var("IP") {
+        Ok(address) => Ok(address.to_owned()),
+        Err(std::env::VarError::NotPresent) => hostname(),
+        Err(std::env::VarError::NotUnicode(_)) => anyhow::bail!("Could not parse IP environment variable")
+    }
+}
 
 pub fn generate_certificate() -> Result<poem::listener::OpensslTlsConfig> {
     info!("Generating self signed TLS certificate");

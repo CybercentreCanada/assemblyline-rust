@@ -3,13 +3,14 @@ use std::sync::Arc;
 use assemblyline_models::datastore::File;
 use bytes::Bytes;
 use rand::thread_rng;
+use reqwest::header::HeaderMap;
 
 use crate::common::sha256_data;
 use crate::Core;
 
 use super::{setup, AUTH_KEY, random_hash};
 
-fn headers() -> http::HeaderMap {
+fn headers() -> HeaderMap {
     [
         ("Container-Id", random_hash(12)),
         ("X-APIKey", AUTH_KEY.to_owned()),

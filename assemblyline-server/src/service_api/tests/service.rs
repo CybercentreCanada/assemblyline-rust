@@ -2,7 +2,7 @@
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::ExpandingClassification;
-use http::HeaderValue;
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::service_api::helpers::APIResponse;
 use crate::service_api::tests::{build_service, empty_delta};
@@ -10,7 +10,7 @@ use crate::service_api::v1::service::RegisterResponse;
 
 use super::{setup, AUTH_KEY, random_hash};
 
-fn headers() -> http::HeaderMap {
+fn headers() -> HeaderMap {
     [
         ("Container-Id", random_hash(12)),
         ("X-APIKey", AUTH_KEY.to_owned()),
