@@ -119,7 +119,7 @@ async fn upload_file(
                     Err(err) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Error reading multipart body: {err}"))),
                 };
 
-                if field.file_name() != Some("file") {
+                if field.file_name() != Some("file") && field.name() != Some("file") {
                     continue
                 }
 

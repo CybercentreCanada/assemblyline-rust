@@ -103,13 +103,7 @@ impl File {
         File {
             archive_ts: None,
             ascii: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
-            classification: ExpandingClassification {
-                classification: "".to_string(),
-                __access_lvl__: 0,
-                __access_req__: vec![],
-                __access_grp1__: vec![],
-                __access_grp2__: vec![],
-            },
+            classification: ExpandingClassification::try_unrestricted().unwrap(),
             entropy: rng.gen_range(0.0..1.0),
             expiry_ts: None,
             is_section_image: rng.r#gen(),

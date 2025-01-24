@@ -85,8 +85,8 @@ async fn test_save_or_freshen_file() {
     let ds = init().await;
 
     let classification = assemblyline_markings::classification::sample_config();
-    let ce = assemblyline_markings::classification::ClassificationParser::new(classification).unwrap();
-
+    let ce = Arc::new(assemblyline_markings::classification::ClassificationParser::new(classification).unwrap());
+    assemblyline_models::types::classification::set_global_classification(ce.clone());
 
     // Generate random data
     let mut data: Vec<u8> = vec![]; 
@@ -115,7 +115,7 @@ async fn test_save_or_freshen_file() {
     assert_eq!(saved_file.expiry_ts, Some(expiry_create));
     assert_eq!(saved_file.seen.count, 1);
     assert_eq!(saved_file.seen.first, saved_file.seen.last);
-    assert_eq!(saved_file.classification.classification, ce.restricted());
+    assert_eq!(saved_file.classification, ce.restricted());
 
     // Freshen the file
     ds.save_or_freshen_file(&f.sha256, raw, Some(expiry_freshen), ce.unrestricted().to_owned(), &ce).await.unwrap();
@@ -128,7 +128,7 @@ async fn test_save_or_freshen_file() {
     assert_eq!(freshened_file.expiry_ts, Some(expiry_freshen));
     assert_eq!(freshened_file.seen.count, 2);
     assert!(freshened_file.seen.first < freshened_file.seen.last);
-    assert_eq!(freshened_file.classification.classification, ce.unrestricted());
+    assert_eq!(freshened_file.classification, ce.unrestricted());
 }
 
 // import hashlib

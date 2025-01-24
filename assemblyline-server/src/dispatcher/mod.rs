@@ -1771,6 +1771,8 @@ impl Dispatcher {
                     safelist_config: self.core.config.services.safelist.clone()
                 };
                 service_task.metadata.insert("dispatcher__".to_string(), serde_json::json!(self.instance_id));
+                service_task.metadata.insert("dispatcher_address__".to_string(), serde_json::json!(self.instance_address));
+                service_task.metadata.insert("task_id__".to_string(), serde_json::json!(service_task.task_id));
 
                 // Its a new task, send it to the service
                 let queue_key = service_queue.push(service_task.priority as f64, &service_task).await?;
@@ -1815,7 +1817,7 @@ impl Dispatcher {
         }
 
         // get the info from datastore
-        let filestore_info = self.core.datastore.file.get(sha256, None).await?;
+        let filestore_info = self.core.datastore.file.get(sha256, None).await.context("file.get")?;
 
         match filestore_info {
             None => {

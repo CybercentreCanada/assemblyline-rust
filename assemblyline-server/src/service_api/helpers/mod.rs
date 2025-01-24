@@ -1,10 +1,9 @@
 use std::io::Write;
 
 use anyhow::Result;
-use log::error;
 use poem::http::StatusCode;
 use poem::web::Json;
-use poem::{Endpoint, IntoResponse, Middleware};
+use poem::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 use tokio::io::{AsyncRead, AsyncReadExt};

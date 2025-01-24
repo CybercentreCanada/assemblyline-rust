@@ -689,26 +689,35 @@ impl Ingester {
             debug!("cache hit on {}", task.submission.files[0].sha256);
             // Create a submission record based on the cache hit if enabled
             if self.core.config.core.ingester.always_create_submission {
-                println!("should create submission");
-                if let Ok(Some(mut submission)) = self.core.datastore.submission.get(&previous.to_string(), None).await {
-                    println!("Create new submission: {}", task.ingest_id);
-                    // Assign the current submission as the PSID for the new submission
-                    pprevious = Some(previous);
-                    previous = task.ingest_id;
-                    task.submission.params.psid = pprevious;
+                debug!("should create submission based on {previous}");
 
-                    submission.archived = false;
-                    submission.classification = ExpandingClassification::new(task.params().classification.as_str().to_owned(), &self.core.classification_parser)?;
-                    submission.expiry_ts = Some(Utc::now() + chrono::Duration::days(task.params().ttl.into()));
-                    submission.from_archive = false;
-                    submission.metadata.clone_from(&task.submission.metadata);
-                    submission.params = task.params().clone();
-                    submission.sid = previous;
-                    submission.to_be_deleted = false;
-                    submission.times.submitted = task.ingest_time;
-                    submission.times.completed = Some(Utc::now());
-
-                    self.core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await?;
+                match self.core.datastore.submission.get(&previous.to_string(), None).await {
+                    Ok(Some(mut submission)) => {
+                        debug!("Create new submission: {}", task.ingest_id);
+                        // Assign the current submission as the PSID for the new submission
+                        pprevious = Some(previous);
+                        previous = task.ingest_id;
+                        task.submission.params.psid = pprevious;
+    
+                        submission.archived = false;
+                        submission.classification = ExpandingClassification::new(task.params().classification.as_str().to_owned(), &self.core.classification_parser)?;
+                        submission.expiry_ts = Some(Utc::now() + chrono::Duration::days(task.params().ttl.into()));
+                        submission.from_archive = false;
+                        submission.metadata.clone_from(&task.submission.metadata);
+                        submission.params = task.params().clone();
+                        submission.sid = previous;
+                        submission.to_be_deleted = false;
+                        submission.times.submitted = task.ingest_time;
+                        submission.times.completed = Some(Utc::now());
+    
+                        self.core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await?;    
+                    },
+                    Ok(None) => {
+                        debug!("filescore cache requested submission that doesn't exist {previous}");
+                    },
+                    Err(err) => {
+                        error!("filescore cache requested submission that couldn't be loaded {previous}: {err:?}");
+                    }
                 }
             }
 

@@ -210,6 +210,7 @@ pub struct ResponseBody {
     #[metadata(copyto="__text__")]
     pub service_name: String,
     /// Tool version of the service
+    #[serde(default)]
     #[metadata(copyto="__text__")]
     pub service_tool_version: Option<String>,
     /// List of supplementary files
@@ -219,9 +220,11 @@ pub struct ResponseBody {
     #[serde(default)]
     pub extracted: Vec<File>,
     /// Context about the service
+    #[serde(default)]
     #[metadata(index=false, store=false)]
     pub service_context: Option<String>,
     /// Debug info about the service
+    #[serde(default)]
     #[metadata(index=false, store=false)]
     pub service_debug_info: Option<String>,
 }
@@ -289,13 +292,7 @@ impl rand::distributions::Distribution<Result> for rand::distributions::Standard
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Result {
         Result {
             archive_ts: None,
-            classification: ExpandingClassification {
-                classification: "".to_string(),
-                __access_lvl__: 0,
-                __access_req__: vec![],
-                __access_grp1__: vec![],
-                __access_grp2__: vec![],
-            },
+            classification: ExpandingClassification::try_unrestricted().unwrap(),
             created: chrono::Utc::now(),
             expiry_ts: None,
             response: rng.gen(),

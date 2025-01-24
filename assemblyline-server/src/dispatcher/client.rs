@@ -258,7 +258,7 @@ impl DispatchClient {
     {
         // For when we repeatedly retry on bad task dequeue-ing
         if timeout.is_zero() {
-            info!("{service_name}:{worker_id} no task returned [timeout]");
+            debug!("{service_name}:{worker_id} no task returned [timeout]");
             return Ok(None)
         }
 
@@ -275,7 +275,7 @@ impl DispatchClient {
         let mut task = match result {
             Some(task) => task,
             None => {
-                info!("{service_name}:{worker_id} no task returned: [empty message]");
+                debug!("{service_name}:{worker_id} no task returned: [empty message]");
                 return Ok(None)
             }
         };

@@ -70,13 +70,7 @@ impl rand::distributions::Distribution<Submission> for rand::distributions::Stan
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Submission {
         Submission {
             archived: rng.r#gen(),
-            classification: ExpandingClassification {
-                classification: "".to_string(),
-                __access_lvl__: 0,
-                __access_req__: vec![],
-                __access_grp1__: vec![],
-                __access_grp2__: vec![],
-            },
+            classification: ExpandingClassification::try_unrestricted().unwrap(),
             error_count: 0,
             errors: vec![],
             expiry_ts: None,
@@ -84,7 +78,7 @@ impl rand::distributions::Distribution<Submission> for rand::distributions::Stan
             files: vec![rng.r#gen()],
             max_score: rng.r#gen(),
             metadata: Default::default(),
-            params: SubmissionParams::new(ClassificationString("".to_string())),
+            params: SubmissionParams::new(ClassificationString::try_unrestricted().unwrap()),
             results: vec![],
             sid: rng.r#gen(),
             state: SubmissionState::Submitted,
@@ -126,7 +120,8 @@ pub struct SubmissionParams {
     /// Should this submission generate an alert?
     pub generate_alert: bool,
     /// List of groups related to this scan
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    // #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub groups: Vec<UpperString>,
     /// Ignore the cached service results?
     pub ignore_cache: bool,

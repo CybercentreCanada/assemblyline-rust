@@ -12,7 +12,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use assemblyline_models::messages::task::Task;
 use log::debug;
 use poem::http::{HeaderMap, StatusCode};
 use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
@@ -139,17 +138,21 @@ async fn task_finished(
 #[serde(untagged)]
 pub enum FinishedBody {
     Success {
-        task: Task,
+        task: assemblyline_models::JsonMap,
         #[serde(default)]
         exec_time: u64,
         freshen: bool,
         result: models::Result,
     },
     Error {
-        task: Task,
+        task: assemblyline_models::JsonMap,
         #[serde(default)]
         exec_time: u64,
         error: assemblyline_models::datastore::error::Error,
+    },
+    Other {
+        #[serde(flatten)]
+        content: assemblyline_models::JsonMap,
     }
 }
 
@@ -165,10 +168,10 @@ pub mod models {
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Result {
         /// Time at which the result was archived
+        #[serde(default)]
         pub archive_ts: Option<DateTime<Utc>>,
         /// Aggregate classification for the result
-        #[serde(flatten)]
-        pub classification: ExpandingClassification,
+        pub classification: ClassificationString,
         /// Date at which the result object got created
         #[serde(default="chrono::Utc::now")]
         pub created: DateTime<Utc>,
@@ -183,9 +186,10 @@ pub mod models {
         /// SHA256 of the file the result object relates to
         pub sha256: Sha256,
         /// What type information is given along with this result
-        #[serde(rename = "type")]
+        #[serde(default, rename = "type")]
         pub result_type: Option<String>,
         /// ???
+        #[serde(default)]
         pub size: Option<u64>,
         /// Use to not pass to other stages after this run
         #[serde(default)]
@@ -215,16 +219,19 @@ pub mod models {
         #[serde(default)]
         pub auto_collapse: bool,
         /// Text body of the result section
+        #[serde(default)]
         pub body: Option<String>,
         /// Classification of the section
         pub classification: ClassificationString,
         /// Type of body in this section
         pub body_format: BodyFormat,
         /// Configurations for the body of this section
+        #[serde(default)]
         pub body_config: Option<HashMap<String, serde_json::Value>>,
         /// Depth of the section
         pub depth: i64,
         /// Heuristic used to score result section
+        #[serde(default)]
         pub heuristic: Option<Heuristic>,
         /// List of tags associated to this section
         #[serde(default)]

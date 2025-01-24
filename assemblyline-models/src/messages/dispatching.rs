@@ -65,7 +65,7 @@ impl From<WatchQueueStatus> for WatchQueueMessage {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all="SCREAMING_SNAKE_CASE")]
 pub enum MessageClasses {
-    CrateWatch,
+    CreateWatch,
     ListOutstanding,
     UpdateBadSid
 }
@@ -101,7 +101,7 @@ pub struct DispatcherCommandMessage {
 impl DispatcherCommandMessage {
     pub fn payload(&self) -> Result<DispatcherCommand, serde_json::Error> {
         Ok(match self.kind {
-            MessageClasses::CrateWatch => DispatcherCommand::CreateWatch(serde_json::from_value(self.payload_data.clone())?),
+            MessageClasses::CreateWatch => DispatcherCommand::CreateWatch(serde_json::from_value(self.payload_data.clone())?),
             MessageClasses::ListOutstanding => DispatcherCommand::ListOutstanding(serde_json::from_value(self.payload_data.clone())?),
             MessageClasses::UpdateBadSid => DispatcherCommand::UpdateBadSid(serde_json::from_value(self.payload_data.clone())?),
         })

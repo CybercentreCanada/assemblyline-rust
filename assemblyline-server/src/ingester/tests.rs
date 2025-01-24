@@ -343,14 +343,18 @@ async fn test_ingest_always_create_submission() {
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
 
+    let sid_0: Sid = "000".parse().unwrap();
+    let sid_1: Sid = "001".parse().unwrap();
+    let sid_2: Sid = "002".parse().unwrap();
+
     // Add a valid file score 
     let sha256: Sha256 = thread_rng().r#gen();
     let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
-        psid: Some("000".parse().unwrap()), 
+        psid: Some(sid_0), 
         expiry_ts: chrono::Utc::now(), 
         score: 10, 
         errors: 0, 
-        sid: "001".parse().unwrap(), 
+        sid: sid_1, 
         time: chrono::Utc::now().timestamp() as f64
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
@@ -359,12 +363,12 @@ async fn test_ingest_always_create_submission() {
 
     // Create a submission for cache hit
     let mut old_sub: Submission = thread_rng().r#gen();
-    old_sub.sid = "001".parse().unwrap();
-    old_sub.params.psid = Some("000".parse().unwrap());
+    old_sub.sid = sid_1;
+    old_sub.params.psid = Some(sid_0);
     core.datastore.submission.save(&old_sub.sid.to_string(), &old_sub, None, None).await.unwrap();
 
     // Ingest a file
-    let sid = Sid::from_str("002").unwrap();
+    let sid = sid_2;
     let submission_msg = MakeMessage::new(core.classification_parser.clone())
         .message(json!({"sid": sid}))
         .files(json!({"sha256": sha256.to_string()}))
@@ -387,6 +391,7 @@ async fn test_ingest_always_create_submission() {
         if wait_time.elapsed() > Duration::from_secs(60) {
             panic!();
         }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     };
     assert_eq!(new_sub.params.psid.unwrap(), old_sub.sid);
 

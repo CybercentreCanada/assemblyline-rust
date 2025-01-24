@@ -276,7 +276,11 @@ impl TaskingClient {
                     if let Some(heuristic) = heuristic.as_object_mut() {
                         // Append service name to heuristic ID
                         let original_id = match heuristic.get("heur_id") {
-                                Some(id) => id.to_string(),
+                            Some(id) => if let Some(id) = id.as_str() {
+                                id.to_owned()
+                            } else {
+                                id.to_string()
+                            },
                             None => bail!("heur_id field is required")
                         };
                         let new_id = format!("{}.{original_id}", service_name.to_uppercase());
@@ -544,12 +548,47 @@ impl TaskingClient {
 #[error("The service you're asking task for does not exist, try later")]
 pub struct ServiceMissing;
 
+/// Some fields of the task object are new, in order to make the new code
+/// compatable with older code those fields are coppied to metadata.
+/// Here we will copy them back if they are missing
+fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
+    if !data.contains_key("task_id") {
+        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+            if let Some(id) = metadata.get("task_id__") {
+                let id: u64 = if let Some(id) = id.as_u64() {
+                    id
+                } else if let Some(id) = id.as_str() {
+                    id.to_string().parse()?
+                } else  {
+                    bail!("Could not parse id")
+                };
+                data.insert("task_id".to_string(), json!(id));
+            }
+        }
+    }
+    if !data.contains_key("dispatcher") {
+        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+            if let Some(id) = metadata.get("dispatcher__") {
+                data.insert("dispatcher".to_string(), id.clone());
+            }
+        }
+    }
+    if !data.contains_key("dispatcher_address") {
+        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+            if let Some(id) = metadata.get("dispatcher_address__") {
+                data.insert("dispatcher_address".to_string(), id.clone());
+            }
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(data)).context("Couldn't parse Task")
+}
 
 impl TaskingClient {
 
     pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: &str) -> Result<serde_json::Value> {
         match service_task {
             FinishedBody::Success { task, exec_time, freshen, result } => {
+                let task = finish_parsing_task(task)?;
                 let missing_files = self._handle_task_result(exec_time, task, result, client_id, service_name, freshen).await.context("_handle_task_result")?;
                 if !missing_files.is_empty() {
                     return Ok(json!({"success": false, "missing_files": missing_files}))
@@ -557,10 +596,18 @@ impl TaskingClient {
                 return Ok(json!({"success": true}))
             },
             FinishedBody::Error { task, exec_time, error } => {
+                let task = finish_parsing_task(task)?;
                 // let error = service_task['error']
                 self._handle_task_error(exec_time, task, error, client_id, service_name).await?;
                 return Ok(json!({"success": true}))    
             },
+            FinishedBody::Other { content } => {
+                error!("Malformed task result: {content:?}");
+                if let Some(serde_json::Value::Object(task_data)) = content.get("task") {
+                    finish_parsing_task(task_data.clone())?;
+                }
+                anyhow::bail!("malformed task result");
+            }
         }
     }
 
@@ -791,7 +838,7 @@ impl TaskingClient {
 
         let result = assemblyline_models::datastore::result::Result{
             archive_ts: None,
-            classification: result.classification,
+            classification: ExpandingClassification::new(result.classification.as_str().to_string(), &self.classification_engine)?,
             created: result.created,
             expiry_ts: result.expiry_ts,
             response: result.response,

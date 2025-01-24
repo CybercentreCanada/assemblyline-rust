@@ -417,7 +417,7 @@ async fn setup() -> TestContext {
     // launch the plumber
     let plumber_name = format!("plumber{}", thread_rng().gen::<u32>());
     let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
-    plumber.start(&mut components);
+    plumber.start(&mut components).await.unwrap();
 
     TestContext {
         metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned())),
@@ -1546,7 +1546,7 @@ async fn test_complex_extracted() {
                     "name": child_sha,
                     "sha256": child_sha,
                     "description": "abc",
-                    "classification": "U"
+                    "classification": context.core.classification_parser.unrestricted()
                 }]
             }
         },

@@ -1,8 +1,6 @@
 use std::fmt::Display;
 use std::str::FromStr;
-use std::sync::Arc;
 
-use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
@@ -17,6 +15,7 @@ pub mod types;
 pub use meta::ElasticMeta;
 pub use types::MD5;
 pub use types::Sha1;
+pub use types::classification::{ClassificationString, ExpandingClassification};
 
 pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
@@ -236,152 +235,6 @@ pub type IP = String;
 
 /// Unvalidated uri type
 pub type Uri = String;
-
-/// Expanding classification type
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Eq)]
-pub struct ExpandingClassification<const USER: bool=false> { 
-    pub classification: String,
-    __access_lvl__: i32,
-    __access_req__: Vec<String>,
-    __access_grp1__: Vec<String>,
-    __access_grp2__: Vec<String>,
-}
-
-impl<const USER: bool> ExpandingClassification<USER> {
-    pub fn new(classification: String, parser: &ClassificationParser) -> Result<Self, ModelError> {
-        if parser.original_definition.enforce {
-            let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
-            let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
-
-            Ok(Self {
-                classification,
-                __access_lvl__: parts.level,
-                __access_req__: parts.required,
-                __access_grp1__: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
-                __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
-            })
-        } else {
-            Ok(Self {
-                classification,
-                __access_lvl__: Default::default(),
-                __access_req__: Default::default(),
-                __access_grp1__: vec!["__EMPTY__".to_owned()],
-                __access_grp2__: vec!["__EMPTY__".to_owned()],
-            })
-        }
-    }
-
-    pub fn unrestricted(parser: &ClassificationParser) -> Self {
-        Self::new(parser.unrestricted().to_string(), parser).unwrap()
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.classification
-    }
-
-    pub fn insert(parser: &ClassificationParser, output: &mut JsonMap, classification: &str) -> Result<(), ModelError> {
-        use serde_json::json;
-        if parser.original_definition.enforce {
-            let parts = parser.get_classification_parts(classification, true, true, !USER)?;
-            let classification = parser.get_normalized_classification_text(parts.clone(), true, false)?;
-
-            output.insert("classification".to_string(), json!(classification));
-            output.insert("__access_lvl__".to_string(), json!(parts.level));
-            output.insert("__access_req__".to_string(), json!(parts.required));
-            output.insert("__access_grp1__".to_string(), json!(if parts.groups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.groups }));
-            output.insert("__access_grp2__".to_string(), json!(if parts.subgroups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.subgroups }));
-            Ok(())
-        } else {
-            output.insert("classification".to_string(), json!(classification));
-            output.insert("__access_lvl__".to_string(), json!(0));
-            output.insert("__access_req__".to_string(), serde_json::Value::Array(Default::default()));
-            output.insert("__access_grp1__".to_string(), json!(&["__EMPTY__"]));
-            output.insert("__access_grp2__".to_string(), json!(&["__EMPTY__"]));
-            Ok(())
-        }
-    }
-}
-
-// #[derive(Serialize, Deserialize, Debug, Clone)]
-// pub struct UncheckedClassification {
-//     classification: String,
-// }
-
-// impl<const USER: bool> From<ExpandingClassification<USER>> for UncheckedClassification {
-//     fn from(value: ExpandingClassification<USER>) -> Self {
-//         UncheckedClassification { classification: value.classification }
-//     }
-// }
-
-// impl<'de, const USER: bool> ValidatedDeserialize<'de, Arc<ClassificationParser>> for ExpandingClassification<USER> {
-//     type ProxyType = UncheckedClassification;
-
-//     fn validate(input: Self::ProxyType, validator: &Arc<ClassificationParser>) -> Result<Self, String> {
-//         Self::new(input.classification, validator).map_err(|err| err.to_string())
-//     }
-// }
-
-impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> {
-    fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
-
-        // let group_meta = ElasticMeta {
-        //     index: Some(true),
-        //     store: None,
-        //     ..Default::default()
-        // };
-
-        struct_metadata::Descriptor { 
-            docs: None, 
-            metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, 
-            kind: struct_metadata::Kind::new_struct("ExpandingClassification", vec![
-                struct_metadata::Entry { label: "classification", docs: None, metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, type_info: String::metadata(), has_default: false, aliases: &["classification"] },
-                // struct_metadata::Entry { label: "__access_lvl__", docs: None, metadata: Default::default(), type_info: i32::metadata(), has_default: false, aliases: &["__access_lvl__"] },
-                // struct_metadata::Entry { label: "__access_req__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_req__"] },
-                // struct_metadata::Entry { label: "__access_grp1__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp1__"] },
-                // struct_metadata::Entry { label: "__access_grp2__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp2__"] },
-            ], &mut []),
-            // kind: struct_metadata::Kind::Aliased { 
-            //     name: "ExpandingClassification", 
-            //     kind: Box::new(String::metadata())
-            // },
-        }
-    }
-}
-
-/// A classification value stored as a string
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug, Clone)]
-#[metadata_type(ElasticMeta)]
-#[metadata(mapping="classification")]
-pub struct ClassificationString(String);
-
-impl From<ClassificationString> for String {
-    fn from(value: ClassificationString) -> Self {
-        value.0
-    }
-}
-
-impl ClassificationString {
-    pub fn new(classification: String, parser: &Arc<ClassificationParser>) -> Result<Self, ModelError> {
-        Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
-    }
-
-    pub fn unrestricted(parser: &ClassificationParser) -> Self {
-        Self(parser.unrestricted().to_owned())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-// impl<'de> ValidatedDeserialize<'de, Arc<ClassificationParser>> for ClassificationString {
-//     type ProxyType = String;
-
-//     fn validate(input: Self::ProxyType, validator: &Arc<ClassificationParser>) -> Result<Self, String> {
-//         Self::new(input, validator).map_err(|err| err.to_string())
-//     }
-// }
-
 
 /// Unvalidated platform type
 pub type Platform = String;

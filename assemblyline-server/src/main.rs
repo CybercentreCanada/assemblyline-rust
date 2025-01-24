@@ -237,6 +237,7 @@ impl Core {
             },
         };
         let classification_parser = Arc::new(ClassificationParser::new(classification_config)?);
+        assemblyline_models::types::classification::set_global_classification(classification_parser.clone());
 
         info!("Start service helper");
         let services = ServiceHelper::start(datastore.clone(), &redis_volatile, classification_parser.clone(), &config.services).await?;

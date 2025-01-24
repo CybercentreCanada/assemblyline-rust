@@ -24,8 +24,8 @@ use assemblyline_models::messages::task::Task;
 use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
 use log::{debug, info};
 use poem::http::StatusCode;
-use poem::listener::{Acceptor, Listener};
-use poem::{Body, EndpointExt};
+use poem::listener::Acceptor;
+use poem::EndpointExt;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -79,8 +79,8 @@ fn headers() -> HeaderMap {
 
 type MockItem = (String, String);
 async fn mock_dispatcher() -> (mpsc::Receiver<MockItem>, String) {
-    use poem::{handler, Server, listener::TcpListener, Body};
-    use poem::web::{Path, Data};
+    use poem::{handler, Server, Body};
+    use poem::web::Data;
 
     let (send, recv) = mpsc::channel(32);
     #[handler]
@@ -192,7 +192,7 @@ fn build_task() -> Task {
 #[tokio::test]
 async fn test_task_timeout() {
     let (client, core, _guard, address) = setup(headers()).await;
-    let service = setup_service(&core).await;
+    let _service = setup_service(&core).await;
 
     let response = client.get(format!("{address}/api/v1/task/")).send().await.unwrap();
 
