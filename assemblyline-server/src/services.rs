@@ -79,8 +79,14 @@ impl ServiceHelper {
         &self.service_stage_hash
     }
 
-    pub fn list(&self) -> HashMap<String, Arc<Service>> {
+    pub fn list_all(&self) -> HashMap<String, Arc<Service>> {
         self.inner.read().services.clone()
+    }
+
+    pub fn list_enabled(&self) -> HashMap<String, Arc<Service>> {
+        let mut services = self.inner.read().services.clone();
+        services.retain(|_key, service| service.enabled);
+        services
     }
 
     /// get the list of services in each category
@@ -143,7 +149,7 @@ impl ServiceHelper {
     ) -> Result<Vec<Vec<Arc<Service>>>>
     {
         // Get the set of all services currently enabled on the system
-        let all_services = self.list();
+        let all_services = self.list_enabled();
 
         // Retrieve a list of services that the classfication group is allowed to submit to
         let accessible: Vec<String> = match submitter_c12n {
@@ -386,8 +392,8 @@ pub mod test {
         };
 
         return serde_json::from_value(json!({
-            "classification": "",
-            "default_result_classification": "",
+            "classification": "L0",
+            "default_result_classification": "L0",
             "name": name,
             "stage": stage,
             "category": category.unwrap_or("static"),
@@ -466,10 +472,19 @@ pub mod test {
         let service_count = services.len();
         println!("setup core");
 
-        for (name, service) in services {
-            core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
-            core.datastore.service_delta.save_json(&name, &mut[("version".to_owned(), json!(service.version))].into_iter().collect(), None, None).await.unwrap();
-            core.services.get_service_stage_hash().set(&name, &ServiceStage::Running).await.unwrap();
+        for (name, service) in &services {
+            core.datastore.service.save(&service.key(), service, None, None).await.unwrap();
+            core.datastore.service_delta.save_json(name, &mut[("version".to_owned(), json!(service.version))].into_iter().collect(), None, None).await.unwrap();
+            if service.enabled {
+                core.services.get_service_stage_hash().set(name, &ServiceStage::Running).await.unwrap();
+            } else {
+                core.services.get_service_stage_hash().set(name, &ServiceStage::Off).await.unwrap();
+            }
+        }
+        core.datastore.service.commit(None).await.unwrap();
+        core.datastore.service_delta.commit(None).await.unwrap();
+
+        for (name, _) in services {
             core.redis_volatile.publish(&("changes.services.".to_owned() + &name), &serde_json::to_vec(&ServiceChange {
                 operation: assemblyline_models::messages::changes::Operation::Added,
                 name,
@@ -478,7 +493,7 @@ pub mod test {
         println!("Services added");
                 
         for step in 0..1000 {
-            if core.services.list().len() == service_count { break }
+            if core.services.list_enabled().len() == service_count { break }
             tokio::time::sleep(Duration::from_micros(step)).await;
         }
         println!("Services confirmed");

@@ -490,7 +490,7 @@ fn de_time(input: &str) -> IResult<&str, NaiveTime> {
                 }
             }
         }
-        NaiveTime::from_hms_nano_opt(hours as u32, min, sec, nano).ok_or(ParsingError::InvalidTime(Box::new(input.to_owned())))
+        NaiveTime::from_hms_nano_opt(hours as u32, min, sec, nano).ok_or(ParsingError::InvalidTime(input.to_owned()))
     })(input)?;
     return Ok((remain, time))
 }

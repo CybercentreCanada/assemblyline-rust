@@ -20,6 +20,8 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
+use magic_sys as _;
+
 use crate::cachestore::CacheStore;
 use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence, safe_str};
 use crate::IBool;

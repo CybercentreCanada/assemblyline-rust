@@ -2,10 +2,7 @@ use std::collections::{HashMap, BTreeMap};
 
 use serde::{Serialize, Deserialize};
 use serde_json::json;
-use struct_metadata::{Described, Descriptor, Entry, Kind, MetadataKind};
-
-use crate::JsonMap;
-
+use struct_metadata::{Described, Descriptor, Kind, MetadataKind};
 
 
 /// Retrieve all subfields recursively flattened into a single listing.    

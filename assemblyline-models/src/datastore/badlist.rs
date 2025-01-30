@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
-
+use crate::types::classification::unrestricted_classification_string;
 use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, UpperString, MD5};
 
 // from assemblyline import odm
@@ -156,6 +156,7 @@ pub struct File {
 #[metadata(index=true, store=false)]
 pub struct Source {
     /// Classification of the source
+    #[serde(default="unrestricted_classification_string")]
     pub classification: ClassificationString,
     /// Name of the source
     #[metadata(store=true)]

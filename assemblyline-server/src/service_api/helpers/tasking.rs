@@ -17,10 +17,11 @@ use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use redis_objects::{increment, Hashmap, RedisObjects};
-use serde_json::json;
+use serde_json::{json, Value};
 use thiserror::Error;
 
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
+use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
 use crate::constants::{ServiceStatus, SERVICE_STATE_HASH};
 use crate::dispatcher::client::DispatchClient;
@@ -95,7 +96,7 @@ impl TaskingClient {
 
                     let mut service_name = None;
                     if let Some(mut message) = message {
-                        if let Some(serde_json::Value::String(name)) = message.remove("service_name") {
+                        if let Some(Value::String(name)) = message.remove("service_name") {
                             service_name = Some(name);
                         }
                     };
@@ -166,7 +167,7 @@ impl TaskingClient {
         } else {
             None
         };
-        let serde_json::Value::Object(mut file_info) = serde_json::to_value(&file_info)? else {
+        let Value::Object(mut file_info) = serde_json::to_value(&file_info)? else {
             bail!("Unusable file info");
         };
         file_info.insert("is_section_image".to_string(), json!(is_section_image));
@@ -204,20 +205,19 @@ impl TaskingClient {
 
         // Patch update_channel, registry_type before Service registration object creation
         service_data.entry("update_channel").or_insert(json!(self.config.services.preferred_update_channel));
-        
-        if let Some(serde_json::Value::Object(docker_config)) = service_data.get_mut("docker_config") {
-            if !docker_config.contains_key("registry_type") {
-                docker_config.insert("registry_type".to_owned(), json!(self.config.services.preferred_registry_type));
-            }
+
+        // Normalize the docker objects
+        let default_registry_type = json!(self.config.services.preferred_registry_type);
+        if let Some(Value::Object(docker_config)) = service_data.get_mut("docker_config") {
+            fix_docker_config(docker_config, &default_registry_type)?;
         }
         if !service_data.contains_key("privileged") {
             service_data.insert("privileged".to_owned(), json!(self.config.services.prefer_service_privileged));
         }
-        if let Some(serde_json::Value::Object(deps)) = service_data.get_mut("dependencies") {
+        if let Some(Value::Object(deps)) = service_data.get_mut("dependencies") {
             for dep in deps.values_mut() {
-                let registry_type = dep.get("registry_type").cloned().unwrap_or_else(|| json!(self.config.services.preferred_registry_type));
-                if let Some(serde_json::Value::Object(con)) = dep.get_mut("container") {
-                    con.insert("registry_type".to_owned(), registry_type);
+                if let Some(Value::Object(docker_config)) = dep.get_mut("container") {
+                    fix_docker_config(docker_config, &default_registry_type)?;
                 }
             }
         }
@@ -228,7 +228,12 @@ impl TaskingClient {
         }
 
         // Create Service registration object
-        let mut service: Service = serde_json::from_value(serde_json::Value::Object(service_data))?;
+        let mut service: Service = match serde_json::from_value(Value::Object(service_data)) {
+            Ok(service) => service,
+            Err(err) => {
+                return Err(RegisterError::Formatting(format!("Parsing Service: {err:?}")))
+            }
+        };
         if service.name.is_empty() || service.version.is_empty() {
             return Err(RegisterError::Formatting("Service name and version must be supplied".to_string()));
         }
@@ -261,13 +266,13 @@ impl TaskingClient {
         }
 
         let mut new_heuristics = vec![];
-        if let Some(serde_json::Value::Array(heuristics)) = heuristics {
+        if let Some(Value::Array(heuristics)) = heuristics {
             let mut plan = self.datastore.heuristic.get_bulk_plan(None)?;
             for (index, heuristic) in heuristics.into_iter().enumerate() {
                 // Set heuristic id to it's position in the list for logging purposes
                 let heuristic_id = format!("#{index}");
 
-                async fn load_heuristic(plan: &mut TypedBulkPlan<Heuristic>, this: &TaskingClient, mut heuristic: serde_json::Value, service_name: &str, ce: Arc<ClassificationParser>) -> anyhow::Result<()> {
+                async fn load_heuristic(plan: &mut TypedBulkPlan<Heuristic>, this: &TaskingClient, mut heuristic: Value, service_name: &str, ce: Arc<ClassificationParser>) -> anyhow::Result<(), RegisterError> {
                     // Attack_id field is now a list, make it a list if we receive otherwise
                     // attack_id = heuristic.get("attack_id", None)
                     // if isinstance(attack_id, str):
@@ -281,21 +286,24 @@ impl TaskingClient {
                             } else {
                                 id.to_string()
                             },
-                            None => bail!("heur_id field is required")
+                            None => return Err(RegisterError::Formatting("heur_id field is required".to_string())),
                         };
                         let new_id = format!("{}.{original_id}", service_name.to_uppercase());
                         heuristic.insert("heur_id".to_string(), json!(new_id));
 
                         // Set default classification
                         if !heuristic.contains_key("classification") {
-                            ExpandingClassification::<false>::insert(&ce, heuristic, ce.unrestricted())?;
+                            heuristic.insert("classification".to_string(), json!(ce.unrestricted()));
                         }
                 
                     } else {
-                        bail!("Heuristic data must be an object");
+                        return Err(RegisterError::Formatting("Heuristic data must be an object".to_string()))
                     }
 
-                    let mut heuristic: Heuristic = serde_json::from_value(heuristic)?;
+                    let mut heuristic: Heuristic = match serde_json::from_value(heuristic).context("parse Heuristic object") {
+                        Ok(heuristic) => heuristic,
+                        Err(err) => return Err(RegisterError::Formatting(format!("Parsing Heuristic: {err:?}")))
+                    };
 
                     let heuristic_id = heuristic.heur_id.clone();
                     if let Some((existing_heuristic_obj, _)) = this.datastore.heuristic.get_if_exists(&heuristic_id, None).await? {
@@ -303,7 +311,7 @@ impl TaskingClient {
                         heuristic.stats = existing_heuristic_obj.stats
                     }
                     plan.add_upsert_operation(&heuristic_id, &heuristic, None)?;
-                    anyhow::Ok(())
+                    Ok(())
                 }
 
                 if let Err(e) = load_heuristic(&mut plan, self, heuristic, &service.name, self.classification_engine.clone()).await {
@@ -348,6 +356,29 @@ impl TaskingClient {
     }
 
 }
+
+fn fix_docker_config(docker_config: &mut JsonMap, registry_type: &Value) -> serde_json::Result<()> {
+    if !docker_config.contains_key("registry_type") {
+        docker_config.insert("registry_type".to_owned(), registry_type.clone());
+    }
+    
+    if let Some(Value::Array(env)) = docker_config.get_mut("environment") {
+        for row in env {
+            if let Some(row) = row.as_object_mut() {
+                match row.entry("value") {
+                    serde_json::map::Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(Value::String("".to_string()));
+                    },
+                    serde_json::map::Entry::Occupied(mut occupied_entry) => {
+                        occupied_entry.insert(Value::String(value_to_string(occupied_entry.get())?));
+                    },
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 
 
 // class TaskingClientException(Exception):
@@ -553,7 +584,7 @@ pub struct ServiceMissing;
 /// Here we will copy them back if they are missing
 fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
     if !data.contains_key("task_id") {
-        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+        if let Some(Value::Object(metadata)) = data.get("metadata") {
             if let Some(id) = metadata.get("task_id__") {
                 let id: u64 = if let Some(id) = id.as_u64() {
                     id
@@ -567,25 +598,25 @@ fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
         }
     }
     if !data.contains_key("dispatcher") {
-        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+        if let Some(Value::Object(metadata)) = data.get("metadata") {
             if let Some(id) = metadata.get("dispatcher__") {
                 data.insert("dispatcher".to_string(), id.clone());
             }
         }
     }
     if !data.contains_key("dispatcher_address") {
-        if let Some(serde_json::Value::Object(metadata)) = data.get("metadata") {
+        if let Some(Value::Object(metadata)) = data.get("metadata") {
             if let Some(id) = metadata.get("dispatcher_address__") {
                 data.insert("dispatcher_address".to_string(), id.clone());
             }
         }
     }
-    serde_json::from_value(serde_json::Value::Object(data)).context("Couldn't parse Task")
+    serde_json::from_value(Value::Object(data)).context("Couldn't parse Task")
 }
 
 impl TaskingClient {
 
-    pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: &str) -> Result<serde_json::Value> {
+    pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: &str) -> Result<Value> {
         match service_task {
             FinishedBody::Success { task, exec_time, freshen, result } => {
                 let task = finish_parsing_task(task)?;
@@ -603,7 +634,7 @@ impl TaskingClient {
             },
             FinishedBody::Other { content } => {
                 error!("Malformed task result: {content:?}");
-                if let Some(serde_json::Value::Object(task_data)) = content.get("task") {
+                if let Some(Value::Object(task_data)) = content.get("task") {
                     finish_parsing_task(task_data.clone())?;
                 }
                 anyhow::bail!("malformed task result");
@@ -639,7 +670,7 @@ impl TaskingClient {
             file_info.is_section_image |= item.is_section_image;
             file_info.is_supplementary |= is_supplementary;
             
-            let serde_json::Value::Object(info) = serde_json::to_value(&file_info).context("freshen_file::to_value")? else {
+            let Value::Object(info) = serde_json::to_value(&file_info).context("freshen_file::to_value")? else {
                 bail!("Object must serialize to object");
             };
     

@@ -61,3 +61,17 @@ fn _child_flat_fields(child: struct_metadata::Descriptor<ElasticMeta>) -> Child 
         }
     }
 }
+
+
+/// convert a json value to a string
+/// When a field or parameter is expected to be a string
+pub fn value_to_string(value: &serde_json::Value) -> serde_json::Result<String> {
+    match value {
+        serde_json::Value::Null => Ok("".to_string()),
+        serde_json::Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
+        serde_json::Value::Number(number) => Ok(format!("{number}")),
+        serde_json::Value::String(str) => Ok(str.clone()),
+        serde_json::Value::Array(vec) => serde_json::to_string(vec),
+        serde_json::Value::Object(map) => serde_json::to_string(map),
+    }
+}

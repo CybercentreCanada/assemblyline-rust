@@ -567,7 +567,7 @@ impl Default for Expiry {
 
 
 #[derive(strum::EnumIter, strum::Display, strum::EnumString, SerializeDisplay, DeserializeFromStr, PartialEq, Eq, Hash)]
-#[strum(serialize_all = "kebab-case")]
+#[strum(ascii_case_insensitive, serialize_all = "kebab-case")]
 pub enum Priority {
     Low,
     Medium,
@@ -1037,10 +1037,25 @@ impl Default for Archive {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all="lowercase")]
 pub enum DatastoreType {
     Elasticsearch
+}
+
+#[test]
+fn test_datastore_type_serialization() {
+    assert_eq!(serde_json::to_string(&DatastoreType::Elasticsearch).unwrap(), "\"elasticsearch\"");
+    assert_eq!(serde_json::from_str::<DatastoreType>("\"elasticsearch\"").unwrap(), DatastoreType::Elasticsearch);
+    assert_eq!(serde_json::to_value(DatastoreType::Elasticsearch).unwrap(), serde_json::json!("elasticsearch"));
+    // assert_eq!(serde_json::from_str::<DatastoreType>("\"Elasticsearch\"").unwrap(), DatastoreType::Elasticsearch);
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct Test {
+        ds: DatastoreType
+    }
+    let sample = Test {ds: DatastoreType::Elasticsearch};
+    assert_eq!(serde_json::to_string(&sample).unwrap(), "{\"ds\":\"elasticsearch\"}");
 }
 
 

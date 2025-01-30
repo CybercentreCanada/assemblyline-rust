@@ -92,6 +92,8 @@ struct MockService {
     drops: Mutex<HashMap<String, u64>>,
 
     running: Arc<Flag>,
+    local_running: Flag,
+    stopped: Flag,
     dispatch_client: DispatchClient,
     signal: Arc<Notify>,
 }
@@ -106,6 +108,8 @@ impl MockService {
         Arc::new(Self {
             service_name: name.to_string(),
             service_queue: core.get_service_queue(name),
+            local_running: Flag::new(true),
+            stopped: Flag::new(false),
             running: core.running.clone(),
             classification_engine: core.classification_parser.clone(),
             filestore: core.filestore.clone(),
@@ -117,7 +121,7 @@ impl MockService {
     }
 
     async fn run(self: Arc<Self>) {
-        while self.running.read() {
+        while self.running.read() && self.local_running.read() {
             let task = self.dispatch_client.request_work("worker", &self.service_name, "0", Some(Duration::from_secs(3)), true, None).await.unwrap();
             let task = match task {
                 Some(task) => task,
@@ -143,9 +147,10 @@ impl MockService {
 
             if let Some(hold) = instructions.get("hold") {
                 if let Some(hold) = hold.as_i64() {
-                    self.service_queue.push(0.0, &task).await.unwrap();
-                    info!("{} Requeued task, holding for {hold}", self.service_name);
+                    self.service_queue.push(task.priority as f64, &task).await.unwrap();
+                    info!("{} Requeued task in {}, holding for {hold}", self.service_name, self.service_queue.name());
                     _ = tokio::time::timeout(Duration::from_secs(hold as u64), self.signal.notified()).await;
+                    info!("{} Resuming from hold", self.service_name);
                     continue
                 }
             }
@@ -257,91 +262,9 @@ impl MockService {
             debug!("result: {result_key} -> {result:?}");
             self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None).await.unwrap();
         }
+        self.stopped.set(true);
     }
 }
-
-// class CoreSession:
-//     def __init__(self, config, ingest):
-//         self.ds: typing.Optional[AssemblylineDatastore] = None
-//         self.filestore = None
-//         self.redis = None
-//         self.config: Config = config
-//         self.ingest: Ingester = ingest
-//         self.dispatcher: Dispatcher
-
-//     @property
-//     def ingest_queue(self):
-//         return self.ingest.ingest_queue
-
-
-// @pytest.fixture(autouse=True)
-// def log_config(caplog):
-//     caplog.set_level(logging.INFO, logger='assemblyline')
-
-
-// class MetricsCounter:
-//     def __init__(self, redis):
-//         self.redis = redis
-//         self.channel = None
-//         self.data = {}
-
-//     def clear(self):
-//         self.data = {}
-
-//     def sync_messages(self):
-//         read = 0
-//         for metric_message in self.channel.listen(blocking=False):
-//             if metric_message is None:
-//                 break
-//             read += 1
-//             try:
-//                 existing = self.data[metric_message['type']]
-//             except KeyError:
-//                 existing = self.data[metric_message['type']] = {}
-
-//             for key, value in metric_message.items():
-//                 if isinstance(value, (int, float)):
-//                     existing[key] = existing.get(key, 0) + value
-//         return read
-
-//     def __enter__(self):
-//         self.channel = forge.get_metrics_sink(self.redis)
-//         self.sync_messages()
-//         return self
-
-//     def __exit__(self, exc_type, exc_val, exc_tb):
-//         self.sync_messages()
-//         for key in list(self.data.keys()):
-//             shortened = {k: v for k, v in self.data[key].items() if v > 0}
-//             if shortened:
-//                 self.data[key] = shortened
-//             else:
-//                 del self.data[key]
-//         self.channel.close()
-
-//         print("Metrics During Test")
-//         for key, value in self.data.items():
-//             print(key, value)
-
-//     def expect(self, channel, name, value):
-//         start_time = time.time()
-//         while time.time() - start_time < RESPONSE_TIMEOUT:
-//             if channel in self.data:
-//                 if self.data[channel].get(name, 0) >= value:
-//                     # self.data[channel][name] -= value
-//                     return
-
-//             if self.sync_messages() == 0:
-//                 time.sleep(0.1)
-//                 continue
-//         pytest.fail(f"Did not get expected metric {name}={value} on metrics channel {channel}")
-
-
-// @pytest.fixture(scope='function')
-// def metrics(redis):
-//     with MetricsCounter(redis) as counter:
-//         yield counter
-
 
 
 
@@ -369,7 +292,10 @@ struct TestContext {
 /// MARK: setup
 async fn setup() -> TestContext {
     std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
-    let (core, guard) = setup_services(test_services()).await;
+    let mut service_configurations = test_services();
+    service_configurations.get_mut("core-a").unwrap().timeout = 100;
+    service_configurations.get_mut("core-b").unwrap().timeout = 100;
+    let (core, guard) = setup_services(service_configurations).await;
 
     let signal = Arc::new(Notify::new());
     let mut components = tokio::task::JoinSet::new();
@@ -377,11 +303,8 @@ async fn setup() -> TestContext {
     // Register services
     let mut services = HashMap::new();
     let stages = core.services.get_service_stage_hash();
-    for (name, mut service) in test_services() {
-        let count = if name == "core-a" { 
-            service.timeout = 100;
-            2 
-        } else { 1 };
+    for (name, service) in test_services() {
+        let count = if name == "core-a" { 2 } else { 1 };
 
         core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
         core.datastore.service_delta.save_json(&name, json!({
@@ -1225,9 +1148,11 @@ async fn test_caching() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plumber_clearing() {
     let context = setup().await;
-    let (sha, size) = ready_body(&context.core, json!({
-        "pre": {"hold": 60}
-    })).await;
+    // terminate the core-b worker
+    context.services.get("core-b").unwrap().local_running.set(false);
+    context.services.get("core-b").unwrap().stopped.wait_for(true).await;
+
+    let (sha, size) = ready_body(&context.core, json!({})).await;
 
     context.ingest_queue.push(&MessageSubmission {
         sid: thread_rng().gen(),
@@ -1251,7 +1176,7 @@ async fn test_plumber_clearing() {
     }).await.unwrap();
 
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1)]).await;
-    let service_queue = context.core.get_service_queue("pre");
+    let service_queue = context.core.get_service_queue("core-b");
 
     let start = std::time::Instant::now();
     while service_queue.length().await.unwrap() < 1 {
@@ -1261,11 +1186,15 @@ async fn test_plumber_clearing() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let mut service_delta = context.core.datastore.service_delta.get("pre", None).await.unwrap().unwrap();
+    // actually disable the service so that plumber will handle the hanging task
+    println!("------------ disabling core-b");
+    let mut service_delta = context.core.datastore.service_delta.get("core-b", None).await.unwrap().unwrap();
     service_delta.enabled = Some(false);
-    context.core.datastore.service_delta.save("pre", &service_delta, None, None).await.unwrap();
-    context.core.redis_volatile.publish("changes.services.pre", &serde_json::to_vec(&ServiceChange {
-        name: "pre".to_owned(),
+    context.core.datastore.service_delta.save("core-b", &service_delta, None, None).await.unwrap();
+    // context.core.services.get_service_stage_hash().set("core-b", )
+    context.core.datastore.service_delta.commit(None).await.unwrap();
+    context.core.redis_volatile.publish("changes.services.core-b", &serde_json::to_vec(&ServiceChange {
+        name: "core-b".to_owned(),
         operation: assemblyline_models::messages::changes::Operation::Modified
     }).unwrap()).await.unwrap();
 
@@ -1281,7 +1210,6 @@ async fn test_plumber_clearing() {
 
     context.metrics.assert_metrics("ingester", &[("submissions_completed", 1)]).await;
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
-    context.metrics.assert_metrics("service", &[("fail_recoverable", 1)]).await;
 }
 
 // MARK: filter

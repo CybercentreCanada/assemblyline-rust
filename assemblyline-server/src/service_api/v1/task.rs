@@ -160,7 +160,7 @@ pub mod models {
     use std::collections::HashMap;
 
     use assemblyline_models::datastore::result::{BodyFormat, ResponseBody};
-    use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
+    use assemblyline_models::{ClassificationString, JsonMap, Sha256};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize};
 

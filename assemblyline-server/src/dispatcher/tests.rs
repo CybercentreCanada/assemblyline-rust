@@ -47,9 +47,13 @@ use crate::{Core, TestGuard};
 // from test_scheduler import dummy_service
 
 fn test_services() -> HashMap<String, Service> {
+    let mut bonus = dummy_service("bonus", "pre", None, None, Some("unknown"), Some(true));
+    bonus.enabled = false;
+
     let mut sandbox = dummy_service("sandbox", "core", Some("Dynamic Analysis"), None, Some("unknown"), Some(true));
     sandbox.recursion_prevention.push("Dynamic Analysis".to_string());
     return [
+        ("bonus", bonus),
         ("extract", dummy_service("extract", "pre", None, None, None, Some(true))),
         ("sandbox", sandbox),
         ("wrench", dummy_service("wrench", "pre", None, None, None, None)),
@@ -156,11 +160,9 @@ async fn test_simple() {
     // Submit a problem, and check that it gets added to the dispatch hash
     // and the right service queues
     info!("==== first dispatch");
-    let task = SubmissionDispatchMessage {
-        submission: sub.clone(),
-        completed_queue: Some("some-completion-queue".to_string()),
-    };
-    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+
+    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
     // client.dispatch_bundle(&task).await.unwrap();
     // disp.pull_submissions();
     let task = disp.get_test_report(sid).await.unwrap();
@@ -278,11 +280,8 @@ async fn test_dispatch_extracted() {
     debug!("Dispatcher ready");
 
     // Launch the submission
-    let task = SubmissionDispatchMessage {
-        submission: sub.clone(),
-        completed_queue: Some("some-completion-queue".to_string()),
-    };
-    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
 
     // Finish one service extracting a file
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -372,11 +371,8 @@ async fn test_dispatch_extracted_bypass_drp()  {
     debug!("Dispatcher ready");
 
     // Launch the submission
-    let task = SubmissionDispatchMessage {
-        submission: sub.clone(),
-        completed_queue: Some("some-completion-queue".to_string()),
-    };
-    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
 
     // Finish one service extracting a file
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -464,11 +460,8 @@ async fn test_timeout() {
 
     // Submit a problem, and check that it gets added to the dispatch hash
     // and the right service queues
-    let task = SubmissionDispatchMessage {
-        submission: sub.clone(),
-        completed_queue: Some("some-completion-queue".to_string()),
-    };
-    disp.dispatch_submission(SubmissionTask::new(task)).await.unwrap();
+    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
 
     let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);

@@ -462,3 +462,10 @@ pub enum BulkResult {
     Noop,
     NotFound,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CreateIndex {
+    pub index: String,
+    pub shards_acknowledged: bool,
+    pub acknowledged: bool,    
+}

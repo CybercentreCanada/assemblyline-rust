@@ -326,10 +326,14 @@ pub struct User {
     /// Date the user agree with terms of service
     #[metadata(index=false, store=false)]
     pub agrees_with_tos: Option<DateTime<Utc>>,
-    /// Maximum number of concurrent API requests
+    /// Maximum number of concurrent API requests (0: No Quota)
     #[metadata(store=false)]
-    #[serde(default="default_api_quota")]
-    pub api_quota: u32,
+    #[serde(default)]
+    pub api_quota: Option<u32>,
+    /// Maximum number of API calls a user can do daily (0: No Quota)
+    #[metadata(store=false)]
+    #[serde(default)]
+    pub api_daily_quota: Option<u32>,
     /// Mapping of API keys
     #[metadata(index=false, store=false)]
     #[serde(default)]
@@ -343,18 +347,25 @@ pub struct User {
     #[serde(default)]
     pub can_impersonate: bool,
     /// Maximum classification for the user
-    #[serde(flatten)]
-    pub classification: ExpandingClassification<true>,  // default=Classification.UNRESTRICTED, )
+    #[metadata(copyto="__text__")]
+    #[serde(flatten, default="unrestricted_expanding_classification")]
+    pub classification: ExpandingClassification<true>,
     /// User's LDAP DN
     #[metadata(store=false, copyto="__text__")]
+    #[serde(default)]
     pub dn: Option<String>,
     /// User's email address
     #[metadata(copyto="__text__")]
+    #[serde(default)]
     pub email: Option<Email>,
     /// List of groups the user submits to
     #[metadata(copyto="__text__")]
     #[serde(default)]
     pub groups: Vec<UpperString>,
+    /// ID of the matching object in your identity provider (used for logging in as another application)
+    #[metadata(copyto="__text__", store=false)]
+    #[serde(default)]
+    identity_id: Option<String>,
     /// Is the user active?
     #[serde(default="default_user_is_active")]
     pub is_active: bool,
@@ -363,14 +374,23 @@ pub struct User {
     pub name: String,
     /// Secret key to generate one time passwords
     #[metadata(index=false, store=false)]    
+    #[serde(default)]
     pub otp_sk: Option<String>,
     /// BCrypt hash of the user's password
     #[metadata(index=false, store=false)]
     pub password: String,
-    /// Maximum number of concurrent submissions
+    /// Maximum number of concurrent submissions (0: No Quota)
     #[metadata(store=false)]
-    #[serde(default="default_submission_quota")]
-    pub submission_quota: u32,
+    #[serde(default)]
+    pub submission_quota: Option<u32>,
+    /// Maximum number of concurrent async submission (0: No Quota)
+    #[metadata(store=false)]
+    #[serde(default)]
+    pub submission_async_quota: Option<u32>,
+    /// Maximum number of submissions a user can do daily (0: No Quota)
+    #[metadata(store=false)]
+    #[serde(default)]
+    pub submission_daily_quota: Option<u32>,
     /// Type of user
     #[serde(rename="type", default="default_user_types")]
     pub user_types: Vec<UserType>,
@@ -386,7 +406,6 @@ pub struct User {
     pub uname: String,
 }
 
-fn default_api_quota() -> u32 { 10 }
 fn default_user_types() -> Vec<UserType> { vec![UserType::User] }
 fn default_submission_quota() -> u32 { 5 }
 fn default_user_is_active() -> bool { true }
@@ -399,25 +418,23 @@ impl Default for User {
     fn default() -> Self {
         User {
             agrees_with_tos: None,
-            api_quota: default_api_quota(),
+            api_quota: None,
+            api_daily_quota: None,
             apikeys: Default::default(),
             apps: Default::default(),
             can_impersonate: false,
-            classification: ExpandingClassification {
-                classification: Default::default(),
-                __access_lvl__: Default::default(),
-                __access_req__: Default::default(),
-                __access_grp1__: Default::default(),
-                __access_grp2__: Default::default(),
-            },
+            classification: ExpandingClassification::try_unrestricted().unwrap(),
             dn: None,
             email: None,
             groups: Default::default(),
+            identity_id: None,
             is_active: default_user_is_active(),
             name: "User".to_owned(),
             otp_sk: None,
             password: Default::default(),
-            submission_quota: default_submission_quota(),
+            submission_quota: None,
+            submission_async_quota: None,
+            submission_daily_quota: None,
             user_types: default_user_types(),
             roles: Default::default(),
             security_tokens: Default::default(),
@@ -425,3 +442,33 @@ impl Default for User {
         }
     }
 }
+
+
+// #[test]
+// fn sample_admin_user() {
+//     let data = r#"{
+//         "agrees_with_tos": "2025-01-30T19:24:57.559049Z", 
+//         "api_quota": null, 
+//         "api_daily_quota": null, 
+//         "apikeys": {}, 
+//         "apps": {}, 
+//         "can_impersonate": false, 
+//         "classification": "", 
+//         "dn": null, 
+//         "email": null, 
+//         "groups": [], 
+//         "identity_id": null, 
+//         "is_active": true, 
+//         "name": "Administrator", 
+//         "otp_sk": null, 
+//         "password": "password", 
+//         "submission_quota": null, 
+//         "submission_async_quota": null, 
+//         "submission_daily_quota": null, 
+//         "type": ["admin", "user", "signature_importer"], 
+//         "roles": [], 
+//         "security_tokens": {}, 
+//         "uname": "admin"
+//     }"#;
+//     let _user: User = serde_json::from_str(&data).unwrap();
+// }

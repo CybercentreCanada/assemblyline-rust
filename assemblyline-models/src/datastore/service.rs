@@ -4,6 +4,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
+use crate::types::classification::unrestricted_classification;
 use crate::{ElasticMeta, JsonMap, Readable, Text};
 
 /// Environment Variable Model
@@ -147,7 +148,8 @@ pub struct UpdateSource {
     #[serde(default)]
     pub headers: Vec<EnvironmentVariable>,
     /// Default classification used in absence of one defined in files from source
-    pub default_classification: String, // = odm.Classification(default=Classification.UNRESTRICTED,),
+    #[serde(default="unrestricted_classification")]
+    pub default_classification: String,
     /// Branch to checkout from Git repository.
     #[serde(default)]
     pub git_branch: Option<String>,
@@ -264,7 +266,8 @@ pub struct Service {
     #[serde(default="default_category")]
     pub category: String,
     /// Classification of the service
-    pub classification: String, // = odm.ClassificationString(default=Classification.UNRESTRICTED, )
+    #[serde(default="unrestricted_classification")]
+    pub classification: String,
     /// Service Configuration
     #[metadata(index=false, store=false)]
     #[serde(default)]
@@ -274,7 +277,8 @@ pub struct Service {
     #[serde(default="default_description")]
     pub description: Text,
     /// Default classification assigned to service results
-    pub default_result_classification: String, // = odm.ClassificationString(default=Classification.UNRESTRICTED, )
+    #[serde(default="unrestricted_classification")]
+    pub default_result_classification: String,
     /// Is the service enabled
     #[metadata(store=true)]
     #[serde(default)]

@@ -91,7 +91,7 @@ fn _escape(index: usize, code: &[u8], reversible: bool) -> Vec<u8> {
 pub fn dotdump_bytes(s: &[u8]) -> String {
     let mut out = String::with_capacity(s.len());
     for &byte in s {
-        if byte < 32 || byte > 126 {
+        if !(32..=126).contains(&byte) {
             out.push('.');
         } else if let Some(char) = char::from_u32(byte as u32) {
             out.push(char);
@@ -109,9 +109,7 @@ pub fn dotdump(s: &str) -> String {
 #[cfg(test)]
 mod test {
 
-    use crate::string_utils::{dotdump_bytes, escape_bytes, safe_str};
-
-    use super::dotdump;
+    use crate::string_utils::dotdump_bytes;
 
     // def test_named_constants():
     //     named_const_test = str_utils.NamedConstants("test", [

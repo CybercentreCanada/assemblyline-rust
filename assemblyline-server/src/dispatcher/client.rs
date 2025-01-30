@@ -295,10 +295,13 @@ impl DispatchClient {
             let response = self.http_client.post(&url).json(&message).send().await;
 
             match response {
-                // if we got a complete response of any kind, treat
+                // if we got a complete response of any kind, treat as accepted
                 Ok(response) => if response.status().is_success() {
                     return Ok(Some(task))
                 } else {
+                    let status = response.status();
+                    let body = response.text().await?;
+                    info!("Dispatcher has refused submission: {}/{} [{status}: {body}]", task.sid, task.service_name);
                     return Ok(None)
                 },
                 Err(err) => {

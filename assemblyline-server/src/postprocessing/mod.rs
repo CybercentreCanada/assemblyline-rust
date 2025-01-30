@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::ArchiveAction;
-use assemblyline_models::{JsonMap, Sid};
+use assemblyline_models::Sid;
 use bytes::Bytes;
 use anyhow::Result;
 use rand::{thread_rng, Rng};
@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 // use anyhow::Result;
 use itertools::Itertools;
 use log::{info, warn, error};
-use redis_objects::{Hashmap, PriorityQueue, Queue, RedisObjects};
+use redis_objects::{Hashmap, PriorityQueue, Queue};
 use serde_json::json;
 use tokio::sync::RwLock;
 
@@ -449,9 +449,9 @@ impl ActionWorker {
 /// Errors related to parsing or interpreting a post processing rule
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParsingError {
-    UnknownPrefixOperator(Box<String>),
-    InvalidDate(Box<String>),
-    InvalidTime(Box<String>),
+    UnknownPrefixOperator(String),
+    InvalidDate(String),
+    InvalidTime(String),
 
     CouldNotParseSubmissionFilter(String),
     CouldNotParseSubmissionFilterTrailing(String),
@@ -461,7 +461,7 @@ pub enum ParsingError {
 
 impl ParsingError {
     pub (crate) fn invalid_date<D: Display>(input: D) -> Self {
-        Self::InvalidDate(Box::new(input.to_string()))
+        Self::InvalidDate(input.to_string())
     }
 }
 

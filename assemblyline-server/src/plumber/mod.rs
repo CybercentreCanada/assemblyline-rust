@@ -14,7 +14,7 @@ use anyhow::Result;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::JsonMap;
 use chrono::{TimeDelta, Utc};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 
@@ -126,6 +126,7 @@ impl Plumber {
                 let current_stage = service_stage_hash.get(service_name).await?.unwrap_or(ServiceStage::Running);
                 let disabled = service.as_ref().map(|s|!s.enabled).unwrap_or(true); // either enabled is false or the service info is none
                 if disabled || current_stage != ServiceStage::Running {
+                    let mut proccessed_tasks = 0;
                     loop {
                         let task = self.dispatch_client.request_work("plumber", service_name, "0", None, false, None).await?;
                         let task = match task { 
@@ -153,6 +154,10 @@ impl Plumber {
 
                         let error_key = error.build_key(None, Some(&task))?;
                         self.dispatch_client.service_failed(task, &error_key, error).await?;
+                        proccessed_tasks += 1
+                    }
+                    if proccessed_tasks > 0 {
+                        debug!("plumber processed {proccessed_tasks} from {service_name}");
                     }
                 }
 

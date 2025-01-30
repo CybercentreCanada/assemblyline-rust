@@ -122,7 +122,7 @@ impl FromStr for PrefixOperator {
             "<=" => PrefixOperator::LessThanOrEqual,
             ">" => PrefixOperator::GreaterThan,
             "<" => PrefixOperator::LessThan,
-            _ => return Err(ParsingError::UnknownPrefixOperator(Box::new(s.to_owned())))
+            _ => return Err(ParsingError::UnknownPrefixOperator(s.to_owned()))
         })
     }
 }
@@ -440,9 +440,9 @@ fn make_date(data: &serde_json::Value) -> Result<DateTime<Utc>> {
             return Ok(date.into())
         }
 
-        return Err(ParsingError::InvalidDate(Box::new(data.to_owned())))
+        return Err(ParsingError::InvalidDate(data.to_owned()))
     }
-    return Err(ParsingError::InvalidDate(Box::new(data.to_string())))
+    return Err(ParsingError::InvalidDate(data.to_string()))
 }
 
 
@@ -452,7 +452,7 @@ impl RangeQuery {
             RangeTerm::Wildcard => {},
             RangeTerm::Date(start) => {
                 let data: DateTime<Utc> = make_date(data)?;
-                let bound = start.resolve().ok_or(ParsingError::InvalidDate(Box::new(start.to_string())))?;
+                let bound = start.resolve().ok_or(ParsingError::InvalidDate(start.to_string()))?;
                 match self.start_bound {
                     RangeBound::Inclusive => if data < bound {
                         return Ok(false)
@@ -496,7 +496,7 @@ impl RangeQuery {
             RangeTerm::Wildcard => {},
             RangeTerm::Date(end) => {
                 let data: DateTime<Utc> = make_date(data)?;
-                let bound = end.resolve().ok_or(ParsingError::InvalidDate(Box::new(end.to_string())))?;
+                let bound = end.resolve().ok_or(ParsingError::InvalidDate(end.to_string()))?;
                 match self.end_bound {
                     RangeBound::Inclusive => if bound < data {
                         return Ok(false)
@@ -660,7 +660,7 @@ fn submission_fields() -> &'static Vec<struct_metadata::Entry<ElasticMeta>> {
     })
 }
 
-fn check_field_type(root: &str, tail: &[String], kind: &struct_metadata::Kind<ElasticMeta>) -> bool {
+fn check_field_type(_root: &str, tail: &[String], kind: &struct_metadata::Kind<ElasticMeta>) -> bool {
     match kind {
         // if its a struct search within it's children
         struct_metadata::Kind::Struct { children, .. } => {
@@ -680,7 +680,7 @@ fn check_field_type(root: &str, tail: &[String], kind: &struct_metadata::Kind<El
         struct_metadata::Kind::Sequence(kind) |
         struct_metadata::Kind::Option(kind) |
         struct_metadata::Kind::Aliased { kind, .. } => {
-            check_field_type(root, tail, &kind.kind)
+            check_field_type(_root, tail, &kind.kind)
         }
 
         // all remaining types are scalar, accept the field so long as its not trying 

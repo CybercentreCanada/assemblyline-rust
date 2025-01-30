@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
 use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, UpperString};
@@ -356,7 +357,8 @@ pub struct Verdict {
     pub non_malicious: Vec<String>,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq, strum::Display, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[metadata_type(ElasticMeta)]
 pub enum SubmissionState {
     Failed,
@@ -364,19 +366,12 @@ pub enum SubmissionState {
     Completed,
 }
 
-impl<'de> Deserialize<'de> for SubmissionState {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>
-    {
-        let string = String::deserialize(deserializer)?;
-        match string.to_lowercase().as_str() {
-            "failed" => Ok(Self::Failed),
-            "submitted" => Ok(Self::Submitted),
-            "completed" => Ok(Self::Completed),
-            _ => Err(serde::de::Error::custom("unparsable submission state")),
-        }
-    }
+#[test]
+fn test_state_serialization() {
+    assert_eq!(serde_json::to_string(&SubmissionState::Failed).unwrap(), "\"failed\"");
+    assert_eq!(serde_json::from_str::<SubmissionState>("\"failed\"").unwrap(), SubmissionState::Failed);
+    assert_eq!(serde_json::to_value(SubmissionState::Failed).unwrap(), serde_json::json!("failed"));
+    assert_eq!(serde_json::from_str::<SubmissionState>("\"Failed\"").unwrap(), SubmissionState::Failed);
 }
 
 

@@ -42,8 +42,8 @@ impl<T: CollectionType> Collection<T> {
     pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String) -> Result<Self> {
         let collection = Collection {
             database: es,
-            name: prefix.clone() + &name,
-            archive_name: archive_name.map(|name| prefix + &name),
+            name: prefix.to_lowercase() + &name.to_lowercase(),
+            archive_name: archive_name.map(|name| prefix.to_lowercase() + &name.to_lowercase()),
             _data: Default::default()
         };
         collection.ensure_collection().await?;
@@ -68,11 +68,18 @@ impl<T: CollectionType> Collection<T> {
                     "settings": self.database.get_index_settings(&self.name, self.is_archive_index(&index))
                 });
 
-                if let Err(err) = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &index)?, &body).await {
-                    if err.is_resource_already_exists() {
-                        warn!("Tried to create an index template that already exists: {}", alias.to_uppercase());    
-                    } else {
-                        return Err(err).context("put index bad request")
+                let result = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &index)?, &body).await;
+                match result {
+                    Ok(resp) => {
+                        let resp: responses::CreateIndex = resp.json().await?;
+                        debug!("created index {index}: {resp:?}");
+                    }
+                    Err(err) => {
+                        if err.is_resource_already_exists() {
+                            warn!("Tried to create an index template that already exists: {}", alias.to_uppercase());    
+                        } else {
+                            return Err(err).context("put index bad request")
+                        }
                     }
                 };
 

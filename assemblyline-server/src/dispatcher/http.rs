@@ -18,12 +18,13 @@ use serde::{Serialize, Deserialize};
 async fn start_task(
     Json(request): Json<ServiceStartMessage>,
     Data(dispatcher): Data<&Arc<Dispatcher>>
-) -> poem::http::StatusCode {
+) -> (poem::http::StatusCode, String) {
     let (send, recv) = tokio::sync::oneshot::channel();
     dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Start(request, Some(send))).await;
     match recv.await {
-        Ok(_) => poem::http::StatusCode::OK,
-        Err(_) => poem::http::StatusCode::BAD_REQUEST,
+        Ok(Ok(())) => (poem::http::StatusCode::OK, "".to_string()),
+        Ok(Err(err)) => (poem::http::StatusCode::BAD_REQUEST, err.to_string()),
+        Err(_) => (poem::http::StatusCode::INTERNAL_SERVER_ERROR, "Connection dropped".to_string()),
     }
 }
 

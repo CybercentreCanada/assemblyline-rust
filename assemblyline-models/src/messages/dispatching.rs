@@ -1,13 +1,35 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
-use crate::Sid;
+use crate::{Sha256, Sid};
 
 
 
 #[derive(Serialize, Deserialize)]
 pub struct SubmissionDispatchMessage {
     pub submission: crate::datastore::Submission,
+    #[serde(default)]
     pub completed_queue: Option<String>,
+    #[serde(default)]
+    pub file_infos: HashMap<Sha256, super::task::FileInfo>,
+    // #[serde(default)]
+    // pub results: ,
+    // #[serde(default)]
+    // pub file_tree=None, 
+    // #[serde(default)]
+    // pub errors: Optional[Iterable[str]] = None,
+// scheduler,datastore: AssemblylineDatastore
+}
+
+impl SubmissionDispatchMessage {
+    pub fn simple(submission: crate::datastore::Submission, completed_queue: Option<String>) -> Self {
+        Self {
+            submission,
+            completed_queue,
+            file_infos: Default::default(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]

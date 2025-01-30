@@ -1077,7 +1077,7 @@ impl ClassificationParser {
     pub fn normalize_classification_options(&self, c12n: &str, options: NormalizeOptions) -> Result<String> {
         let NormalizeOptions{long_format, skip_auto_select, get_dynamic_groups} = options;
 
-        if !self.enforce || self.invalid_mode {
+        if !self.enforce || self.invalid_mode || c12n.is_empty() {
             return Ok(self.unrestricted.clone())
         }
 

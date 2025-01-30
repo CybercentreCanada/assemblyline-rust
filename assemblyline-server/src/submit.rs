@@ -81,10 +81,7 @@ impl SubmitManager {
 
         self.datastore.submission.save(&sub.sid.to_string(), &sub, None, None).await?;
 
-        self.dispatch_submission_queue.push(&SubmissionDispatchMessage{
-            submission: sub,
-            completed_queue,
-        }).await?;
+        self.dispatch_submission_queue.push(&SubmissionDispatchMessage::simple(sub, completed_queue)).await?;
         Ok(())
     }
 }

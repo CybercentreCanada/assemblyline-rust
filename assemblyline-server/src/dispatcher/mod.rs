@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Result, anyhow};
 use assemblyline_models::config::TemporaryKeyType;
 use assemblyline_models::datastore::submission::SubmissionState;
 use assemblyline_models::datastore::{error, Service, Submission};
@@ -93,7 +93,7 @@ macro_rules! retry {
 }
 
 enum DispatchAction {
-    Start(ServiceStartMessage, Option<oneshot::Sender<()>>),
+    Start(ServiceStartMessage, Option<oneshot::Sender<Result<()>>>),
     Result(ServiceResponse),
     Check(Sid),
     BadSid(Sid),
@@ -177,7 +177,7 @@ struct SubmissionTask {
 
     file_info: HashMap<Sha256, Option<Arc<FileInfo>>>,
     file_names: HashMap<Sha256, String>,
-    file_schedules: HashMap<Sha256, Vec<Vec<Arc<Service>>>>,
+    file_schedules: HashMap<Sha256, Vec<Vec<String>>>,
     file_tags: HashMap<Sha256, HashMap<String, TagEntry>>, // = defaultdict(dict),
     file_depth: HashMap<Sha256, u32>,
     file_ancestry: HashMap<Sha256, Vec<Vec<AncestoryEntry>>>,
@@ -211,13 +211,11 @@ struct SubmissionTask {
 
 impl SubmissionTask {
 
-    fn new(args: SubmissionDispatchMessage) -> Self {
-//     def __init__(self, submission, completed_queue, scheduler, datastore: AssemblylineDatastore, results=None,
-//                  file_infos=None, file_tree=None, errors: Optional[Iterable[str]] = None):
+    fn new(args: SubmissionDispatchMessage, access_control: Option<String>) -> Self {
         let mut out = Self {
             submission: args.submission,
             completed_queue: args.completed_queue,
-            service_access_control: None,
+            service_access_control: access_control,
             internal_task_queue: Default::default(),
 
             file_info: Default::default(),
@@ -246,18 +244,11 @@ impl SubmissionTask {
             _parent_map: Default::default(),
         };
 
+        for (hash, info) in args.file_infos {
+            out.file_info.insert(hash, Some(Arc::new(info)));
+        }
 
-        // self.submission: Submission = Submission(submission)
-        // submitter: Optional[User] = datastore.user.get_if_exists(self.submission.params.submitter)
-        // self.service_access_control: Optional[str] = None
-        // if submitter:
-        //     self.service_access_control = submitter.classification.value
-
-
-
-        // if file_infos is not None:
-        //     self.file_info.update({k: FileInfo(v) for k, v in file_infos.items()})
-
+        error!("dispatcher parameters not parsed");
         // if file_tree is not None:
         //     def recurse_tree(tree, depth):
         //         for sha256, file_data in tree.items():
@@ -267,6 +258,7 @@ impl SubmissionTask {
 
         //     recurse_tree(file_tree, 0)
 
+        error!("dispatcher parameters not parsed");
         // if results is not None:
         //     rescan = scheduler.expand_categories(self.submission.params.services.rescan)
 
@@ -286,6 +278,7 @@ impl SubmissionTask {
         //         for service_name in prevented_services:
         //             self.forbid_for_children(sha256, service_name)
 
+        error!("dispatcher parameters not parsed");
         //     # Replay the process of receiving results for dispatcher internal state
         //     for k, result in results.items():
         //         sha256, service, _ = k.split('.', 2)
@@ -306,6 +299,7 @@ impl SubmissionTask {
         //             else:
         //                 self.file_tags[sha256][key] = tags[key]
 
+        error!("dispatcher parameters not parsed");
         // if errors is not None:
         //     for e in errors:
         //         sha256, service, _ = e.split('.', 2)
@@ -858,8 +852,15 @@ impl Dispatcher {
                     None => continue
                 };
 
+                // Fetch the access level of the submitter and attach it to the task.
+                // This is for performance rather than security reasons.
+                let mut access_control = None;
+                if let Some((submitter, _)) = self.core.datastore.user.get_if_exists(&message.submission.params.submitter, None).await.context("fetching user data")? {
+                    access_control = Some(submitter.classification.classification)
+                }
+
                 // This is probably a complete task
-                let task = SubmissionTask::new(message);
+                let task = SubmissionTask::new(message, access_control);
                 self.dispatch_submission(task).await.context("dispatch_submission")?;
             }
         }
@@ -1259,10 +1260,7 @@ impl Dispatcher {
         }
 
         // Put the file back into processing
-        self.submission_queue.unpop(&SubmissionDispatchMessage{
-            submission,
-            completed_queue,
-        }).await?;
+        self.submission_queue.unpop(&SubmissionDispatchMessage::simple(submission, completed_queue)).await?;
         Ok(true)
     }
 
@@ -1292,10 +1290,7 @@ impl Dispatcher {
 
         if !self.active_submissions.exists(&sid).await? {
             info!("[{sid}] New submission received");
-            self.active_submissions.add(&sid, &SubmissionDispatchMessage{
-                completed_queue: task.completed_queue.clone(),
-                submission: task.submission.clone()
-            }).await?;
+            self.active_submissions.add(&sid, &SubmissionDispatchMessage::simple(task.submission.clone(),  task.completed_queue.clone())).await?;
 
             // Write all new submissions to the traffic queue
             self.traffic_queue.publish(&SubmissionMessage::started((&task.submission).into())).await?;
@@ -1373,7 +1368,7 @@ impl Dispatcher {
             match self._submission_worker(&mut task, &mut work_queue).await {
                 Ok(_) => return,
                 Err(err) => {
-                    error!("Error handling submission [{}]: {err}", task.submission.sid);
+                    error!("Error handling submission [{}]: {err:?}", task.submission.sid);
                 },
             }
         }
@@ -1398,7 +1393,7 @@ impl Dispatcher {
 
         // process the root file
         let mut finished = false;
-        self.dispatch_file(task, &task.submission.files[0].sha256.clone()).await?;
+        self.dispatch_file(task, &task.submission.files[0].sha256.clone()).await.context("initial dispatch")?;
 
         while self.core.is_running() && !finished {
             let mut message = task.pop_internal_task();
@@ -1448,11 +1443,16 @@ impl Dispatcher {
             // process the message
             match message {
                 DispatchAction::Start(message, started) => {
+                    let finish = |message: Result<()>| {
+                        started.map(|socket| socket.send(message))
+                    };
+
                     let key = (message.sha, message.service_name.clone());
                     if let Some((service_task, queue_key)) = task.queue_keys.remove(&key) {
                         // If this task is already finished (result message processed before start
                         // message) we can skip setting a timeout
                         if task.service_errors.contains_key(&key) || task.service_results.contains_key(&key) {
+                            finish(Err(anyhow!("Task already finished")));
                             continue
                         }
 
@@ -1461,6 +1461,7 @@ impl Dispatcher {
                             if request_id != service_task.task_id {
                                 // trying to start the wrong task, put the queue key back and ignore this message
                                 task.queue_keys.insert(key, (service_task, queue_key));
+                                finish(Err(anyhow!("This task has been replaced")));
                                 continue
                             }
                         }
@@ -1469,10 +1470,11 @@ impl Dispatcher {
                             timeouts.insert(key.clone(), (Instant::now(), Duration::from_secs(service.timeout as u64) + TIMEOUT_GRACE, message.worker_id.clone()));
                             task.service_logs.entry(key.clone()).or_default().push(format!("Popped from queue and running at {} on worker {}", chrono::Utc::now(), message.worker_id));
                             task.running_services.insert(key, service_task);
-                            if let Some(started) = started {
-                                _ = started.send(());
-                            }
+                            finish(Ok(()));
+                            continue
                         }
+                    } else {
+                        finish(Err(anyhow!("Task not recorded as queued")));
                     }
                 },
                 DispatchAction::Result(message) => {
@@ -1513,10 +1515,7 @@ impl Dispatcher {
                 },
                 DispatchAction::BadSid(_) => {
                     task.submission.to_be_deleted = true;
-                    self.active_submissions.set(&sid.to_string(), &SubmissionDispatchMessage{
-                        completed_queue: task.completed_queue.clone(),
-                        submission: task.submission.clone()
-                    }).await?;
+                    self.active_submissions.set(&sid.to_string(), &SubmissionDispatchMessage::simple(task.submission.clone(), task.completed_queue.clone())).await?;
                 },
                 DispatchAction::Check(_) => {
                     info!("[{sid}] checking dispatch status...");
@@ -1561,7 +1560,7 @@ impl Dispatcher {
         let sid = task.submission.sid;
 
         // We are processing this file, load the file info
-        let file_info = match self.get_fileinfo(task, sha256).await? {
+        let file_info = match self.get_fileinfo(task, sha256).await.context("get_fileinfo")? {
             Some(file_info) => file_info,
             None => return Ok(())
         };
@@ -1588,10 +1587,11 @@ impl Dispatcher {
                     file_depth,
                     Some(forbidden_services),
                     task.service_access_control.clone()
-                )?;
-                task.file_schedules.insert(sha256.clone(), schedule.clone());
-                debug!("[{sid}::{sha256}] schedule: {:?}", get_schedule_names(&schedule));
-                schedule
+                ).context("build_schedule")?;
+                let schedule_names = get_schedule_names(&schedule);
+                debug!("[{sid}::{sha256}] schedule: {:?}", schedule_names);
+                task.file_schedules.insert(sha256.clone(), schedule_names.clone());
+                schedule_names
             }
         };
 
@@ -1600,16 +1600,15 @@ impl Dispatcher {
 
         // Go through each round of the schedule removing complete/failed services
         // Break when we find a stage that still needs processing
-        let mut outstanding: HashMap<String, Arc<Service>> = Default::default();
+        let mut outstanding: Vec<String> = Default::default();
         let mut started_stages = vec![];
         while !schedule.is_empty() && outstanding.is_empty() {
             let stage = schedule.remove(0);
             started_stages.push(stage.clone());
 
-            for service in stage {
-                let key = (sha256.clone(), service.name.clone());
-
+            for service_name in stage {
                 // If the service terminated in an error, count the error and continue
+                let key = (sha256.clone(), service_name.clone());
                 if task.service_errors.contains_key(&key) {
                     continue
                 }
@@ -1618,7 +1617,7 @@ impl Dispatcher {
                 let result = match task.service_results.get(&key) {
                     Some(result) => result,
                     None => {
-                        outstanding.insert(service.name.clone(), service);
+                        outstanding.push(service_name);
                         continue
                     }
                 };
@@ -1640,7 +1639,7 @@ impl Dispatcher {
             let mut running = vec![];
             let mut skipped = vec![];
 
-            for (service_name, service) in outstanding {
+            for service_name in outstanding {
                 let service_queue = self.core.get_service_queue(&service_name);
 
                 let key = (sha256.clone(), service_name.clone());
@@ -1672,6 +1671,12 @@ impl Dispatcher {
                     continue
                 }
 
+                // check if the service is still enabled
+                let service = match self.core.services.get(&service_name) {
+                    Some(service) if service.enabled => service,
+                    _ => continue
+                };
+                
                 // Load the list of tags we will pass
                 let mut tags = vec![];
                 if service.uses_tags || service.uses_tag_scores {
@@ -1898,7 +1903,7 @@ impl Dispatcher {
 
             while !schedule.is_empty() && !pending_files.contains(&sha256) && !processing_files.contains(&sha256) {
                 let stage = schedule.remove(0);
-                for service in stage {
+                for service_name in stage {
 
                     // should be handled by plumber
                     // // Only active services should be in this dict, so if a service that was placed in the
@@ -1909,7 +1914,7 @@ impl Dispatcher {
                     // }
 
                     // If there is an error we are finished with this service
-                    let key = (sha256.clone(), service.name.clone());
+                    let key = (sha256.clone(), service_name.clone());
                     if task.service_errors.contains_key(&key) {
                         continue
                     }
@@ -1940,7 +1945,7 @@ impl Dispatcher {
 
                     // Check if the service is in queue, and handle it the same as being in progress.
                     // Check this one last, since it can require a remote call to redis rather than checking a dict.
-                    let service_queue = self.core.get_service_queue(&service.name);
+                    let service_queue = self.core.get_service_queue(&service_name);
                     if let Some((_, queue_key)) = task.queue_keys.get(&key) {
                         if task.queue_keys.contains_key(&key) && service_queue.rank(queue_key).await?.is_some() {
                             processing_files.push(sha256.clone());
@@ -1954,8 +1959,16 @@ impl Dispatcher {
                         break
                     }
 
+                    // We check if it has already been dispatched before checking if its enabled 
+                    // to let us catch any trailing results coming in. But we don't count the file as pending
+                    // because we aren't going to _start_ processing on enabled. Plumber will handle the corner cases.
+                    match self.core.services.get(&service_name) {
+                        Some(service) if service.enabled => {},
+                        _ => continue
+                    };
+
                     // Since the service is not finished or in progress, it must still need to start
-                    debug!("[{sid}] Not complete on account of {sha256} needing {}", service.name);
+                    debug!("[{sid}] Not complete on account of {sha256} needing {service_name}");
                     pending_files.push(sha256.clone());
                     break
                 }

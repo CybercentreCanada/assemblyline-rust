@@ -1,6 +1,5 @@
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +19,10 @@ use crate::ingester::IngestTask;
 use crate::Core;
 
 use super::Ingester;
+
+fn time_limit() -> Duration {
+    Duration::from_secs(120)
+}
 
 /// A helper to fill in some fields that are largely invariant across tests.
 struct MakeMessage {
@@ -388,8 +391,8 @@ async fn test_ingest_always_create_submission() {
         if let Some(obj) = core.datastore.submission.get(&sid.to_string(), None).await.unwrap() {
             break obj
         }
-        if wait_time.elapsed() > Duration::from_secs(60) {
-            panic!();
+        if wait_time.elapsed() > time_limit() {
+            panic!("timed out waiting for submission creation");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };

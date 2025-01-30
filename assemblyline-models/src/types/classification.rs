@@ -27,6 +27,37 @@ pub fn set_global_classification(config: Arc<ClassificationParser>) {
     *GLOBAL_CLASSIFICATION.lock().unwrap() = ClassificationMode::Configured(config);
 }
 
+pub fn unrestricted_classification() -> String {
+    match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
+        ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
+        ClassificationMode::Disabled => "".to_string(),
+        ClassificationMode::Configured(parser) => parser.unrestricted().to_owned(),
+    }
+}
+
+pub fn unrestricted_classification_string() -> ClassificationString {
+    match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
+        ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
+        ClassificationMode::Disabled => ClassificationString(Default::default()),
+        ClassificationMode::Configured(parser) => ClassificationString::unrestricted(parser),
+    }
+}
+
+pub fn unrestricted_expanding_classification() -> ExpandingClassification {
+    match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
+        ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
+        ClassificationMode::Disabled => ExpandingClassification {
+            classification: Default::default(),
+            __access_lvl__: Default::default(),
+            __access_req__: Default::default(),
+            __access_grp1__: Default::default(),
+            __access_grp2__: Default::default(),
+        },
+        ClassificationMode::Configured(parser) => ExpandingClassification::unrestricted(parser),
+    }
+}
+
+
 // #[cfg(feature = "local_classification")]
 // pub async fn with_local_classification<F: std::future::Future>(config: Arc<ClassificationParser>, f: F)  {
 //     TASK_CLASSIFICATION.scope(Some(config), f).await
@@ -47,6 +78,7 @@ pub struct ExpandingClassification<const USER: bool=false> {
 impl<const USER: bool> ExpandingClassification<USER> {
     pub fn new(classification: String, parser: &ClassificationParser) -> Result<Self, ModelError> {
         if parser.original_definition.enforce {
+
             let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
             let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
 
@@ -267,6 +299,14 @@ impl ClassificationString {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub fn default_unrestricted() -> ClassificationString {
+        match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
+            ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
+            ClassificationMode::Disabled => ClassificationString(Default::default()),
+            ClassificationMode::Configured(parser) => ClassificationString::unrestricted(parser),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -300,6 +340,25 @@ impl Serialize for ClassificationString {
         RawClassificationString::from(self).serialize(serializer)
     }
 }
+
+// fn response_or_empty_string<'de, D>(d: D) -> Result<Option<Response>, D::Error>
+// where
+//     D: Deserializer<'de>,
+// {
+//     #[derive(Deserialize)]
+//     #[serde(untagged)]
+//     enum MyHelper<'a> {
+//         S(&'a str),
+//         R(Response),
+//     }
+
+//     match MyHelper::deserialize(d) {
+//         Ok(MyHelper::R(r)) => Ok(Some(r)),
+//         Ok(MyHelper::S(s)) if s.is_empty() => Ok(None),
+//         Ok(MyHelper::S(_)) => Err(D::Error::custom("only empty strings may be provided")),
+//         Err(err) => Err(err),
+//     }
+// }
 
 impl<'de> Deserialize<'de> for ClassificationString {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

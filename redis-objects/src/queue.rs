@@ -280,6 +280,10 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         }
     }
 
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
 // class PriorityQueue(Generic[T]):
 //     def __init__(self, name, host=None, port=None, private=False):
 //         self.c = get_client(host, port, private)
