@@ -57,7 +57,6 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
     type Output = Response;
 
     async fn call(&self, mut req: Request) -> Result<Self::Output> {
-        debug!("authenicating request");
         // normalize headers, they are already case insensitive, but lets also normalize _
         let mut new_headers = vec![];
         for (name, value) in req.headers() {
@@ -111,16 +110,21 @@ pub struct ClientInfo {
     pub client_id: String,
     pub service_name: String,
     pub service_version: String,
-    pub service_tool_version: String,
+    pub service_tool_version: Option<String>,
 }
 
 impl ClientInfo {
     fn new(req: &Request) -> Result<Self, &'static str> {
+        let service_tool_version = match req.header("SERVICE-TOOL-VERSION") {
+            None | Some("") => None,
+            Some(header) => Some(header.to_owned())
+        };
+
         Ok(ClientInfo {
             client_id: read_required_header(req, "CONTAINER-ID")?.to_owned(),
             service_name: read_required_header(req, "SERVICE-NAME")?.to_owned(),
-            service_version: read_required_header(req, "SERVICE-VERSION")?.to_owned(),
-            service_tool_version: read_required_header(req, "SERVICE-TOOL-VERSION")?.to_owned(),
+            service_version: read_required_header(req, "SERVICE-VERSION")?.replace("stable", ""),
+            service_tool_version,
         })
     }
 }

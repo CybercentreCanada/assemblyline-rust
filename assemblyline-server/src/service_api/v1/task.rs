@@ -58,7 +58,7 @@ async fn get_task(
         service_tool_version,
         client_id
     } = client_info;
-    debug!("Getting task for {service_name} {service_version} [{service_tool_version}]");
+    debug!("Getting task for {service_name} {service_version} [{}]", service_tool_version.as_deref().unwrap_or("None"));
 
     let timeout_string = require_header!(headers, "timeout", "30");
     let timeout = match timeout_string.parse() {
@@ -73,7 +73,7 @@ async fn get_task(
     loop {
         let remaining = timeout.saturating_sub(start_time.elapsed());
         if remaining.is_zero() {
-            debug!("get task timeout ({timeout:?}) after {attempts} attempts");
+            debug!("get {service_name} task timeout ({timeout:?}) after {attempts} attempts");
             break
         }
         attempts += 1;
@@ -82,7 +82,7 @@ async fn get_task(
             client_id, 
             service_name, 
             service_version, 
-            service_tool_version, 
+            service_tool_version.as_deref(), 
             Some(status_expiry), 
             remaining
         ).await;

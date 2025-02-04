@@ -654,10 +654,10 @@ impl Ingester {
         // Check if this file is already being processed
         debug!("[{} :: {}] checking cache? {}", task.ingest_id, task.sha256(), !task.params().ignore_cache);
         Self::stamp_filescore_key(&mut task, None);
-        let (cache_entry, _) = if !task.params().ignore_cache {
-            self.check(&mut task, false).await?
-        } else {
+        let (cache_entry, _) = if task.params().ignore_cache {
             (None, "".to_owned())
+        } else {
+            self.check(&mut task, false).await?
         };
 
         // Assign priority.

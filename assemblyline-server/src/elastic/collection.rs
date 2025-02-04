@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use assemblyline_models::meta::flatten_fields;
 use assemblyline_models::{ElasticMeta, JsonMap, Readable};
+use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use log::{debug, error, warn};
 use reqwest::Method;
@@ -538,7 +539,9 @@ impl<T: CollectionType> Collection<T> {
     pub async fn update(&self, id: &str, mut operations: OperationBatch, index_type: Option<Index>, retry_on_conflict: Option<i64>) -> Result<bool> {
         let index_type = index_type.unwrap_or(Index::Hot);
         operations.validate_operations::<T>()?;
-        let operations = operations.to_script();
+        let operations = json!({
+            "script": operations.to_script()
+        });
 
         for index in self.get_index_list(Some(index_type))? {
             let request = Request::update_doc(&self.database.host, &index, id, retry_on_conflict)?;
@@ -639,8 +642,8 @@ pub enum InvalidOperationError {
     InvalidField { field: String, model: String },
     #[error("Invalid operation for field {field}: {operation:?}")]
     InvalidOperation { field: String, operation: UpdateOperation },
-    #[error("Invalid value for field {field}: {value}")]
-    Value { field: String, value: String }
+    #[error("Invalid value for field {field}: {value} (expected {kind})")]
+    Value { field: String, value: String, kind: String }
 }
 
 #[derive(Default)]
@@ -686,14 +689,14 @@ impl OperationBatch {
 
         for (op, doc_key, value) in &mut self.operations {
 
-            let (field, multivalued) = match fields.get(doc_key) {
+            let (field, multivalued, optional) = match fields.get(doc_key) {
                 Some(field) => *field,
                 None => {
                     // let prev_key = None;
                     if let Some((prev_key, _)) = doc_key.rsplit_once('.') {
-                        if let Some((field, multivalued)) = fields.get(prev_key) {
+                        if let Some((field, multivalued, optional)) = fields.get(prev_key) {
                             if let struct_metadata::Kind::Mapping(kind, ..) = &field.kind {
-                                (kind.as_ref(), *multivalued)
+                                (kind.as_ref(), *multivalued, *optional)
                             } else {
                                 return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
                             }
@@ -706,6 +709,10 @@ impl OperationBatch {
                 }
             };
 
+            if optional && value.is_null() {
+                continue
+            }
+
             match op {
                 UpdateOperation::Append | UpdateOperation::AppendIfMissing |
                 UpdateOperation::Prepend | UpdateOperation::PrependIfMissing |
@@ -715,14 +722,14 @@ impl OperationBatch {
                     }
 
                     if check_type(&field.kind, value).is_err() {
-                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string(), kind: format!("{:?}", field.kind) })
                     }
                 }
 
                 UpdateOperation::Dec |
                 UpdateOperation::Inc => {
                     if check_type(&field.kind, value).is_err() {
-                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string(), kind: format!("{:?}", field.kind) })
                     }
                 }
 
@@ -730,11 +737,11 @@ impl OperationBatch {
                     if multivalued && value.is_array() {
                         for value in value.as_array_mut().unwrap() {
                             if check_type(&field.kind, value).is_err() {
-                                return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
-                            }        
+                                return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string(), kind: format!("{:?}", field.kind) })
+                            }
                         }
                     } else if check_type(&field.kind, value).is_err() {
-                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string() })
+                        return Err(InvalidOperationError::Value { field: doc_key.to_owned(), value: value.to_string(), kind: format!("{:?}", field.kind) })
                     }
                 }
 
@@ -1176,3 +1183,20 @@ impl<'a, T: CollectionType, RT: Debug + Readable> ScrollCursor<'a, T, RT> {
 //         None
 //     }
 // }
+
+
+#[test]
+fn test_check_type() {
+
+    #[derive(Described)]
+    #[metadata_type(ElasticMeta)]
+    struct TestObject {
+        an_optional_date: Option<DateTime<Utc>>,
+    }
+
+    let kind = TestObject::metadata().kind;    
+    assert!(check_type(&kind, &mut json!({"an_optional_date": null})).is_ok(), "{kind:?}");
+
+    // let kind = flatten_fields(&TestObject::metadata());
+    // assert!(check_type(&kind, &mut json!({"an_optional_date": null})).is_ok(), "{kind:?}");
+}

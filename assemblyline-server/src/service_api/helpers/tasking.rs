@@ -438,7 +438,7 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 } 
 
 impl TaskingClient {
-    pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: &str, status_expiry: Option<i64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
+    pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<i64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
         let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
 
         let status_expiry = match status_expiry {
@@ -483,7 +483,7 @@ impl TaskingClient {
             service_version,
             false,
             false,
-            Some(service_tool_version),
+            service_tool_version,
             Some(&task)
         )?;
 
@@ -548,11 +548,11 @@ impl TaskingClient {
         // Checking for previous empty results for this key
         let empty_key = format!("{result_key}.e");
         match self.datastore.emptyresult.get_if_exists(&empty_key, None).await {
-            Ok(Some(_)) => {
+            Ok(Some((_, version))) => {
                 increment!(metric_factory, cache_hit);
                 increment!(metric_factory, not_scored);
                 let result = create_empty_result_from_key(&result_key, self.config.submission.emptyresult_dtl.into(), &self.classification_engine)?;
-                self.dispatch_client.service_finished(task, empty_key, result, None, None).await?;
+                self.dispatch_client.service_finished(task, empty_key, result, None, Some(version)).await?;
                 return Ok((None, true))
             },
             Ok(None) => {},

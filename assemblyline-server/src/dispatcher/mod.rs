@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result, anyhow};
 use assemblyline_models::config::TemporaryKeyType;
 use assemblyline_models::datastore::submission::SubmissionState;
+use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{error, Service, Submission};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
 use assemblyline_models::messages::submission::SubmissionMessage;
@@ -31,6 +32,7 @@ use rand::Rng;
 
 use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
+use crate::elastic::Elastic;
 use crate::http::TlsAcceptor;
 use crate::postprocessing::ActionWorker;
 use crate::services::get_schedule_names;
@@ -44,6 +46,7 @@ const ONE_SECOND: Duration = Duration::from_secs(1);
 const ONE_HOUR: Duration = Duration::from_secs(60 * 60);
 const ONE_DAY: Duration = Duration::from_secs(ONE_HOUR.as_secs() * 24);
 const DEFAULT_RESULT_BATCH_SIZE: usize = 50;
+const USER_CACHE_TIME: Duration = Duration::from_secs(30);
 
 // ERROR_BATCH_SIZE = int(os.environ.get('DISPATCHER_ERROR_BATCH_SIZE', '50'))
 
@@ -133,6 +136,7 @@ struct ServiceStartMessage {
     sha: Sha256,
     service_name: String,
     worker_id: String,
+    dispatcher_id: String,
     task_id: Option<u64>,
 }
 
@@ -611,6 +615,7 @@ pub struct Dispatcher {
     finalizing_start: Mutex<Option<std::time::Instant>>,
     shutdown_grace: u64,
     result_batch_size: usize,
+    user_cache: UserCache,
 
     // Setup queues for work to be divided into
     process_queues: tokio::sync::RwLock<HashMap<Sid, mpsc::UnboundedSender<DispatchAction>>>,
@@ -696,6 +701,7 @@ impl Dispatcher {
             result_batch_size,
             finalizing: Arc::new(Flag::new(false)),
             finalizing_start: Mutex::new(None),
+            user_cache: UserCache::new(core.datastore.clone()),
 
             // Communications queues
             start_queue: core.redis_volatile.queue(DISPATCH_START_EVENTS.to_owned() + &instance_id, Some(QUEUE_EXPIRY)),
@@ -751,6 +757,8 @@ impl Dispatcher {
     }
 
     pub fn start(self: &Arc<Self>, components: &mut tokio::task::JoinSet<()>) {
+        components.spawn(self.clone().on_terminate());
+
         // Pull in new submissions
         components.spawn(retry!("Pull Submissions", self, pull_submissions));
 
@@ -772,6 +780,11 @@ impl Dispatcher {
 
         // Daemon to report CPU usage
         components.spawn(retry!("Metrics Reporter".to_string(), self, handle_metrics));
+    }
+
+    async fn on_terminate(self: Arc<Self>) {
+        self.finalizing.wait_for(true).await;
+        _ = self.dispatchers_directory_finalize.set(&self.instance_id, &chrono::Utc::now().timestamp()).await;
     }
 
     async fn handle_metrics(self: Arc<Self>) -> Result<()> {
@@ -855,8 +868,8 @@ impl Dispatcher {
                 // Fetch the access level of the submitter and attach it to the task.
                 // This is for performance rather than security reasons.
                 let mut access_control = None;
-                if let Some((submitter, _)) = self.core.datastore.user.get_if_exists(&message.submission.params.submitter, None).await.context("fetching user data")? {
-                    access_control = Some(submitter.classification.classification)
+                if let Some(submitter) = self.user_cache.get(&message.submission.params.submitter).await? {
+                    access_control = Some(submitter.classification.classification.clone())
                 }
 
                 // This is probably a complete task
@@ -927,7 +940,7 @@ impl Dispatcher {
             if gap > GUARD_TIMEOUT {
                 warn!("Dispatcher closing due to guard interval failure: {gap} > {GUARD_TIMEOUT}");
                 self.core.running.set(false);
-                return Ok(())
+                break
             }
 
             // Everything is fine, prepare for next round
@@ -942,7 +955,9 @@ impl Dispatcher {
     async fn work_thief(self: &Arc<Self>) -> Result<()> {
         // Clean up the finalize list once in a while, each time a dispatcher starts is fine
         for (id, timestamp) in self.dispatchers_directory_finalize.items().await? {
-            if chrono::Utc::now().timestamp() - timestamp > ONE_DAY.as_secs() as i64 {
+            let age = chrono::Utc::now().timestamp() - timestamp;
+            if age > ONE_DAY.as_secs() as i64 {
+                debug!("cleaning finialize record: {id} ({age} seconds)");
                 self.dispatchers_directory_finalize.pop(&id).await?;
             }
         }
@@ -954,8 +969,8 @@ impl Dispatcher {
 
             // Load guards
             let finalizing = self.dispatchers_directory_finalize.items().await?;
-            for (id, time) in &finalizing {
-                last_seen.insert(id.clone(), *time);
+            for (id, time) in self.dispatchers_directory.items().await? {
+                last_seen.insert(id.clone(), time);
             }
 
             // List all dispatchers with jobs assigned
@@ -2480,13 +2495,6 @@ impl Dispatcher {
 //         self.service_change_watcher.stop()
 //         self.postprocess_worker.stop()
 
-//     def interrupt_handler(self, signum, stack_frame):
-//         self.log.info("Instance caught signal. Beginning to drain work.")
-//         self.finalizing_start = time.time()
-//         self._shutdown_timeout = AL_SHUTDOWN_QUIT
-//         self.finalizing.set()
-//         self.dispatchers_directory_finalize.set(self.instance_id, int(time.time()))
-
 //     def _handle_status_change(self, status: Optional[bool]):
 //         super()._handle_status_change(status)
 
@@ -2522,5 +2530,34 @@ impl Drop for QuotaGuard {
                 Err(err) => error!("Error clearing quota entry for {user}: {err}"),
             }
         });
+    }
+}
+
+struct UserCache {
+    datastore: Arc<Elastic>,
+    cache: Mutex<HashMap<String, (Arc<User>, std::time::Instant)>>,
+}
+
+impl UserCache {
+    pub fn new(datastore: Arc<Elastic>) -> Self {
+        Self {
+            datastore,
+            cache: Mutex::new(Default::default()),
+        }
+    }
+
+    pub async fn get(&self, name: &str) -> Result<Option<Arc<User>>> {
+        if let Some((user, time)) = self.cache.lock().get(name) {
+            if time.elapsed() < USER_CACHE_TIME {
+                return Ok(Some(user.clone()))
+            }
+        }
+
+        if let Some((user, _)) = self.datastore.user.get_if_exists(name, None).await.context("fetching user data")? {
+            let user = Arc::new(user);
+            self.cache.lock().insert(name.to_string(), (user.clone(), std::time::Instant::now()));
+            return Ok(Some(user))
+        }
+        return Ok(None)
     }
 }

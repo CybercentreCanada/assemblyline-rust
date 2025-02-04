@@ -58,6 +58,7 @@ use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, Watc
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::{JsonMap, Sid};
 use log::{debug, error, info};
+use reqwest::StatusCode;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -116,7 +117,7 @@ impl DispatchClient {
 //         self.service_data = cast(dict[str, Service], CachedObject(self._get_services))
 //         self.dead_dispatchers = []
 
-        let mut http_client = reqwest::Client::builder();
+        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
         match crate::config::get_cluster_ca_cert().await? {
             Some(cert) => {
                 let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
@@ -146,6 +147,10 @@ impl DispatchClient {
 //     def _get_services(self):
 //         # noinspection PyUnresolvedReferences
 //         return {x.name: x for x in self.ds.list_all_services(full=True)}
+
+    async fn is_known_dead(&self, dispatcher_id: &str) -> bool {
+        self.dispatcher_data.lock().await.dead.contains(dispatcher_id)
+    }
 
     async fn is_dispatcher(&self, dispatcher_id: &str) -> Result<bool> {
         let mut dispatchers = self.dispatcher_data.lock().await;
@@ -279,6 +284,11 @@ impl DispatchClient {
                 return Ok(None)
             }
         };
+
+        if self.is_known_dead(&task.dispatcher).await {
+            return Ok(None)
+        }
+
         task.metadata.insert("worker__".to_string(), json!(worker_id));
 
         let url = format!("https://{}/start", task.dispatcher_address);
@@ -287,6 +297,7 @@ impl DispatchClient {
             sha: task.fileinfo.sha256.clone(),
             service_name: task.service_name.clone(),
             worker_id: worker_id.to_string(),
+            dispatcher_id: task.dispatcher.clone(),
             task_id: Some(task.task_id),
         };
 
@@ -296,13 +307,19 @@ impl DispatchClient {
 
             match response {
                 // if we got a complete response of any kind, treat as accepted
-                Ok(response) => if response.status().is_success() {
-                    return Ok(Some(task))
-                } else {
+                Ok(response) => {
                     let status = response.status();
-                    let body = response.text().await?;
-                    info!("Dispatcher has refused submission: {}/{} [{status}: {body}]", task.sid, task.service_name);
-                    return Ok(None)
+                    if status.is_success() {
+                        return Ok(Some(task))
+                    } else if status == StatusCode::GONE {
+                        // The dispatcher we are trying to reach no longer exists.
+                        self.dispatcher_data.lock().await.dead.insert(task.dispatcher);
+                        return Ok(None)
+                    } else {
+                        let body = response.text().await?;
+                        info!("Dispatcher has refused submission: {}/{} [{status}: {body}]", task.sid, task.service_name);
+                        return Ok(None)
+                    }
                 },
                 Err(err) => {
                     error!("Error reaching dispatcher: {err:?}");
@@ -363,7 +380,7 @@ impl DispatchClient {
             self.datastore.emptyresult.save(&result_key, &EmptyResult { expiry_ts }, None, None).await?;
         } else {
             loop {
-                debug!("Saving result: {result_key}");
+                debug!("Saving result: {result_key} [version: {version:?}]");
                 let save_res = self.datastore.result.save(&result_key, &result, version, None).await;
 
                 match save_res {

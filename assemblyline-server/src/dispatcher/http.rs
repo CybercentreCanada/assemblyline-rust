@@ -8,6 +8,7 @@ use super::Dispatcher;
 
 use assemblyline_models::messages::task::{ServiceError, ServiceResponse, ServiceResult};
 use log::error;
+use poem::http::StatusCode;
 use poem::web::{Data, Json};
 use poem::{get, handler, post, EndpointExt, Route, Server};
 use serde::{Serialize, Deserialize};
@@ -19,6 +20,9 @@ async fn start_task(
     Json(request): Json<ServiceStartMessage>,
     Data(dispatcher): Data<&Arc<Dispatcher>>
 ) -> (poem::http::StatusCode, String) {
+    if request.dispatcher_id != dispatcher.instance_id {
+        return (StatusCode::GONE, "This dispatcher id is no longer accepted at this IP address".to_string())
+    }
     let (send, recv) = tokio::sync::oneshot::channel();
     dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Start(request, Some(send))).await;
     match recv.await {

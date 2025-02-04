@@ -1,4 +1,4 @@
-FROM rust:1.83.0-bookworm AS builder
+FROM rust:1.84.1-bookworm AS builder
 
 # Add more build tools
 RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev

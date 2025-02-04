@@ -8,7 +8,7 @@ use std::time::Duration;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
-use log::{error, warn};
+use log::{debug, error, warn};
 
 pub mod responses;
 pub mod collection;
@@ -1382,9 +1382,17 @@ impl Elastic {
                             } 
                         }
                         
-                        if self.file.update(sha256, batch, None, Some(8)).await.is_ok() {
-                            return Ok(())
+                        match self.file.update(sha256, batch, None, Some(8)).await {
+                            Ok(true) => return Ok(()),
+                            Ok(false) => {
+                                warn!("fast save_or_freshen failed");
+                            },
+                            Err(err) => {
+                                error!("fast save_or_freshen failed: {err}");
+                            }
                         }
+                    } else {
+                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}");
                     }
 
                     let value = serde_json::to_value(current_fileinfo)?;
@@ -1438,7 +1446,7 @@ impl Elastic {
             match result {
                 Ok(_) => return Ok(()),
                 Err(err) if err.is_version_conflict() => {
-                    info!("Retrying save or freshen due to version conflict: {err}");
+                    debug!("Retrying save or freshen due to version conflict: {err}");
                     continue
                 },
                 Err(err) => return Err(err)

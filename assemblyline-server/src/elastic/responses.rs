@@ -6,7 +6,7 @@ use serde::Deserialize;
 use strum::Display;
 
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Get<Source, Field> {
     /// The name of the index the document belongs to. 
     pub _index: String,

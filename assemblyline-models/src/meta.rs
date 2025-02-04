@@ -7,18 +7,19 @@ use struct_metadata::{Described, Descriptor, Kind, MetadataKind};
 
 /// Retrieve all subfields recursively flattened into a single listing.    
 /// 
-/// This method loses information about whether a field is optional or part of a sequence.   
-pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, (&Descriptor<ElasticMeta>, bool)> {    
+/// This method strips direct information about whether a field is optional or part of a sequence and includes it as boolean flags.
+/// response type is mapping from path to (type info, bool flag for multivalued, bool flag for optional)
+pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, (&Descriptor<ElasticMeta>, bool, bool)> {    
     match &target.kind {
         Kind::Struct { children , ..} => {
             let mut fields = HashMap::<_, _>::new();
             for child in children {
-                for (mut path, (subfield, multivalued)) in flatten_fields(&child.type_info) {
+                for (mut path, (subfield, multivalued, optional)) in flatten_fields(&child.type_info) {
                     let mut label = vec![child.label.to_owned()];
                     if !path.is_empty() {
                         label.append(&mut path);
                     }
-                    fields.insert(label, (subfield, multivalued));
+                    fields.insert(label, (subfield, multivalued, optional));
                 }
             }
             fields
@@ -30,9 +31,15 @@ pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, 
             }
             fields
         }
-        Kind::Option(kind) |
+        Kind::Option(kind) => {
+            let mut fields = flatten_fields(kind);
+            for (_, _, optional) in fields.values_mut() {
+                *optional = true;
+            }
+            fields
+        },
         Kind::Aliased { kind, .. } => flatten_fields(kind),
-        _ => [(vec![], (target, false))].into_iter().collect(),
+        _ => [(vec![], (target, false, false))].into_iter().collect(),
     }
 }
 
