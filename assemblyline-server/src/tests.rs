@@ -18,7 +18,7 @@ use assemblyline_filestore::FileStore;
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use serde_json::{from_value, json};
 use tokio::sync::{mpsc, Notify};
 
@@ -173,7 +173,7 @@ impl MockService {
             if instructions.get("failure").and_then(|x|x.as_bool()).unwrap_or(false) {
                 let mut error: assemblyline_models::datastore::Error = serde_json::from_value(instructions.get("error").unwrap().clone()).unwrap();
                 error.sha256 = task.fileinfo.sha256.clone();
-                let key = thread_rng().gen::<u128>().to_string();
+                let key = rand::rng().random::<u128>().to_string();
                 self.dispatch_client.service_failed(task, &key, error).await.unwrap();
                 continue
             }
@@ -246,7 +246,7 @@ impl MockService {
             //     .get("result_key")
             //     .and_then(|x|x.as_str())
             //     .map(|x|x.to_string())
-            //     .unwrap_or_else(|| thread_rng().gen::<u64>().to_string());
+            //     .unwrap_or_else(|| rand::rng().random::<u64>().to_string());
             // if !instructions.contains_key("result_key") && result.is_empty() {
             //     result_key = result_key + 
             // }
@@ -338,7 +338,7 @@ async fn setup() -> TestContext {
     dispatcher.start(&mut components);
 
     // launch the plumber
-    let plumber_name = format!("plumber{}", thread_rng().gen::<u32>());
+    let plumber_name = format!("plumber{}", rand::rng().random::<u32>());
     let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
     plumber.start(&mut components).await.unwrap();
 
@@ -359,7 +359,7 @@ async fn setup() -> TestContext {
 async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize) {
     let body = {
         let out = body.as_object_mut().unwrap();
-        out.insert("salt".to_owned(), json!(thread_rng().gen::<u64>().to_string()));
+        out.insert("salt".to_owned(), json!(rand::rng().random::<u64>().to_string()));
         bytes::Bytes::from(serde_json::to_string(&body).unwrap())
     };
 
@@ -507,7 +507,7 @@ async fn test_deduplication() {
 
     for _ in 0..2 {
         context.ingest_queue.push(&MessageSubmission {
-            sid: thread_rng().gen(),
+            sid: rand::rng().random(),
             metadata: Default::default(),
             params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
                 .set_description("file abc123")
@@ -550,7 +550,7 @@ async fn test_deduplication() {
     // -------------------------------------------------------------------------------
     // Submit the same body, but change a parameter so the cache key misses,
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -614,7 +614,7 @@ async fn test_ingest_retry() {
 //     core.ingest.submit = fail_once
 
 //     context.ingest_queue.push(&MessageSubmission {
-//         sid: thread_rng().gen(),
+//         sid: rand::rng().random(),
 //         metadata: Default::default(),
 //         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
 //             .set_description("file abc123")
@@ -723,7 +723,7 @@ async fn test_service_crash_recovery() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -768,7 +768,7 @@ async fn test_service_retry_limit() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -813,7 +813,7 @@ async fn test_dropping_early() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -867,7 +867,7 @@ async fn test_service_error() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -906,7 +906,7 @@ async fn test_extracted_file() {
     let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -949,7 +949,7 @@ async fn test_depth_limit() {
     }
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1001,7 +1001,7 @@ async fn test_max_extracted_in_one() {
     let max_extracted = 3;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1052,7 +1052,7 @@ async fn test_max_extracted_in_several() {
     ]).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1094,7 +1094,7 @@ async fn test_caching() {
 
     async fn run_once(context: &TestContext, sha: &Sha256, size: usize) -> Sid {
         context.ingest_queue.push(&MessageSubmission {
-            sid: thread_rng().gen(),
+            sid: rand::rng().random(),
             metadata: Default::default(),
             params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
                 .set_description("file abc123")
@@ -1155,7 +1155,7 @@ async fn test_plumber_clearing() {
     let (sha, size) = ready_body(&context.core, json!({})).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1231,7 +1231,7 @@ async fn test_filter() {
     let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1299,7 +1299,7 @@ async fn test_tag_filter() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1346,7 +1346,7 @@ async fn test_partial() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1406,7 +1406,7 @@ async fn test_temp_data_monitoring() {
     })).await;
 
     context.ingest_queue.push(&MessageSubmission {
-        sid: thread_rng().gen(),
+        sid: rand::rng().random(),
         metadata: Default::default(),
         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
@@ -1482,7 +1482,7 @@ async fn test_complex_extracted() {
         "finish": {"temporary_data": {"passwords": ["test_temp_data_monitoring"]}},
     })).await;
 
-    let sid = thread_rng().gen();
+    let sid = rand::rng().random();
     context.ingest_queue.push(&MessageSubmission {
         sid,
         metadata: Default::default(),

@@ -5,7 +5,7 @@ use anyhow::Result;
 use assemblyline_models::config::Config;
 use assemblyline_models::messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage};
 use log::warn;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use redis_objects::{Publisher, Queue};
 
 use crate::elastic::collection::OperationBatch;
@@ -62,7 +62,7 @@ impl ArchiveManager {
                 files: submission.files.clone(),
                 metadata: submission.metadata.clone(),
                 params,
-                sid: thread_rng().gen(),
+                sid: rand::rng().random(),
                 time: Default::default(),
                 notification: Default::default(),
                 scan_key: Default::default(),

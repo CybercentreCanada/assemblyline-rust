@@ -10,7 +10,7 @@ use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 use assemblyline_models::{ClassificationString, JsonMap, Sha256, Sid, UpperString};
 use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use serde_json::json;
 use tokio::sync::mpsc;
 
@@ -72,7 +72,7 @@ impl MakeMessage {
         params.groups = vec!["users".parse().unwrap()];
 
         let message = MessageSubmission {
-            sid: thread_rng().r#gen(),
+            sid: rand::rng().random(),
             files: vec![File {
                 sha256: uniform_string('0', 64).parse().unwrap(),
                 size: Some(100),
@@ -211,7 +211,7 @@ async fn test_ingest_stale_score_exists() {
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
  
     // Add a stale file score for this file
-    let sha256: Sha256 = thread_rng().r#gen();
+    let sha256: Sha256 = rand::rng().random();
     let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
         psid: Some("0".parse().unwrap()), 
         expiry_ts: chrono::Utc::now(), 
@@ -247,7 +247,7 @@ async fn test_ingest_score_exists() {
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
  
     // Add a valid file score for all files
-    let sha256: Sha256 = thread_rng().r#gen();
+    let sha256: Sha256 = rand::rng().random();
     let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
         psid: Some("0".parse().unwrap()), 
         expiry_ts: chrono::Utc::now(), 
@@ -351,7 +351,7 @@ async fn test_ingest_always_create_submission() {
     let sid_2: Sid = "002".parse().unwrap();
 
     // Add a valid file score 
-    let sha256: Sha256 = thread_rng().r#gen();
+    let sha256: Sha256 = rand::rng().random();
     let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
         psid: Some(sid_0), 
         expiry_ts: chrono::Utc::now(), 
@@ -365,7 +365,7 @@ async fn test_ingest_always_create_submission() {
     core.datastore.filescore.save(&key, &filescore_cache, None, None).await.unwrap();
 
     // Create a submission for cache hit
-    let mut old_sub: Submission = thread_rng().r#gen();
+    let mut old_sub: Submission = rand::rng().random();
     old_sub.sid = sid_1;
     old_sub.params.psid = Some(sid_0);
     core.datastore.submission.save(&old_sub.sid.to_string(), &old_sub, None, None).await.unwrap();
@@ -433,7 +433,7 @@ fn create_ingest_task(ce: &Arc<ClassificationParser>) -> IngestTask {
             name: "abc".to_string(),
         }],
         metadata: Default::default(),
-        sid: thread_rng().r#gen(),
+        sid: rand::rng().random(),
         time: chrono::Utc::now(),
         notification: Default::default(),
         scan_key: Default::default(),
@@ -491,7 +491,7 @@ async fn test_existing_score() {
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
 
     // Set everything to have an existing filestore
-    let sha256: Sha256 = thread_rng().r#gen();
+    let sha256: Sha256 = rand::rng().random();
     let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
         psid: Some("0".parse().unwrap()), 
         expiry_ts: chrono::Utc::now(), 

@@ -44,7 +44,7 @@ pub struct Heuristic {
 }
 
 impl Readable for Heuristic {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }
 
 

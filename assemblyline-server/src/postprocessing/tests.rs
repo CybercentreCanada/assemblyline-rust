@@ -4,7 +4,6 @@ use std::{collections::HashMap, sync::Arc};
 use assemblyline_models::config::{NamedValue, PostprocessAction, Webhook};
 use chrono::{Utc, Duration};
 use poem::{listener::{Acceptor, Listener}, EndpointExt};
-use rand::thread_rng;
 use serde_json::json;
 use rand::Rng;
 
@@ -337,13 +336,13 @@ async fn test_hook() {
     }
 
     {
-        let mut sub: Submission = thread_rng().gen();
+        let mut sub: Submission = rand::rng().random();
         sub.metadata.insert("ok".to_string(), serde_json::Value::String("bad".to_string()));
         worker.process(&sub, Default::default(), false).await.unwrap(); 
     }
 
     {
-        let mut sub: Submission = thread_rng().gen();
+        let mut sub: Submission = rand::rng().random();
         sub.metadata.insert("ok".to_string(), serde_json::Value::String("good".to_string()));
         sub.metadata.insert("do_hello".to_string(), serde_json::Value::String("yes".to_string()));
         worker.process(&sub, Default::default(), false).await.unwrap(); 

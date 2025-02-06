@@ -233,5 +233,5 @@ pub struct ServiceDelta {
 }
 
 impl Readable for ServiceDelta {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }

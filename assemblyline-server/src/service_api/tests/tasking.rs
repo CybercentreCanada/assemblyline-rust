@@ -26,7 +26,7 @@ use log::{debug, info};
 use poem::http::StatusCode;
 use poem::listener::Acceptor;
 use poem::EndpointExt;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -184,7 +184,7 @@ async fn setup_service(core: &Core) -> Service {
 }
 
 fn build_task() -> Task {
-    let mut task: Task = thread_rng().gen();
+    let mut task: Task = rand::rng().random();
     task.ignore_cache = false;
     task
 }
@@ -300,7 +300,7 @@ async fn test_finish_error() {
     task.dispatcher_address = mock_address;
 
     // task = random_minimal_obj(Task)
-    let mut error: Error = thread_rng().gen();
+    let mut error: Error = rand::rng().random();
     error.response.service_name = service.name;
     error.response.service_version = service.version;
     error.response.service_tool_version = Some(TOOL_VERSION.to_owned());
@@ -341,7 +341,7 @@ async fn test_finish_minimal() {
     task.dispatcher_address = mock_address;
 
     // create a result for that task
-    let mut result: assemblyline_models::datastore::Result = thread_rng().gen();
+    let mut result: assemblyline_models::datastore::Result = rand::rng().random();
     result.response.service_name = service.name;
     result.response.service_version = service.version;
     result.response.service_tool_version = Some(TOOL_VERSION.to_owned());
@@ -383,7 +383,7 @@ async fn test_finish_heuristic() {
     task.dispatcher_address = mock_address;
 
     // create a result for that task
-    let mut result: assemblyline_models::datastore::Result = thread_rng().gen();
+    let mut result: assemblyline_models::datastore::Result = rand::rng().random();
     result.response.service_name = service.name.clone();
     result.response.service_version = service.version;
     result.response.service_tool_version = Some(TOOL_VERSION.to_owned());
@@ -475,12 +475,12 @@ async fn test_finish_missing_file() {
     task.dispatcher_address = mock_address;
 
     // create a result for that task
-    let mut result: assemblyline_models::datastore::Result = thread_rng().gen();
+    let mut result: assemblyline_models::datastore::Result = rand::rng().random();
     result.response.service_name = service.name;
     result.response.service_version = service.version;
     result.response.service_tool_version = Some(TOOL_VERSION.to_owned());
     
-    let missing_hash: Sha256 = thread_rng().gen();
+    let missing_hash: Sha256 = rand::rng().random();
     result.response.extracted.push(assemblyline_models::datastore::result::File{ 
         name: Default::default(), 
         sha256: missing_hash.clone(), 

@@ -11,7 +11,7 @@ use assemblyline_models::{ClassificationString, Sha256};
 use log::{debug, info};
 use poem::listener::Acceptor;
 use poem::EndpointExt;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
@@ -69,7 +69,7 @@ pub async fn setup() -> (Core, TestGuard) {
 }
 
 fn make_result(file_hash: Sha256, service: String) -> result::Result {
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = service;
     new_result
@@ -78,7 +78,7 @@ fn make_result(file_hash: Sha256, service: String) -> result::Result {
 // recoverable=true
 fn make_error(file_hash: Sha256, service: &str, recoverable: bool) -> Error {
     use assemblyline_models::datastore::error::Status;
-    let mut new_error: Error = thread_rng().gen();
+    let mut new_error: Error = rand::rng().random();
     new_error.response.service_name = service.to_string();
     new_error.sha256 = file_hash;
     if recoverable {
@@ -129,7 +129,7 @@ async fn test_simple() {
     debug!("Core setup");
 
     // create a test file to dispatch
-    let mut file: File = rand::thread_rng().gen();
+    let mut file: File = rand::rng().random();
     let file_hash = file.sha256.clone();
     file.file_type = "unknown".to_string();
     core.datastore.file.save(&file_hash, &file, None, None).await.unwrap();
@@ -141,7 +141,7 @@ async fn test_simple() {
     debug!("User created");
 
     // create the submission to dispatch
-    let mut sub: Submission = rand::thread_rng().gen();
+    let mut sub: Submission = rand::rng().random();
     let sid = sub.sid;
     sub.params.ignore_cache = false;
     sub.params.max_extracted = 5;
@@ -244,8 +244,8 @@ async fn test_dispatch_extracted() {
     debug!("Core setup");
 
     // create a test file to dispatch
-    let mut file_one: File = rand::thread_rng().gen();
-    let mut file_two: File = rand::thread_rng().gen();
+    let mut file_one: File = rand::rng().random();
+    let mut file_two: File = rand::rng().random();
     for file in [&mut file_one, &mut file_two] {
         let file_hash = file.sha256.clone();
         file.file_type = "exe".to_string();
@@ -261,7 +261,7 @@ async fn test_dispatch_extracted() {
     debug!("User created");
 
     // create the submission to dispatch
-    let mut sub: Submission = rand::thread_rng().gen();
+    let mut sub: Submission = rand::rng().random();
     // let sid = sub.sid;
     sub.params.ignore_cache = false;
     sub.params.max_extracted = 5;
@@ -287,7 +287,7 @@ async fn test_dispatch_extracted() {
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash.clone();
     new_result.response.service_name = "extract".to_string();
     new_result.response.extracted = vec![result::File{
@@ -305,7 +305,7 @@ async fn test_dispatch_extracted() {
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = "sandbox".to_string();
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
@@ -314,7 +314,7 @@ async fn test_dispatch_extracted() {
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash;
     new_result.response.service_name = "extract".to_string();
     client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None).await.unwrap();
@@ -334,8 +334,8 @@ async fn test_dispatch_extracted_bypass_drp()  {
     debug!("Core setup");
 
     // create a test file to dispatch
-    let mut file_one: File = rand::thread_rng().gen();
-    let mut file_two: File = rand::thread_rng().gen();
+    let mut file_one: File = rand::rng().random();
+    let mut file_two: File = rand::rng().random();
     for file in [&mut file_one, &mut file_two] {
         let file_hash = file.sha256.clone();
         file.file_type = "exe".to_string();
@@ -351,7 +351,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     debug!("User created");
 
     // create the submission to dispatch
-    let mut sub: Submission = rand::thread_rng().gen();
+    let mut sub: Submission = rand::rng().random();
     // let sid = sub.sid;
     sub.params.ignore_cache = false;
     sub.params.ignore_recursion_prevention = true;
@@ -378,7 +378,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash.clone();
     new_result.response.service_name = "extract".to_string();
     // This extracted file should be able to bypass Dynamic Recursion Prevention
@@ -397,7 +397,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = "sandbox".to_string();
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
@@ -406,7 +406,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
-    let mut new_result: result::Result = thread_rng().gen();
+    let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash.clone();
     new_result.response.service_name = "extract".to_string();
     client.service_finished(job, "extract-done".to_string(), new_result, None, None).await.unwrap();
@@ -430,7 +430,7 @@ async fn test_timeout() {
     debug!("Core setup");
 
     // create a test file to dispatch
-    let mut file: File = rand::thread_rng().gen();
+    let mut file: File = rand::rng().random();
     let file_hash = file.sha256.clone();
     file.file_type = "unknown".to_string();
     core.datastore.file.save(&file_hash, &file, None, None).await.unwrap();
@@ -442,7 +442,7 @@ async fn test_timeout() {
     debug!("User created");
 
     // create the submission to dispatch
-    let mut sub: Submission = rand::thread_rng().gen();
+    let mut sub: Submission = rand::rng().random();
     let sid = sub.sid;
     sub.params.ignore_cache = false;
     sub.params.max_extracted = 5;
@@ -526,12 +526,12 @@ async fn test_prevent_result_overwrite() {
     // result_queue = client._get_queue_from_cache(DISPATCH_RESULT_QUEUE + dispatcher_name)
 
     // Create a task and add it to set of running tasks
-    let mut task: Task = thread_rng().gen();
+    let mut task: Task = rand::rng().random();
     task.dispatcher = dispatcher_name.to_owned();
     task.dispatcher_address = format!("localhost:{port}");
 
     // Create a result that's not "empty"
-    let mut result: result::Result = thread_rng().gen();
+    let mut result: result::Result = rand::rng().random();
     result.response.service_name = task.service_name.clone();
     result.sha256 = task.fileinfo.sha256.clone();
     result.result.score = 1;

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use log::debug;
 use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
@@ -111,23 +110,23 @@ pub struct Task {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Task> for rand::distributions::Standard {
+impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Task {
         Task {
-            task_id: rng.gen(),
+            task_id: rng.random(),
             dispatcher: random_word(rng),
             dispatcher_address: "localhost:8080".to_string(),
-            sid: rng.gen(),
+            sid: rng.random(),
             metadata: Default::default(),
             min_classification: Default::default(),
             fileinfo: FileInfo { 
                 magic: "".to_string(), 
-                md5: rng.gen(), 
+                md5: rng.random(), 
                 mime: None, 
-                sha1: rng.gen(), 
-                sha256: rng.gen(), 
-                size: rng.gen(), 
-                ssdeep: rng.gen(), 
+                sha1: rng.random(), 
+                sha256: rng.random(), 
+                size: rng.random(), 
+                ssdeep: Some(rng.random()),
                 tlsh: None, 
                 file_type: "unknown".to_owned(), 
                 uri_info: None 
@@ -135,16 +134,16 @@ impl rand::distributions::Distribution<Task> for rand::distributions::Standard {
             filename: random_word(rng),
             service_name: random_word(rng),
             service_config: Default::default(),
-            depth: rng.gen(),
-            max_files: rng.gen(),
-            ttl: rng.gen_range(0..100),
+            depth: rng.random(),
+            max_files: rng.random(),
+            ttl: rng.random_range(0..100),
             tags: Default::default(),
             temporary_submission_data: Default::default(),
-            deep_scan: rng.gen(),
-            ignore_cache: rng.gen(),
-            ignore_recursion_prevention: rng.gen(),
-            ignore_filtering: rng.gen(),
-            priority: rng.gen(),
+            deep_scan: rng.random(),
+            ignore_cache: rng.random(),
+            ignore_recursion_prevention: rng.random(),
+            ignore_filtering: rng.random(),
+            priority: rng.random(),
             safelist_config: Default::default(),
         }
     }
@@ -192,7 +191,7 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
         ])?;
 
         let ignore_salt = if task.ignore_cache || partial.unwrap_or_default() {
-             &rand::thread_rng().gen::<u128>().to_string()
+             &rand::rng().random::<u128>().to_string()
         } else {
             "None"
         };

@@ -970,11 +970,11 @@ impl Tagging {
         Ok(flatten_tags(data, None))
     }
 
-    pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
-        let safelisted = safelisted.unwrap_or(false);
+    pub fn to_list(&self, _safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
+        // let safelisted = safelisted.unwrap_or(false);
         let mut out = vec![];
         
-        let tag_dict = if let serde_json::Value::Object(obj) = serde_json::to_value(&self)? {
+        let tag_dict = if let serde_json::Value::Object(obj) = serde_json::to_value(self)? {
             flatten_tags(obj, None)
         } else {
             return Err(serde_json::Error::custom("tags couldn't fold to json"));

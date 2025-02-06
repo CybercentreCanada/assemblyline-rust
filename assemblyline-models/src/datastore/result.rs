@@ -154,10 +154,10 @@ pub struct Milestone {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Milestone> for rand::distributions::Standard {
+impl rand::distr::Distribution<Milestone> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Milestone {
-        let service_started = chrono::Utc::now() - chrono::TimeDelta::hours(rng.gen_range(1..200));
-        let duration = chrono::TimeDelta::seconds(rng.gen_range(1..900));
+        let service_started = chrono::Utc::now() - chrono::TimeDelta::hours(rng.random_range(1..200));
+        let duration = chrono::TimeDelta::seconds(rng.random_range(1..900));
         Milestone {
             service_started,
             service_completed: service_started + duration
@@ -230,10 +230,10 @@ pub struct ResponseBody {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<ResponseBody> for rand::distributions::Standard {
+impl rand::distr::Distribution<ResponseBody> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ResponseBody {
         ResponseBody {
-            milestones: rng.gen(),
+            milestones: rng.random(),
             service_version: random_word(rng),
             service_name: random_word(rng),
             service_tool_version: None,
@@ -288,18 +288,18 @@ pub struct Result {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Result> for rand::distributions::Standard {
+impl rand::distr::Distribution<Result> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Result {
         Result {
             archive_ts: None,
             classification: ExpandingClassification::try_unrestricted().unwrap(),
             created: chrono::Utc::now(),
             expiry_ts: None,
-            response: rng.gen(),
+            response: rng.random(),
             result: Default::default(),
-            sha256: rng.gen(),
+            sha256: rng.random(),
             result_type: None,
-            size: rng.gen(),
+            size: None,
             partial: Default::default(),
             drop_file: Default::default(),
             from_archive: Default::default(),

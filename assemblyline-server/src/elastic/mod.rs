@@ -15,6 +15,7 @@ pub mod collection;
 pub mod error;
 pub mod search;
 pub mod bulk;
+pub mod pit;
 
 #[cfg(test)]
 mod test_datastore;
@@ -1166,7 +1167,7 @@ impl Elastic {
             warn!("Unknown alternative user '{username}' to switch to for Elasticsearch");
         }
         // generate a format safe random password that is just 16 characters of hex
-        let password = hex::encode(rand::thread_rng().gen::<u128>().to_be_bytes());
+        let password = hex::encode(rand::rng().random::<u128>().to_be_bytes());
 
         if username.starts_with("plumber") {
             // Ensure roles for "plumber" user are created

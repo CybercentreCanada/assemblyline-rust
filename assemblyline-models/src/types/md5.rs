@@ -55,7 +55,7 @@ impl From<[u8; 16]> for MD5 {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<MD5> for rand::distributions::Standard {
+impl rand::distr::Distribution<MD5> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> MD5 {
         MD5(random_hex(rng, 32))
     }

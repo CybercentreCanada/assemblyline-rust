@@ -381,5 +381,5 @@ fn default_service_accepts() -> String { ".*".to_string() }
 fn default_service_rejects() -> Option<String> { Some("empty|metadata/.*".to_string()) }
 
 impl Readable for Service {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }

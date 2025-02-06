@@ -5,8 +5,7 @@ use assemblyline_models::datastore::badlist::{BadhashTypes, Badlist, Hashes, Sou
 use assemblyline_models::{ClassificationString, ExpandingClassification};
 use chrono::Utc;
 use log::info;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::seq::IndexedRandom;
 
 use crate::service_api::helpers::badlist::{BadlistClient, CommonRequestBadlist, RequestBadlist};
 use crate::service_api::helpers::APIResponse;
@@ -128,7 +127,7 @@ async fn test_badlist_exists_tags() {
     while items.len() < 12 {
         let hash = random_hash(64);
         let mut item = make_sha256_badlist(&hash, &core.classification_parser);
-        item.tag = Some(Tag { tag_type: TAG_TYPE.to_owned(), value: TAG_VALUES.choose(&mut thread_rng()).unwrap().to_string() });
+        item.tag = Some(Tag { tag_type: TAG_TYPE.to_owned(), value: TAG_VALUES.choose(&mut rand::rng()).unwrap().to_string() });
         let (key, _) = badlist_client.add_update(into_request(item),None).await.unwrap();
         items.push(core.datastore.badlist.get(&key, None).await.unwrap().unwrap());
     }

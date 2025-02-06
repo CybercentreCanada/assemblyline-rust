@@ -317,7 +317,7 @@ impl Core {
         })).unwrap();
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
-        let prefix = rand::thread_rng().r#gen::<u128>().to_string();
+        let prefix = rand::rng().random::<u128>().to_string();
         let core = Self::setup(Arc::new(config), &prefix, false).await.unwrap();
         let elastic = core.datastore.clone();
         elastic.apply_test_settings().await.unwrap();

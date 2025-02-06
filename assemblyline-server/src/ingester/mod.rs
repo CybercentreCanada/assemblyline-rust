@@ -330,7 +330,7 @@ impl Ingester {
         let task = Box::new(IngestTask::new(message));
 
         // Reset to new random uuid
-        // task.submission.sid = rand::thread_rng().gen(); 
+        // task.submission.sid = rand::rng().random(); 
 
         self.spawn_ingest(task);
         Ok(())
@@ -1175,7 +1175,7 @@ impl Ingester {
 ///     2 * maximum      0.96
 ///     3 * maximum      0.999
 fn must_drop(length: u64, maximum: i64) -> bool {
-    rand::thread_rng().gen::<f64>() < drop_chance(length, maximum)
+    rand::rng().random::<f64>() < drop_chance(length, maximum)
 }
 
 fn drop_chance(length: u64, maximum: i64) -> f64 {

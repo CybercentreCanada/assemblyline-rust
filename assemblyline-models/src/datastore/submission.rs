@@ -67,21 +67,21 @@ pub struct Submission {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Submission> for rand::distributions::Standard {
+impl rand::distr::Distribution<Submission> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Submission {
         Submission {
-            archived: rng.r#gen(),
+            archived: rng.random(),
             classification: ExpandingClassification::try_unrestricted().unwrap(),
             error_count: 0,
             errors: vec![],
             expiry_ts: None,
             file_count: 1,
-            files: vec![rng.r#gen()],
-            max_score: rng.r#gen(),
+            files: vec![rng.random()],
+            max_score: rng.random(),
             metadata: Default::default(),
             params: SubmissionParams::new(ClassificationString::try_unrestricted().unwrap()),
             results: vec![],
-            sid: rng.r#gen(),
+            sid: rng.random(),
             state: SubmissionState::Submitted,
             to_be_deleted: false,
             times: Times {
@@ -392,12 +392,12 @@ pub struct File {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<File> for rand::distributions::Standard {
+impl rand::distr::Distribution<File> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> File {
         File {
             name: "readme.txt".to_string(),
-            size: Some(rng.gen_range(10..1_000_000)),
-            sha256: rng.r#gen()
+            size: Some(rng.random_range(10..1_000_000)),
+            sha256: rng.random()
         }
     }
 }

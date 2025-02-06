@@ -11,7 +11,8 @@ use struct_metadata::Described;
 
 use crate::elastic::DEFAULT_SEARCH_FIELD;
 
-use super::collection::{Collection, PitGuard, DEFAULT_ROW_SIZE, DEFAULT_SORT};
+use super::pit::PitGuard;
+use super::collection::{Collection, DEFAULT_ROW_SIZE, DEFAULT_SORT};
 use super::{parse_sort, responses, Index, Request, Result};
 
 

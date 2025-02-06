@@ -18,9 +18,9 @@ pub enum Status {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Status> for rand::distributions::Standard {
+impl rand::distr::Distribution<Status> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Status {
-        if rng.gen() {
+        if rng.random() {
             Status::FailNonrecoverable
         } else {
             Status::FailRecoverable
@@ -60,7 +60,7 @@ pub enum ErrorTypes {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<ErrorTypes> for rand::distributions::Standard {
+impl rand::distr::Distribution<ErrorTypes> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ErrorTypes {
         match ErrorTypes::iter().choose(rng) {
             Some(value) => value,
@@ -92,16 +92,16 @@ pub struct Response {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Response> for rand::distributions::Standard {
+impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Response {
-        let word_count = rng.gen_range(5..25);
+        let word_count = rng.random_range(5..25);
         Response {
             message: random_words(rng, word_count).join(" "),
             service_debug_info: None,
             service_name: random_word(rng),
             service_tool_version: None,
             service_version: "0.0".to_string(),
-            status: rng.r#gen(),
+            status: rng.random(),
         }
     }
 }
@@ -132,15 +132,15 @@ pub struct Error {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Error> for rand::distributions::Standard {
+impl rand::distr::Distribution<Error> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Error {
         Error {
             archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts: None,
-            response: rng.r#gen(),
-            sha256: rng.r#gen(),
-            error_type: rng.r#gen(),
+            response: rng.random(),
+            sha256: rng.random(),
+            error_type: rng.random(),
         }
     }
 }

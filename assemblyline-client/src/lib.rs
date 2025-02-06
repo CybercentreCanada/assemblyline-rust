@@ -102,7 +102,8 @@ impl Client {
 mod tests {
 
     use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
-    use rand::{thread_rng, Rng};
+    use assemblyline_models::ClassificationString;
+    use rand::Rng;
 
     use crate::{Authentication, Client};
 
@@ -120,10 +121,10 @@ mod tests {
 
     fn random_body() -> Vec<u8> {
         let mut out = vec![];
-        let mut prng = thread_rng();
-        let length = 128 + prng.gen_range(0..256);
+        let mut prng = rand::rng();
+        let length = 128 + prng.random_range(0..256);
         while out.len() < length {
-            out.push(prng.r#gen());
+            out.push(prng.random());
         }
         out
     }
@@ -134,7 +135,7 @@ mod tests {
 
         let result = client.submit.single()
             .metadata_item("testbatch".to_owned(), "0".to_owned())
-            .params(SubmissionParams{ ttl: 1, ..Default::default()})
+            .params(SubmissionParams{ ttl: 1, ..SubmissionParams::new(ClassificationString::try_unrestricted().unwrap())})
             .fname("test-file".to_owned())
             .content(random_body()).await.unwrap();
 
@@ -145,13 +146,13 @@ mod tests {
     #[tokio::test]
     async fn search_single_page() {
         let client = prepare_client().await;
-        let batch: u64 = thread_rng().r#gen();
+        let batch: u64 = rand::rng().random();
         let batch: String = batch.to_string();
 
         let _result = client.ingest.single()
             .metadata_item("testbatch".to_owned(), batch.clone())
             .notification_queue(batch.clone())
-            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: Some(vec!["Characterize".to_owned()]), ..Default::default()}, ..Default::default()})
+            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".to_owned()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::try_unrestricted().unwrap())})
             .fname("test-file".to_owned())
             .content(random_body()).await.unwrap();
 

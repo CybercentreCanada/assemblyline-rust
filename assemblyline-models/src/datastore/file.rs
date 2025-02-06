@@ -84,11 +84,11 @@ pub struct File {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<File> for rand::distributions::Standard {
+impl rand::distr::Distribution<File> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> File {
         let mut data = vec![];
         for _ in 0..1000 {
-            data.push(rng.gen());
+            data.push(rng.random());
         }
         File::gen_for_sample(&data, rng)
     }
@@ -104,10 +104,10 @@ impl File {
             archive_ts: None,
             ascii: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
             classification: ExpandingClassification::try_unrestricted().unwrap(),
-            entropy: rng.gen_range(0.0..1.0),
+            entropy: rng.random_range(0.0..1.0),
             expiry_ts: None,
-            is_section_image: rng.r#gen(),
-            is_supplementary: rng.r#gen(),
+            is_section_image: rng.random(),
+            is_supplementary: rng.random(),
             hex: String::from_iter(data.iter().take(64).map(|byte| if byte.is_ascii() { *byte as char } else { '.' })),
             labels: vec![],
             label_categories: Default::default(),
@@ -118,7 +118,7 @@ impl File {
             sha1: sha1.parse().unwrap(),
             sha256: sha256.parse().unwrap(),
             size: data.len() as u64,
-            ssdeep: rng.gen(),
+            ssdeep: rng.random(),
             file_type: "unknown".to_string(),
             tlsh: None,
             from_archive: false,

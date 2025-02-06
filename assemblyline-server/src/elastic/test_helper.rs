@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use assemblyline_models::datastore::{File, Service};
 use log::debug;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 
 use super::Elastic;
 
@@ -21,7 +21,7 @@ fn create_service(name: &str) -> Service {
 
 async fn init() -> Arc<Elastic> {
     let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
-    let prefix = rand::thread_rng().r#gen::<u128>().to_string();
+    let prefix = rand::rng().random::<u128>().to_string();
     Elastic::connect("http://elastic:devpass@localhost:9200", false, None, false, &prefix).await.unwrap()
 }
 
@@ -97,7 +97,7 @@ async fn test_save_or_freshen_file() {
     let expiry_freshen = chrono::Utc::now() + chrono::Duration::days(15).to_std().unwrap();
 
     // Generate file info for random file
-    let mut f = File::gen_for_sample(&data, &mut thread_rng());
+    let mut f = File::gen_for_sample(&data, &mut rand::rng());
     f.expiry_ts = Some(chrono::Utc::now());
 
     // Make sure file does not exists

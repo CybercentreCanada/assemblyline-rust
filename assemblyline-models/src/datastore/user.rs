@@ -407,11 +407,10 @@ pub struct User {
 }
 
 fn default_user_types() -> Vec<UserType> { vec![UserType::User] }
-fn default_submission_quota() -> u32 { 5 }
 fn default_user_is_active() -> bool { true }
 
 impl Readable for User {
-    fn set_from_archive(&mut self, from_archive: bool) {}
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }
 
 impl Default for User {

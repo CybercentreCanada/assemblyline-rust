@@ -673,7 +673,7 @@ pub struct Dispatcher {
 impl Dispatcher {
     pub async fn new(core: Core, tcp: TlsAcceptor) -> Result<Arc<Self>> {
         // generate an id for this instance
-        let instance_id = format!("{:x}", rand::thread_rng().gen::<u128>());
+        let instance_id = format!("{:x}", rand::rng().random::<u128>());
         info!("Using dispatcher id {instance_id}");
 
         // load environment configured values
@@ -1769,7 +1769,7 @@ impl Dispatcher {
                 let config = Self::build_service_config(&service, &task.submission);
                 let mut service_task = ServiceTask {
                     sid,
-                    task_id: rand::thread_rng().gen(),
+                    task_id: rand::rng().random(),
                     dispatcher: self.instance_id.clone(),
                     dispatcher_address: self.instance_address.clone(),
                     metadata,

@@ -2,8 +2,6 @@ use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
-use struct_metadata::Described;
-
 
 
 /// Named Value

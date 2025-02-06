@@ -1,13 +1,15 @@
+use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use assemblyline_client::TLSSettings;
 use assemblyline_models::Sha256;
 use clap::{Args, Parser};
 use expanduser::expanduser;
-use rand::{thread_rng, Rng};
-use serde::de;
+use rand::Rng;
 use serde_json::json;
+use sha2::Digest;
 
 
 #[derive(Debug, Parser)]
@@ -41,15 +43,19 @@ struct Cli {
     #[arg(long)]
     timeout: Option<f64>,
 
-    /// 
+    /// How many times to repeatedly upload all selected files
     #[arg(long)]
     repeats: Option<u32>,
 
-    /// 
+    /// How many parallel uploads to allow
     #[arg(long)]
     threads: Option<u32>,
 
-    /// 
+    /// Always hash files and ingest by sha256 even when the target is a path
+    #[arg(long, default_value_t=false)]
+    as_sha256: bool,
+
+    /// Set the 'never_drop' submission parameter, disables some safety checks
     #[arg(long, default_value_t=false)]
     never_drop: bool,
     
@@ -84,6 +90,8 @@ struct Config {
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     // ----------------------------------------------------
     // Parse arguments
     let args = Arc::new(Cli::parse());
@@ -143,7 +151,7 @@ async fn main() {
             for _ in 0..args.repeats.unwrap_or(1) {
         
                 if let Some(path) = &args.target.file {
-                    enqueue.send(Target::Path(path.to_path_buf())).await.unwrap();
+                    enqueue.send(prepare_path(args.as_sha256, path).await.unwrap()).await.unwrap();
                 } else if let Some(hash) = &args.target.sha {
                     enqueue.send(Target::Hash(hash.parse().expect("sha256 was not parsable"))).await.unwrap();
                 } else if let Some(path) = &args.target.directory {
@@ -152,10 +160,13 @@ async fn main() {
                         let mut listing = tokio::fs::read_dir(directory).await.unwrap();
                         while let Some(item) = listing.next_entry().await.unwrap() {
                             let file_type = item.file_type().await.unwrap();
+                            if file_type.is_symlink() { continue }
                             if file_type.is_dir() {
                                 directories.push(item.path());
                             } else if file_type.is_file() {
-                                enqueue.send(Target::Path(item.path())).await.unwrap();
+                                if let Some(target) = prepare_path(args.as_sha256, &item.path()).await {
+                                    enqueue.send(target).await.unwrap();
+                                }
                             }
                         }
                     }
@@ -191,6 +202,40 @@ enum Target {
     Hash(Sha256),
 }
 
+async fn prepare_path(as_sha256: bool, path: &Path) -> Option<Target> {
+    Some(if as_sha256 {
+        Target::Hash(calculate_sha256(path).await?)
+    } else {
+        Target::Path(path.to_path_buf())
+    })
+}
+
+static SHA_CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<Sha256>>>> = OnceLock::new();
+
+async fn calculate_sha256(path: &Path) -> Option<Sha256> {
+    {
+        let cache = SHA_CACHE.get_or_init(|| { Mutex::new(HashMap::default()) });
+        if let Some(hash) = cache.lock().unwrap().get(path) {
+            return hash.clone()
+        }
+    }
+
+    let _path = path.to_owned();
+    let hash: Option<Sha256> = tokio::task::spawn_blocking(|| {
+        let mut hasher = sha2::Sha256::new();
+        let file = std::fs::read(_path).ok()?;
+        hasher.write_all(&file).ok()?;
+        Sha256::try_from(hasher.finalize().as_slice()).ok()
+    }).await.unwrap();
+
+    {
+        let cache = SHA_CACHE.get_or_init(|| { Mutex::new(HashMap::default()) });
+        cache.lock().unwrap().insert(path.to_owned(), hash.clone());
+    }
+    hash
+}
+
+
 async fn ingest_file(client: Arc<assemblyline_client::Client>, target: Target, args: Arc<Cli>) -> Result<String, String> {
     let mut builder = client.ingest.single();
 
@@ -200,7 +245,7 @@ async fn ingest_file(client: Arc<assemblyline_client::Client>, target: Target, a
 
     builder = builder.parameter("service_spec".to_string(), json!({
         "ServiceName": {
-            "field": thread_rng().gen::<u64>().to_string()
+            "field": rand::rng().random::<u64>().to_string()
         }
     }));
 

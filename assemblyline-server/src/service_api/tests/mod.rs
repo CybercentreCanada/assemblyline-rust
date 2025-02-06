@@ -1,5 +1,6 @@
 use assemblyline_models::datastore::service::{DockerConfig, RegistryType};
 use assemblyline_models::datastore::{Service, ServiceDelta};
+use rand::seq::IndexedRandom;
 use tokio::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,8 +10,6 @@ use assemblyline_models::HEXCHARS;
 use log::{error, info};
 use poem::listener::{Acceptor, TcpAcceptor};
 use poem::Server;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
 
 use crate::{Core, TestGuard};
 
@@ -65,7 +64,7 @@ pub async fn setup(headers: HeaderMap) -> (reqwest::Client, Arc<Core>, TestGuard
 }
 
 pub fn random_hash(length: usize) -> String {
-    let mut rng = thread_rng();
+    let mut rng = rand::rng();
     let mut out = String::new();
     while out.len() < length {
         out.push(*HEXCHARS.choose(&mut rng).unwrap());

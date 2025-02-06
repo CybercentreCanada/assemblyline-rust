@@ -40,7 +40,7 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
             channel_name,
             counter_name: None,
             counter_type,
-            host: format!("{:x}", rand::thread_rng().gen::<u128>()),
+            host: format!("{:x}", rand::rng().random::<u128>()),
             store,
             export_zero: true,
             export_interval: Duration::from_secs(5),

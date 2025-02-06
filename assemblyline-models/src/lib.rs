@@ -161,14 +161,14 @@ impl TryFrom<&[u8]> for Sha256 {
 pub fn random_hex<R: rand::prelude::Rng + ?Sized>(rng: &mut R, size: usize) -> String {
     let mut buffer = String::with_capacity(size);
     for _ in 0..size {
-        let index = rng.gen_range(0..HEXCHARS.len());
+        let index = rng.random_range(0..HEXCHARS.len());
         buffer.push(HEXCHARS[index]);
     }
     buffer
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Sha256> for rand::distributions::Standard {
+impl rand::distr::Distribution<Sha256> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha256 {
         Sha256{hex: random_hex(rng, 64) }
     }
@@ -201,9 +201,9 @@ impl Sid {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Sid> for rand::distributions::Standard {
+impl rand::distr::Distribution<Sid> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sid {
-        Sid(rng.gen())
+        Sid(rng.random())
     }
 }
 
@@ -265,7 +265,7 @@ impl std::str::FromStr for SSDeepHash {
         // SSDEEP_REGEX = r"^[0-9]{1,18}:[a-zA-Z0-9/+]{0,64}:[a-zA-Z0-9/+]{0,64}$"
         let (numbers, hashes) = s.split_once(":").ok_or_else(||ModelError::InvalidSSDeep(s.to_owned()))?;
         let (hasha, hashb) = hashes.split_once(":").ok_or_else(||ModelError::InvalidSSDeep(s.to_owned()))?;
-        if numbers.len() < 1 || numbers.len() > 18 || numbers.chars().any(|c|!c.is_ascii_digit()) {
+        if numbers.is_empty() || numbers.len() > 18 || numbers.chars().any(|c|!c.is_ascii_digit()) {
             return Err(ModelError::InvalidSSDeep(s.to_owned()))
         }
         if hasha.len() > 64 || hasha.chars().any(|c|!is_ssdeep_char(c)) {
@@ -279,16 +279,16 @@ impl std::str::FromStr for SSDeepHash {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<SSDeepHash> for rand::distributions::Standard {
+impl rand::distr::Distribution<SSDeepHash> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> SSDeepHash {
-        use rand::distributions::{Alphanumeric, DistString};
+        use rand::distr::{Alphanumeric, SampleString};
         let mut output = String::new();
-        output += &rng.gen_range(0..10000).to_string();
+        output += &rng.random_range(0..10000).to_string();
         output += ":";
-        let len = rng.gen_range(0..64);
+        let len = rng.random_range(0..64);
         output += &Alphanumeric.sample_string(rng, len);
         output += ":";
-        let len = rng.gen_range(0..64);
+        let len = rng.random_range(0..64);
         output += &Alphanumeric.sample_string(rng, len);
         SSDeepHash(output)
     }
@@ -329,14 +329,14 @@ const WORDS: [&str; 187] = ["The", "Cyber", "Centre", "stays", "on", "the", "cut
 
 #[cfg(feature = "rand")]
 pub fn random_word<R: rand::Rng + ?Sized>(prng: &mut R) -> String {
-    WORDS[prng.gen_range(0..WORDS.len())].to_string()
+    WORDS[prng.random_range(0..WORDS.len())].to_string()
 }
 
 #[cfg(feature = "rand")]
 pub fn random_words<R: rand::Rng + ?Sized>(prng: &mut R, count: usize) -> Vec<String> {
     let mut output = vec![];
     while output.len() < count {
-        output.push(WORDS[prng.gen_range(0..WORDS.len())].to_string())
+        output.push(WORDS[prng.random_range(0..WORDS.len())].to_string())
     }
     output
 }
@@ -344,42 +344,42 @@ pub fn random_words<R: rand::Rng + ?Sized>(prng: &mut R, count: usize) -> Vec<St
 
 #[cfg(test)]
 mod test {
-    use rand::{thread_rng, Rng};
+    use rand::Rng;
 
     use crate::{SSDeepHash, Sha1, Sha256, MD5};
     
     #[test]
     fn random_ssdeep() {
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..100 {
-            let hash: SSDeepHash = prng.gen();
+            let hash: SSDeepHash = prng.random();
             assert_eq!(hash, hash.to_string().parse().unwrap());
         }
     }
 
     #[test]
     fn random_sha256() {
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..100 {
-            let hash: Sha256 = prng.gen();
+            let hash: Sha256 = prng.random();
             assert_eq!(hash, hash.to_string().parse().unwrap());
         }
     }
 
     #[test]
     fn random_sha1() {
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..100 {
-            let hash: Sha1 = prng.gen();
+            let hash: Sha1 = prng.random();
             assert_eq!(hash, hash.to_string().parse().unwrap());
         }
     }
 
     #[test]
     fn random_md5() {
-        let mut prng = thread_rng();
+        let mut prng = rand::rng();
         for _ in 0..100 {
-            let hash: MD5 = prng.gen();
+            let hash: MD5 = prng.random();
             assert_eq!(hash, hash.to_string().parse().unwrap());
         }
     }

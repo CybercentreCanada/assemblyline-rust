@@ -38,7 +38,7 @@ impl std::str::FromStr for Sha1 {
 }
 
 #[cfg(feature = "rand")]
-impl rand::distributions::Distribution<Sha1> for rand::distributions::Standard {
+impl rand::distr::Distribution<Sha1> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha1 {
         Sha1(random_hex(rng, 40))
     }

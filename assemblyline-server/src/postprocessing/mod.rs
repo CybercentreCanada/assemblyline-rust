@@ -9,7 +9,7 @@ use assemblyline_models::messages::ArchiveAction;
 use assemblyline_models::Sid;
 use bytes::Bytes;
 use anyhow::Result;
-use rand::{thread_rng, Rng};
+use rand::Rng;
 use tokio::sync::mpsc;
 // use anyhow::Result;
 use itertools::Itertools;
@@ -79,7 +79,7 @@ fn should_resubmit(score: f64, shift: f64) -> bool {
 
     let resubmit_probability = 1.0 / 10.0f64.powf((shift - score) / 100.0);
 
-    return rand::thread_rng().gen::<f64>() < resubmit_probability
+    return rand::rng().random::<f64>() < resubmit_probability
 }
 
 pub struct ActionWorker {
@@ -287,7 +287,7 @@ impl ActionWorker {
                 info!("[{sid} :: {}] Resubmitted for extended analysis", submission_msg.files[0].sha256);
                 let mut resubmission = submission_msg.clone();
                 resubmission.params.psid = Some(sid);
-                resubmission.sid = thread_rng().gen();
+                resubmission.sid = rand::rng().random();
                 resubmission.scan_key = None;
                 resubmission.params.services.resubmit.clear();
                 resubmission.params.services.selected = submit_to;

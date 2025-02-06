@@ -64,9 +64,9 @@ ffuzzy = "0.3"
 redis-objects = { version = "*", path = "../redis-objects" }
 
 # Data managing
-assemblyline-markings = { version = "0.1.8", path = "../assemblyline-markings" }
+assemblyline-markings = { version = "0.1.10", path = "../assemblyline-markings" }
 assemblyline-filestore = { version = "0.1", path = "../assemblyline-filestore" }
-assemblyline-models = { version = "0.2", path = "../assemblyline-models", features = ["rand"] }
+assemblyline-models = { version = "0.3", path = "../assemblyline-models", features = ["rand"] }
 struct-metadata = "1.0"
 serde = { version = "*", features = ["derive", "rc"] }
 serde_json = "*"
@@ -74,7 +74,7 @@ serde_yaml = "*"
 serde_with = "*"
 
 # data parsing
-nom = "*"
+nom = "7"
 regex = "*"
 
 [dependencies.magic-sys]

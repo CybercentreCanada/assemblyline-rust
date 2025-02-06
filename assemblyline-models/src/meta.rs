@@ -134,7 +134,7 @@ impl Mappings {
         field.index = field.index.or(meta.index);
         field.store = field.store.or(meta.store);
 
-        if field.type_.clone().map_or(false, |x| x != "text") {
+        if field.type_.clone().is_some_and(|x| x != "text") {
             field.doc_values = meta.index;
         }
 
@@ -145,9 +145,9 @@ impl Mappings {
         self.properties.insert(name.trim_matches('.').to_owned(), field);
     }
 
-    fn build_field(&mut self, label: Option<&str>, kind: &Kind<ElasticMeta>, meta: &ElasticMeta, prefix: &Vec<&str>, allow_refuse_implicit: bool) -> Result<(), MappingError> {
+    fn build_field(&mut self, label: Option<&str>, kind: &Kind<ElasticMeta>, meta: &ElasticMeta, prefix: &[&str], _allow_refuse_implicit: bool) -> Result<(), MappingError> {
         // resolve the absolute name for this field
-        let mut path = prefix.clone();
+        let mut path = Vec::from(prefix);
         if let Some(label) = label {
             path.push(label);
         }
@@ -211,13 +211,13 @@ impl Mappings {
         match kind {
             Kind::Struct { children, .. } => {
                 for child in children {
-                    self.build_field(Some(child.label), &child.type_info.kind, &child.metadata, &path, allow_refuse_implicit)?;
+                    self.build_field(Some(child.label), &child.type_info.kind, &child.metadata, &path, _allow_refuse_implicit)?;
                 }
             },
-            Kind::Aliased { name, kind } => {
-                self.build_field(None, &kind.kind, meta, &path, allow_refuse_implicit)?;
+            Kind::Aliased { kind, .. } => {
+                self.build_field(None, &kind.kind, meta, &path, _allow_refuse_implicit)?;
             },
-            Kind::Enum { name, variants } => {
+            Kind::Enum { .. } => {
                 self.insert(&full_name, meta, FieldMapping{ 
                     type_: Some("keyword".to_owned()), 
                     // The maximum always safe value in elasticsearch
@@ -226,10 +226,10 @@ impl Mappings {
                 });
             },
             Kind::Sequence(kind) => {
-                self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
+                self.build_field(None, &kind.kind, meta, &path, _allow_refuse_implicit)?;
             },
             Kind::Option(kind) => {
-                self.build_field(None, &kind.kind, &meta, &path, allow_refuse_implicit)?;
+                self.build_field(None, &kind.kind, meta, &path, _allow_refuse_implicit)?;
             },
             Kind::Mapping(key, value) => {
                 if key.kind != Kind::String {
@@ -451,7 +451,7 @@ pub fn default_settings(index: serde_json::Value) -> serde_json::Value {
 
 pub fn build_mapping<T: Described<ElasticMeta>>() -> Result<Mappings, MappingError> {
     let metadata = T::metadata();
-    if let struct_metadata::Kind::Struct { name, children } = metadata.kind {
+    if let struct_metadata::Kind::Struct { children, .. } = metadata.kind {
         let children: Vec<_> = children.iter().map(|entry|(Some(entry.label), &entry.type_info.kind, &entry.metadata)).collect();
         build_mapping_inner(&children, vec![], true)
     } else {
@@ -488,19 +488,19 @@ fn build_mapping_inner(children: &[(Option<&'static str>, &Kind<ElasticMeta>, &E
     Ok(mappings)
 }
 
-fn build_field_mapping(mapping: &mut Mappings) -> Result<(), MappingError> {
-    todo!()
-}
+// fn build_field_mapping(mapping: &mut Mappings) -> Result<(), MappingError> {
+//     todo!()
+// }
 
 // Simple types can be resolved by a direct mapping
 fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
     match kind {
-        Kind::Struct { name, children } => None,
-        Kind::Aliased { name, kind } => match kind.metadata.mapping {
+        Kind::Struct { .. } => None,
+        Kind::Aliased { kind, .. } => match kind.metadata.mapping {
             Some(mapping) => Some(mapping),
             None => simple_mapping(&kind.kind),
         },
-        Kind::Enum { name, variants } => Some("keyword"),
+        Kind::Enum { .. } => Some("keyword"),
         Kind::Sequence(kind) => match kind.metadata.mapping {
             Some(mapping) => Some(mapping),
             None => simple_mapping(&kind.kind),
@@ -509,7 +509,7 @@ fn simple_mapping(kind: &Kind<ElasticMeta>) -> Option<&'static str> {
             Some(mapping) => Some(mapping),
             None => simple_mapping(&kind.kind),
         },
-        Kind::Mapping(key, value) => None,
+        Kind::Mapping(..) => None,
         Kind::DateTime => Some("date"),
         Kind::String => Some("keyword"),
         Kind::U128 | Kind::I128 => None,
