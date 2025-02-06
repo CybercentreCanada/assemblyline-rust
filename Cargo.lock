@@ -165,8 +165,7 @@ checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 name = "assemblyline-client"
 version = "0.1.12"
 dependencies = [
- "assemblyline-markings 0.1.8",
- "assemblyline-models 0.1.21",
+ "assemblyline-models 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "async-recursion",
  "base64 0.21.7",
  "chrono",
@@ -232,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-markings"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "itertools 0.11.0",
  "serde",
@@ -243,26 +242,9 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.1.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caedd35358716531b517fa53ffaf8e23b21976de06c07b03f0d90f319aed088e"
+version = "0.3.0"
 dependencies = [
- "assemblyline-markings 0.1.8",
- "base62",
- "chrono",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "serde_with",
- "struct-metadata 0.1.5",
- "strum 0.25.0",
-]
-
-[[package]]
-name = "assemblyline-models"
-version = "0.2.0"
-dependencies = [
- "assemblyline-markings 0.1.9",
+ "assemblyline-markings 0.1.10",
  "base62",
  "chrono",
  "hex",
@@ -275,7 +257,29 @@ dependencies = [
  "serde_with",
  "sha1",
  "sha2",
- "struct-metadata 1.1.0",
+ "struct-metadata",
+ "strum 0.26.3",
+]
+
+[[package]]
+name = "assemblyline-models"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d36f2db9e31ea261b8582a5eff71ff42b4921bc69a101712d44d3d2c2854b64f"
+dependencies = [
+ "assemblyline-markings 0.1.8",
+ "base62",
+ "chrono",
+ "hex",
+ "log",
+ "md-5",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha1",
+ "sha2",
+ "struct-metadata",
  "strum 0.26.3",
 ]
 
@@ -285,8 +289,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
- "assemblyline-markings 0.1.9",
- "assemblyline-models 0.2.0",
+ "assemblyline-markings 0.1.10",
+ "assemblyline-models 0.3.0",
  "async-trait",
  "bytes",
  "cart_container",
@@ -320,7 +324,7 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "sha2",
- "struct-metadata 1.1.0",
+ "struct-metadata",
  "strum 0.26.3",
  "strum_macros 0.26.4",
  "tempfile",
@@ -4005,36 +4009,13 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "struct-metadata"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d82a8c46bc4cea7a0972a7c740bdb0784a8c537896d2ba46fc36efb6bbf523b"
-dependencies = [
- "chrono",
- "serde_json",
- "struct-metadata-derive 0.1.1",
-]
-
-[[package]]
-name = "struct-metadata"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa00b22db5dfb05130f5f2c1eabf17705c2f6fb3547bb529d137ad847bd4596"
 dependencies = [
  "chrono",
  "serde_json",
- "struct-metadata-derive 1.0.0",
-]
-
-[[package]]
-name = "struct-metadata-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae650ca0e5d6189ac01583eed85dcea049a4454c87f8976216cd53a172aff448"
-dependencies = [
- "convert_case",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
+ "struct-metadata-derive",
 ]
 
 [[package]]

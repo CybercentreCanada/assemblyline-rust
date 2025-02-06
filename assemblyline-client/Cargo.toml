@@ -27,15 +27,15 @@ url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
-assemblyline-models = { version="0.1" }
+assemblyline-models = { version="0.3" }
 
 # Libraryies used for the ingest binary
 clap = { version = "4.5", features = ["derive"] }
 configparser = "3"
 expanduser = "1.2"
 rand = "0.8"
+sha2 = "0.10"
 
 [dev-dependencies]
 rand = "0.8"
 env_logger = "0.10"
-assemblyline-markings = { version="0.1" }
