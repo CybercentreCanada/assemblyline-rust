@@ -183,6 +183,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sha2",
  "strum 0.25.0",
  "tokio",
  "tokio-util",
