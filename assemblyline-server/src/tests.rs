@@ -459,7 +459,7 @@ impl MetricsWatcher {
         let start = std::time::Instant::now();
         let mut values: HashMap<&str, i64> = HashMap::from_iter(values.iter().cloned());
         while !values.is_empty() {
-            if start.elapsed() > std::time::Duration::from_secs(20) {
+            if start.elapsed() > RESPONSE_TIMEOUT {
                 match self.counts.lock().get(service) {
                     Some(count) => error!("Existing metrics for {service}: {count:?}"),
                     None => error!("No metrics for {service}"),

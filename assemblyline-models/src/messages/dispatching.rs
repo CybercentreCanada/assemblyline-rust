@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Sha256, Sid};
+use crate::{JsonMap, Sha256, Sid};
 
 
 
@@ -13,13 +13,12 @@ pub struct SubmissionDispatchMessage {
     pub completed_queue: Option<String>,
     #[serde(default)]
     pub file_infos: HashMap<Sha256, super::task::FileInfo>,
-    // #[serde(default)]
-    // pub results: ,
-    // #[serde(default)]
-    // pub file_tree=None, 
-    // #[serde(default)]
-    // pub errors: Optional[Iterable[str]] = None,
-// scheduler,datastore: AssemblylineDatastore
+    #[serde(default)]
+    pub results: HashMap<String, crate::datastore::result::Result>,
+    #[serde(default)]
+    pub file_tree: HashMap<Sha256, FileTreeData>,
+    #[serde(default)]
+    pub errors: Vec<String>,
 }
 
 impl SubmissionDispatchMessage {
@@ -28,8 +27,18 @@ impl SubmissionDispatchMessage {
             submission,
             completed_queue,
             file_infos: Default::default(),
+            file_tree: Default::default(),
+            errors: Default::default(),
+            results: Default::default(),
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FileTreeData {
+    pub name: Vec<String>,
+    pub children: HashMap<Sha256, FileTreeData>
 }
 
 #[derive(Serialize, Deserialize)]

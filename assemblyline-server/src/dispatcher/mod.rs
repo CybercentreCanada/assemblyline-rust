@@ -13,13 +13,14 @@ use assemblyline_models::config::TemporaryKeyType;
 use assemblyline_models::datastore::submission::SubmissionState;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{error, Service, Submission};
-use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
+use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, FileTreeData, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
 use assemblyline_models::messages::submission::SubmissionMessage;
 use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, ServiceResponse, ServiceResult, TagEntry, TagItem, Task as ServiceTask};
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
 use assemblyline_models::{ExpandingClassification, JsonMap, Readable, Sha256, Sid};
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use poem::listener::Acceptor;
@@ -35,7 +36,7 @@ use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TAS
 use crate::elastic::Elastic;
 use crate::http::TlsAcceptor;
 use crate::postprocessing::ActionWorker;
-use crate::services::get_schedule_names;
+use crate::services::{get_schedule_names, ServiceHelper};
 use crate::{Core, Flag};
 
 // APM_SPAN_TYPE = 'handle_message'
@@ -215,7 +216,7 @@ struct SubmissionTask {
 
 impl SubmissionTask {
 
-    fn new(args: SubmissionDispatchMessage, access_control: Option<String>) -> Self {
+    fn new(args: SubmissionDispatchMessage, access_control: Option<String>, scheduler: &ServiceHelper) -> Self {
         let mut out = Self {
             submission: args.submission,
             completed_queue: args.completed_queue,
@@ -248,66 +249,98 @@ impl SubmissionTask {
             _parent_map: Default::default(),
         };
 
+        // read cached file info into local storage
         for (hash, info) in args.file_infos {
             out.file_info.insert(hash, Some(Arc::new(info)));
         }
 
-        error!("dispatcher parameters not parsed");
-        // if file_tree is not None:
-        //     def recurse_tree(tree, depth):
-        //         for sha256, file_data in tree.items():
-        //             self.file_depth[sha256] = depth
-        //             self.file_names[sha256] = file_data['name'][0]
-        //             recurse_tree(file_data['children'], depth + 1)
+        // read information about file tree constructed by results
+        if !args.file_tree.is_empty() {
+            fn recurse_tree(out: &mut SubmissionTask, tree: HashMap<Sha256, FileTreeData>, depth: u32) {
+                for (sha256, file_data) in tree {
 
-        //     recurse_tree(file_tree, 0)
+                    out.file_depth.insert(sha256.clone(), depth);
+                    let file_name = file_data.name.first().cloned().unwrap_or_else(|| sha256.to_string());
+                    out.file_names.insert(sha256,  file_name);
 
-        error!("dispatcher parameters not parsed");
-        // if results is not None:
-        //     rescan = scheduler.expand_categories(self.submission.params.services.rescan)
+                    recurse_tree(out, file_data.children, depth + 1)
+                }
+            }
 
-        //     # Replay the process of routing files for dispatcher internal state.
-        //     for k, result in results.items():
-        //         sha256, service, _ = k.split('.', 2)
-        //         service = scheduler.services.get(service)
-        //         if not service:
-        //             continue
+            recurse_tree(&mut out, args.file_tree, 0);
+        }
 
-        //         # TODO: the following 2 lines can be removed when assemblyline changed to version 4.6+
-        //         if service.category == DYNAMIC_ANALYSIS_CATEGORY:
-        //             self.forbid_for_children(sha256, service.name)
+        if !args.results.is_empty() {
+            let rescan = scheduler.expand_categories(out.submission.params.services.rescan.clone());
 
-        //         prevented_services = scheduler.expand_categories(service.recursion_prevention)
+            // Replay the process of routing files for dispatcher internal state.
+            for k in args.results.keys() {
+                if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
+                    let sha256: Sha256 = match sha256.parse() {
+                        Ok(sha) => sha,
+                        Err(_) => continue,
+                    };
 
-        //         for service_name in prevented_services:
-        //             self.forbid_for_children(sha256, service_name)
+                    let service = match scheduler.get(service) {
+                        Some(service) => service,
+                        None => continue,
+                    };
 
-        error!("dispatcher parameters not parsed");
-        //     # Replay the process of receiving results for dispatcher internal state
-        //     for k, result in results.items():
-        //         sha256, service, _ = k.split('.', 2)
-        //         if service not in rescan:
-        //             extracted = result['response']['extracted']
-        //             children: list[str] = [r['sha256'] for r in extracted]
-        //             self.register_children(sha256, children)
-        //             children_detail: list[tuple[str, str]] = [(r['sha256'], r['parent_relation']) for r in extracted]
-        //             self.service_results[(sha256, service)] = ResultSummary(
-        //                 key=k, drop=result['drop_file'], score=result['result']['score'],
-        //                 children=children_detail)
+                    let prevented_services = scheduler.expand_categories(service.recursion_prevention.clone());
+                    for service_name in prevented_services {
+                        out.forbid_for_children(sha256.clone(), service_name)
+                    }
+                }
+            }
+        
+            // Replay the process of receiving results for dispatcher internal state
+            for (k, result) in args.results {
+                if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
+                    let sha256: Sha256 = match sha256.parse() {
+                        Ok(sha) => sha,
+                        Err(_) => continue,
+                    };
 
-        //         tags = Result(result).scored_tag_dict()
-        //         for key in tags.keys():
-        //             if key in self.file_tags[sha256].keys():
-        //                 # Sum score of already known tags
-        //                 self.file_tags[sha256][key]['score'] += tags[key]['score']
-        //             else:
-        //                 self.file_tags[sha256][key] = tags[key]
+                    if let Ok(tags) = result.scored_tag_dict() {
+                        for (key, tag) in tags {
+                            let file_tags = out.file_tags.entry(sha256.clone()).or_default();
+                            match file_tags.entry(key) {
+                                std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
+                                    occupied_entry.get_mut().score += tag.score;
+                                },
+                                std::collections::hash_map::Entry::Vacant(mut vacant_entry) => {
+                                    vacant_entry.insert(tag);
+                                },
+                            }
+                        }
+                    }
+                    
+                    let service = service.to_owned();
+                    if !rescan.contains(&service) {
+                        let extracted = result.response.extracted;
+                        out.register_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
+                        let children_detail: Vec<(Sha256, String)> = extracted.into_iter().map(|file| (file.sha256, file.parent_relation)).collect();
+                        out.service_results.insert((sha256, service), ResultSummary {
+                            key: k, 
+                            drop: result.drop_file, 
+                            score: result.result.score,
+                            children: children_detail,
+                            partial: result.partial
+                        });
+                    }
+                }
+            }
+        }
 
-        error!("dispatcher parameters not parsed");
-        // if errors is not None:
-        //     for e in errors:
-        //         sha256, service, _ = e.split('.', 2)
-        //         self.service_errors[(sha256, service)] = e
+        // store errors that are already part of this submission
+        for e in args.errors {
+            if let [sha256, service, ..] = e.splitn(3, ".").collect_vec()[..] {
+                if let Ok(sha256) = sha256.parse() {
+                    let service = service.to_owned();
+                    out.service_errors.insert((sha256, service), e);
+                }
+            }
+        }
 
         out
     }
@@ -582,6 +615,7 @@ pub async fn main(core: Core) -> Result<()> {
     // Initialize Internal state
     let dispatcher = Dispatcher::new(core, tcp).await?;
     dispatcher.finalizing.install_terminate_handler(true)?;
+    dispatcher.core.install_activation_handler("dispatcher").await?;
 
     let mut components = tokio::task::JoinSet::new();
     dispatcher.start(&mut components);
@@ -873,7 +907,7 @@ impl Dispatcher {
                 }
 
                 // This is probably a complete task
-                let task = SubmissionTask::new(message, access_control);
+                let task = SubmissionTask::new(message, access_control, &self.core.services);
                 self.dispatch_submission(task).await.context("dispatch_submission")?;
             }
         }

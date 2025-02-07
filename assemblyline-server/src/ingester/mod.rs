@@ -201,6 +201,7 @@ pub async fn main(core: Core) -> Result<()> {
     // Initialize ingester Internal state
     let ingester = Arc::new(Ingester::new(core).await?);
     ingester.core.running.install_terminate_handler(false)?;
+    ingester.core.install_activation_handler("ingester").await?;
 
     // launch the assorted daemons within the ingester
     let mut components = tokio::task::JoinSet::new();

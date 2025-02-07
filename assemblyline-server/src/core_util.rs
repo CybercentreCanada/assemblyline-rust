@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::config::Config;
 use assemblyline_filestore::FileStore;
+use log::{error, info};
 
 use crate::cachestore::CacheStore;
 use crate::common::tagging::{SafelistFile, TagSafelister};
@@ -56,5 +58,55 @@ impl Core {
         //     raise InvalidSafelist('Could not find any tag_safelist file to load.')
 
         return TagSafelister::new(self.datastore.clone(), tag_safelist_data).await;
+    }
+
+    pub async fn install_activation_handler(&self, component: &str) -> Result<()> {
+        info!("Listening for status events on: system.{component}.active");
+        let mut change_stream = self.redis_volatile.pubsub_json_listener::<bool>()
+            .subscribe(format!("system.{component}.active"))
+            .listen();
+
+        // setup local copies of some values
+        let enabled = self.enabled.clone();
+        let component = component.to_owned();
+        let active_hash = self.redis_persistant.clone().hashmap::<bool>("system".to_string(), None);
+        let component_active_key = format!("{component}.active");
+
+        // initialize our activity status
+        match active_hash.get(&component_active_key).await? {
+            Some(value) => {
+                enabled.set(value);
+            }
+            None => {
+                // Initialize state to be active if not set
+                active_hash.set(&component_active_key, &true).await?;
+                enabled.set(true);    
+            }
+        }
+
+        // spawn a watcher that monitors the activity changes
+        tokio::spawn(async move {
+            while let Some(change) = change_stream.recv().await {
+                match change {
+                    None => {
+                        info!("Refreshing status");
+                        enabled.set(match active_hash.get(&component_active_key).await {
+                            Ok(value) => value.unwrap_or(true),
+                            Err(err) => {
+                                error!("Error getting component active flag from redis: {err}");
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                continue
+                            },
+                        });
+                    }
+                    Some(status) => {
+                        info!("Status change detected: {status}");
+                        enabled.set(status);
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 }

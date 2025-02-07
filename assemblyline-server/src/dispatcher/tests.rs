@@ -162,7 +162,7 @@ async fn test_simple() {
     info!("==== first dispatch");
     let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
 
-    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
+    disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
     // client.dispatch_bundle(&task).await.unwrap();
     // disp.pull_submissions();
     let task = disp.get_test_report(sid).await.unwrap();
@@ -281,7 +281,7 @@ async fn test_dispatch_extracted() {
 
     // Launch the submission
     let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
-    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
+    disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -372,7 +372,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
 
     // Launch the submission
     let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
-    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
+    disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -461,7 +461,7 @@ async fn test_timeout() {
     // Submit a problem, and check that it gets added to the dispatch hash
     // and the right service queues
     let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
-    disp.dispatch_submission(SubmissionTask::new(task, None)).await.unwrap();
+    disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
