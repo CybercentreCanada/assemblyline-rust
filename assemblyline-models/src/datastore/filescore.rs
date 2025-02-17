@@ -22,7 +22,7 @@ pub struct FileScore {
     /// ID of the associated submission
     pub sid: Sid,
     /// Epoch time at which the FileScore entry was created
-    pub time: f64,
+    pub time: f32,
 }
 
 impl Readable for FileScore {

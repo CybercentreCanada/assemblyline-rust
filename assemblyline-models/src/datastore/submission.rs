@@ -16,7 +16,9 @@ use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap,
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Submission {
-    // pub archive_ts = odm.Optional(odm.Date(store=False, description="Archiving timestamp (Deprecated)"))
+    /// Time at which the submission was archived
+    #[serde(default)]
+    pub archive_ts: Option<DateTime<Utc>>,
     /// Document is present in the malware archive
     pub archived: bool,
     /// Classification of the submission
@@ -70,6 +72,7 @@ pub struct Submission {
 impl rand::distr::Distribution<Submission> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Submission {
         Submission {
+            archive_ts: None,
             archived: rng.random(),
             classification: ExpandingClassification::try_unrestricted().unwrap(),
             error_count: 0,
@@ -322,6 +325,9 @@ pub struct ServiceSelection {
     /// List of selected services
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
+    /// List of runtime excluded services
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub runtime_excluded: Vec<String>,
 }
 
 /// Submission-Relevant Times

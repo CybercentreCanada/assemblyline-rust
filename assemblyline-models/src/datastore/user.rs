@@ -327,13 +327,13 @@ pub struct User {
     #[metadata(index=false, store=false)]
     pub agrees_with_tos: Option<DateTime<Utc>>,
     /// Maximum number of concurrent API requests (0: No Quota)
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="integer")]
     #[serde(default)]
-    pub api_quota: Option<u32>,
+    pub api_quota: Option<u64>,
     /// Maximum number of API calls a user can do daily (0: No Quota)
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="integer")]
     #[serde(default)]
-    pub api_daily_quota: Option<u32>,
+    pub api_daily_quota: Option<u64>,
     /// Mapping of API keys
     #[metadata(index=false, store=false)]
     #[serde(default)]
@@ -380,17 +380,17 @@ pub struct User {
     #[metadata(index=false, store=false)]
     pub password: String,
     /// Maximum number of concurrent submissions (0: No Quota)
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="integer")]
     #[serde(default)]
-    pub submission_quota: Option<u32>,
+    pub submission_quota: Option<u64>,
     /// Maximum number of concurrent async submission (0: No Quota)
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="integer")]
     #[serde(default)]
-    pub submission_async_quota: Option<u32>,
+    pub submission_async_quota: Option<u64>,
     /// Maximum number of submissions a user can do daily (0: No Quota)
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="integer")]
     #[serde(default)]
-    pub submission_daily_quota: Option<u32>,
+    pub submission_daily_quota: Option<u64>,
     /// Type of user
     #[serde(rename="type", default="default_user_types")]
     pub user_types: Vec<UserType>,

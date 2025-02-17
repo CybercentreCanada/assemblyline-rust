@@ -479,7 +479,7 @@ impl ClassificationParser {
     }
 
     /// check if the user is in a group permitted dissemination
-    fn _can_see_groups(user_groups: &Vec<String>, required_groups: &Vec<String>) -> bool {
+    fn _can_see_groups(user_groups: &Vec<String>, required_groups: &[String]) -> bool {
         if required_groups.is_empty() {
             return true
         }
@@ -655,9 +655,9 @@ impl ClassificationParser {
         Ok(ParsedClassification { level, required, groups, subgroups })
     }
 
-    /// Listing all classifcation permutations can take a really long time the more the classification
-    /// definition is complexe. Normalizing each entry makes it even worst. Use only this function if
-    /// absolutely necessary.
+    // /// Listing all classifcation permutations can take a really long time the more the classification
+    // /// definition is complexe. Normalizing each entry makes it even worst. Use only this function if
+    // /// absolutely necessary.
     // pub fn list_all_classification_combinations(self, long_format: bool = True, normalized: bool = False) -> Set {
 
     //     combinations = set()

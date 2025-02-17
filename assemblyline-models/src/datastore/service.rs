@@ -4,8 +4,9 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::types::classification::unrestricted_classification;
-use crate::{ElasticMeta, JsonMap, Readable, Text};
+use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
+use crate::ClassificationString;
+use crate::{ElasticMeta, JsonMap, Readable, Text, types::NonZeroInteger};
 
 /// Environment Variable Model
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
@@ -32,7 +33,7 @@ pub struct DockerConfig {
     pub command: Option<Vec<String>>,
     /// CPU allocation
     #[serde(default="default_cpu_cores")]
-    pub cpu_cores: f64,
+    pub cpu_cores: f32,
     /// Additional environemnt variables for the container
     #[serde(default)]
     pub environment: Vec<EnvironmentVariable>,
@@ -52,19 +53,22 @@ pub struct DockerConfig {
     pub ports: Vec<String>,
     /// Container RAM limit
     #[serde(default="default_ram_mb")]
-    pub ram_mb: u64,
+    pub ram_mb: i32,
     /// Container RAM request
     #[serde(default="default_ram_mb_min")]
-    pub ram_mb_min: u64,
+    pub ram_mb_min: i32,
     /// Service account to use for pods in kubernetes
     #[serde(default)]
     pub service_account: Option<String>,
+    /// Additional container labels.
+    #[serde(default)]
+    pub labels: Vec<EnvironmentVariable>,
 }
 
-fn default_cpu_cores() -> f64 { 1.0 }
+fn default_cpu_cores() -> f32 { 1.0 }
 fn default_registry_type() -> RegistryType { RegistryType::Docker }
-fn default_ram_mb() -> u64 { 512 }
-fn default_ram_mb_min() -> u64 { 256 }
+fn default_ram_mb() -> i32 { 512 }
+fn default_ram_mb_min() -> i32 { 256 }
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
@@ -113,12 +117,25 @@ pub struct DependencyConfig {
     pub run_as_core: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Described)]
+#[metadata_type(ElasticMeta)]
+#[serde(rename_all="UPPERCASE")]
+pub enum FetchMethods {
+    #[default]
+    Get,
+    Post,
+    Git,
+} 
+
 
 /// Update Source Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct UpdateSource {
+    /// Is this source active for periodic fetching?
+    #[serde(default="default_enabled")]
+    pub enabled: bool,
     /// Name of source
     pub name: String,
     /// Password used to authenticate with source
@@ -148,15 +165,33 @@ pub struct UpdateSource {
     #[serde(default)]
     pub headers: Vec<EnvironmentVariable>,
     /// Default classification used in absence of one defined in files from source
-    #[serde(default="unrestricted_classification")]
-    pub default_classification: String,
+    #[serde(default="unrestricted_classification_string")]
+    pub default_classification: ClassificationString,
     /// Branch to checkout from Git repository.
     #[serde(default)]
     pub git_branch: Option<String>,
     /// Synchronize signatures with remote source. Allows system to auto-disable signatures no longer found in source.
     #[serde(default)]
     pub sync: bool,
+    /// Fetch method to be used with source
+    #[serde(default)]
+    pub fetch_method: FetchMethods,
+    /// Should the source's classfication override the signature's self-defined classification, if any?
+    #[serde(default)]
+    pub override_classification: bool,
+    /// Processing configuration for source
+    #[serde(default)]
+    pub configuration: HashMap<String, serde_json::Value>,
+    /// Update check interval, in seconds, for this source
+    #[serde(default)]
+    #[metadata(mapping="integer")]
+    update_interval: Option<NonZeroInteger>,
+    /// Ignore source caching and forcefully fetch from source
+    #[serde(default)]
+    pub ignore_cache: bool,
 }
+
+fn default_enabled() -> bool { true }
 
 /// Update Configuration for Signatures
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
@@ -171,7 +206,7 @@ pub struct UpdateConfig {
     #[serde(default)]
     pub sources: Vec<UpdateSource>,
     /// Update check interval, in seconds
-    pub update_interval_seconds: u32,
+    pub update_interval_seconds: i32,
     /// Should the service wait for updates first?
     #[serde(default)]
     pub wait_for_update: bool,
@@ -260,7 +295,9 @@ pub struct Service {
     #[metadata(store=true)]
     #[serde(default="default_service_rejects")]
     pub rejects: Option<String>,
-
+    /// Should the service be auto-updated?
+    #[serde(default)]
+    pub auto_update: bool,
     /// Which category does this service belong to?
     #[metadata(store=true, copyto="__text__")]
     #[serde(default="default_category")]
@@ -288,12 +325,15 @@ pub struct Service {
     pub is_external: bool,
     /// How many licences is the service allowed to use?
     #[serde(default)]
+    #[metadata(mapping="integer")]
     pub licence_count: u32,
     /// The minimum number of service instances. Overrides Scaler's min_instances configuration.
     #[serde(default)]
+    #[metadata(mapping="integer")]
     pub min_instances: Option<u32>,
     /// If more than this many jobs are queued for this service drop those over this limit. 0 is unlimited.
     #[serde(default)]
+    #[metadata(mapping="integer")]
     pub max_queue_length: u32,
 
     /// Does this service use tags from other services for analysis?
@@ -336,7 +376,7 @@ pub struct Service {
     pub submission_params: Vec<SubmissionParams>,
     /// Service task timeout, in seconds
     #[serde(default="default_timeout")]
-    pub timeout: u32,
+    pub timeout: i32,
 
     /// Docker configuration for service
     pub docker_config: DockerConfig,
@@ -358,7 +398,7 @@ pub struct Service {
 fn default_category() -> String { "Static Analysis".to_owned() }
 fn default_description() -> Text { Text("NA".to_owned()) }
 fn default_stage() -> String { "CORE".to_owned() }
-fn default_timeout() -> u32 { 60 }
+fn default_timeout() -> i32 { 60 }
 fn default_update_channel() -> ChannelKinds { ChannelKinds::Stable }
 
 impl Service {

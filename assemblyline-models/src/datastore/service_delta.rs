@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
+use crate::types::NonZeroInteger;
 use crate::{ClassificationString, ElasticMeta, JsonMap, Readable, Text};
 
-use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, ParamKinds, RegistryType, SignatureDelimiter};
+use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, FetchMethods, ParamKinds, RegistryType, SignatureDelimiter};
 
 // from assemblyline import odm
 // from assemblyline.odm.models.service import SIGNATURE_DELIMITERS
@@ -22,8 +23,9 @@ use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, ParamKinds, 
 
 
 /// Docker Configuration Delta
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
 #[metadata_type(ElasticMeta)]
+#[serde(default)]
 #[metadata(index=false, store=false)]
 pub struct DockerConfigDelta {
     /// REF_DOCKER_CONFIG
@@ -50,13 +52,18 @@ pub struct DockerConfigDelta {
     pub ram_mb_min: Option<i32>,
     /// REF_DOCKER_CONFIG
     pub service_account: Option<String>,
+    /// REF_DOCKER_CONFIG
+    pub labels: Option<Vec<EnvironmentVariable>>,
 }
 
 
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
 #[metadata_type(ElasticMeta)]
+#[serde(default)]
 #[metadata(index=false, store=false)]
 pub struct UpdateSourceDelta {
+    /// REF_UPDATE_SOURCE
+    pub enabled: Option<bool>,
     /// REF_UPDATE_SOURCE
     pub name: Option<String>,
     /// REF_UPDATE_SOURCE
@@ -83,6 +90,17 @@ pub struct UpdateSourceDelta {
     pub git_branch: Option<String>,
     /// REF_UPDATE_SOURCE
     pub sync: Option<bool>,
+    /// REF_UPDATE_SOURCE
+    pub fetch_method: Option<FetchMethods>,
+    /// REF_UPDATE_SOURCE
+    pub override_classification: Option<bool>,
+    /// REF_UPDATE_SOURCE
+    pub configuration: Option<HashMap<String, serde_json::Value>>,
+    /// REF_UPDATE_SOURCE
+    #[metadata(mapping="integer")]
+    pub update_interval: Option<NonZeroInteger>,
+    /// REF_UPDATE_SOURCE
+    pub ignore_cache: Option<bool>,    
 }
 
 #[derive(Serialize, Deserialize, Described)]
@@ -163,17 +181,21 @@ pub struct ServiceDelta {
     #[metadata(store=true)]
     pub rejects: Option<String>,
     /// REF_SERVICE
-    #[metadata(store=true, copyto="__text__")]
+    pub auto_update: Option<bool>,
+    /// REF_SERVICE
+    #[metadata(store=true)]
     pub category: Option<String>,
     /// REF_SERVICE
+    #[metadata(mapping="keyword")]
     pub classification: Option<ClassificationString>,
     /// REF_SERVICE
     #[metadata(index=false)]
     pub config: Option<JsonMap>,
     /// REF_SERVICE
-    #[metadata(store=true, copyto="__text__")]
+    #[metadata(store=true)]
     pub description: Option<Text>,
     /// REF_SERVICE
+    #[metadata(mapping="keyword")]
     pub default_result_classification: Option<ClassificationString>,
     /// REF_SERVICE
     #[metadata(store=true)]
@@ -198,7 +220,7 @@ pub struct ServiceDelta {
     pub monitored_keys: Option<Vec<String>>,
 
     /// REF_SERVICE
-    #[metadata(store=true, copyto="__text__")]
+    #[metadata(store=true)]
     pub name: Option<String>, 
     /// REF_SERVICE
     #[metadata(store=true)]
@@ -210,7 +232,7 @@ pub struct ServiceDelta {
     pub disable_cache: Option<bool>,
 
     /// REF_SERVICE
-    #[metadata(store=true, copyto="__text__")]
+    #[metadata(store=true)]
     pub stage: Option<String>, 
     /// REF_SERVICE
     #[metadata(index=false)]

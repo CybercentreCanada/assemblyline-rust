@@ -231,7 +231,7 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
                 // struct_metadata::Entry { label: "__access_req__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_req__"] },
                 // struct_metadata::Entry { label: "__access_grp1__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp1__"] },
                 // struct_metadata::Entry { label: "__access_grp2__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp2__"] },
-            ], &mut []),
+            ], &mut [], &mut[]),
             // kind: struct_metadata::Kind::Aliased { 
             //     name: "ExpandingClassification", 
             //     kind: Box::new(String::metadata())
@@ -270,7 +270,7 @@ impl<const U: bool> PartialEq for ExpandingClassification<U> {
 /// A classification value stored as a string
 #[derive(Described, Debug, Clone, Eq)]
 #[metadata_type(ElasticMeta)]
-#[metadata(mapping="classification")]
+#[metadata(mapping="classification_string")]
 pub struct ClassificationString(pub (crate) String);
 
 impl From<ClassificationString> for String {

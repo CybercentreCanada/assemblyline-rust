@@ -43,6 +43,7 @@ pub struct File {
     #[metadata(store=true, copyto="__text__")]    
     pub name: Vec<String>,
     /// Size of the file in bytes
+    #[metadata(mapping="integer")]
     pub size: Option<u64>,
     /// Type of file as identified by Assemblyline
     #[serde(rename="type")]

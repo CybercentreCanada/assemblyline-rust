@@ -92,7 +92,6 @@ enum Commands {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> ExitCode {
     // Load CLI

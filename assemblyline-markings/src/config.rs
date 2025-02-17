@@ -402,11 +402,11 @@ pub struct ClassificationSubGroup {
     /// Short form canonical name of marking
     pub short_name: NameString,
 
-    /// Assuming that this groups is the only group selected, this is the display name
-    /// that will be used in the classification (that values has to be in the aliases
-    /// of this group and only this group) (optional)
-    ///
-    /// Loaded in the python version, but not actually used
+    // /// Assuming that this groups is the only group selected, this is the display name
+    // /// that will be used in the classification (that values has to be in the aliases
+    // /// of this group and only this group) (optional)
+    // ///
+    // /// Loaded in the python version, but not actually used
     // #[serde(default)]
     // pub solitary_display_name: Option<String>,
 

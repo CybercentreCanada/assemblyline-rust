@@ -25,6 +25,7 @@ pub struct Retrohunt {
     #[serde(flatten)]
     pub classification: ExpandingClassification,
     /// Maximum classification of results in the search
+    #[metadata(mapping="keyword")]
     pub search_classification: ClassificationString,
     /// User who created this retrohunt job
     #[metadata(copyto="__text__")]

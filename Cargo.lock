@@ -254,6 +254,7 @@ dependencies = [
  "md-5",
  "pretty_assertions",
  "rand 0.9.0",
+ "regex",
  "serde",
  "serde_json",
  "serde_with",
@@ -261,6 +262,7 @@ dependencies = [
  "sha2",
  "struct-metadata",
  "strum 0.26.3",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
@@ -1365,9 +1367,9 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convert_case"
-version = "0.6.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
+checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -4234,9 +4236,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "struct-metadata"
-version = "1.1.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "033a6e260640e646737fde2d65455c4939a52441eafdd06333e190a6f8e61c69"
+checksum = "7687c73a6eac045bf107a8c24fcc1da6d4d344e87ffd15d7ee874e25dc9d8cc5"
 dependencies = [
  "chrono",
  "serde_json",
@@ -4245,9 +4247,9 @@ dependencies = [
 
 [[package]]
 name = "struct-metadata-derive"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "474eb5e142b85819cb315395ab8536400a7856770b0b470858881b41622c5c24"
+checksum = "582a6c4ee3bfe3ed2992a6fbfb75c552aa372bbe605f2c75ee63bd82f954c889"
 dependencies = [
  "convert_case",
  "proc-macro2",

@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 //     per_instance = odm.List(odm.Integer(), description="Number of submissions per Dispatcher instance")
 
 
-
 /// Metrics Model
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Metrics {

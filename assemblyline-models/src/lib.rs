@@ -230,9 +230,6 @@ pub type Uuid = String;
 /// Unvalidated domain type
 pub type Domain = String;
 
-/// Unvalidated ip type
-pub type IP = String;
-
 /// Unvalidated uri type
 pub type Uri = String;
 

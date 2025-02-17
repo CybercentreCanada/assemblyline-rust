@@ -16,7 +16,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
-use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256};
+use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256, Text};
 
 use super::tagging::Tagging;
 
@@ -36,6 +36,18 @@ pub enum BodyFormat {
     Multi,
     OrderedKeyValue,
     Timeline,
+}
+
+// This needs to match the PROMOTE_TO StringTable in
+// assemblyline-v4-service/assemblyline_v4_service/common/result.py.
+// Any updates here need to go in that StringTable also.
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[metadata_type(ElasticMeta)]
+#[serde(rename_all="SCREAMING_SNAKE_CASE")]
+pub enum PromoteTo {
+    Screenshot, 
+    Entropy, 
+    UriParams
 }
 
 // constants = forge.get_constants()
@@ -103,7 +115,7 @@ pub struct Section {
     pub auto_collapse: bool,
     /// Text body of the result section
     #[metadata(copyto="__text__")]
-    pub body: Option<String>,
+    pub body: Option<Text>,
     /// Classification of the section
     pub classification: ClassificationString,
     /// Type of body in this section
@@ -114,7 +126,7 @@ pub struct Section {
     pub body_config: Option<HashMap<String, serde_json::Value>>,
     /// Depth of the section
     #[metadata(index=false)]
-    pub depth: i64,
+    pub depth: i32,
     /// Heuristic used to score result section
     pub heuristic: Option<Heuristic>,
     /// List of tags associated to this section
@@ -126,13 +138,15 @@ pub struct Section {
     pub safelisted_tags: HashMap<String, Vec<String>>,
     /// Title of the section
     #[metadata(copyto="__text__")]
-    pub title_text: String,
+    pub title_text: Text,
+    /// This is the type of data that the current section should be promoted to.
+    pub promote_to: Option<PromoteTo>,
 }
 
 /// Result Body
 #[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index=true, store=true)]
 pub struct ResultBody {
     /// Aggregate of the score for all heuristics
     #[serde(default)]
@@ -179,7 +193,7 @@ pub struct File {
     pub sha256: Sha256,
     /// Description of the file
     #[metadata(copyto="__text__")]
-    pub description: String,
+    pub description: Text,
     /// Classification of the file
     pub classification: ClassificationString,
     /// Is this an image used in an Image Result Section?
@@ -187,13 +201,13 @@ pub struct File {
     pub is_section_image: bool,
     /// File relation to parent, if any.
     #[serde(default = "default_file_parent_relation")]
-    pub parent_relation: String,
+    pub parent_relation: Text,
     /// Allow file to be analysed during Dynamic Analysis even if Dynamic Recursion Prevention is enabled.
     #[serde(default)]
     pub allow_dynamic_recursion: bool,
 }
 
-fn default_file_parent_relation() -> String { "EXTRACTED".to_owned() }
+fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
 
 /// Response Body of Result
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
@@ -274,7 +288,7 @@ pub struct Result {
     #[serde(rename = "type")]
     pub result_type: Option<String>,
     /// ???
-    pub size: Option<u64>,
+    pub size: Option<i32>,
     /// Use to not pass to other stages after this run
     #[serde(default)]
     pub drop_file: bool,

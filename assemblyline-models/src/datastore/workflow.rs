@@ -46,11 +46,14 @@ pub struct Workflow {
     pub creator: String,
     /// UID of the last user to edit the workflow
     pub edited_by: String,
+    /// Is this workflow enabled?
+    #[serde(default="default_enabled")]
+    pub enabled: bool,
     /// Date of first hit on workflow
     pub first_seen: Option<DateTime<Utc>>,
     /// Number of times there was a workflow hit
     #[serde(default)]
-    pub hit_count: i64,
+    pub hit_count: i32,
     /// Labels applied by the workflow
     #[serde(default)]
     #[metadata(copyto="__text__")]
@@ -75,3 +78,5 @@ pub struct Workflow {
     /// ID of the workflow
     pub workflow_id: Option<Uuid>,
 }
+
+fn default_enabled() -> bool { true }

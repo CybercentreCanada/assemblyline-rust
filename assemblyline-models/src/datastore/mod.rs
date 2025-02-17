@@ -77,9 +77,12 @@ mod python {
 
     use serde_json::json;
 
-    use super::{RetrohuntHit, Retrohunt, File};
+    use super::{RetrohuntHit, File};
     use crate::datastore::badlist::Badlist;
-    use crate::datastore::Submission;
+    use crate::datastore::safelist::Safelist;
+    use crate::datastore::user::User;
+    use crate::datastore::{Retrohunt, Service, ServiceDelta, Tagging, Workflow};
+    use crate::datastore::{Alert, EmptyResult, Error, Result, Submission, filescore::FileScore, heuristic::Heuristic};
     use crate::meta::Mappings;
 
     use crate::meta::build_mapping;
@@ -138,6 +141,64 @@ mod python {
     // }
 
     #[test]
+    fn alert_schema() {
+        let py_mappings = load_mapping("alert", "Alert");
+        let mapping = build_mapping::<Alert>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    
+    #[test]
+    fn badlist_schema() {
+        let py_mappings = load_mapping("badlist", "Badlist");
+        // py_mappings.properties.remove("archive_ts");
+        let mapping = build_mapping::<Badlist>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn emptyresult_schema() {
+        let py_mappings = load_mapping("emptyresult", "EmptyResult");
+        let mapping = build_mapping::<EmptyResult>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn error_schema() {
+        let py_mappings = load_mapping("error", "Error");
+        let mapping = build_mapping::<Error>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn file_schema() {
+        let py_mappings = load_mapping("file", "File");
+        let mapping = build_mapping::<File>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn filescore_schema() {
+        let py_mappings = load_mapping("filescore", "FileScore");
+        let mapping = build_mapping::<FileScore>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn heuristic_schema() {
+        let py_mappings = load_mapping("heuristic", "Heuristic");
+        let mapping = build_mapping::<Heuristic>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn result_schema() {
+        let py_mappings = load_mapping("result", "Result");
+        let mapping = build_mapping::<Result>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
     fn retrohunt_schema() {
         let py_mappings = load_mapping("retrohunt", "Retrohunt");
         let mapping = build_mapping::<Retrohunt>().unwrap();
@@ -152,42 +213,55 @@ mod python {
     }
 
     #[test]
-    fn file_schema() {
-        let mut py_mappings = load_mapping("file", "File");
-        py_mappings.properties.remove("archive_ts");
-        let mapping = build_mapping::<File>().unwrap();
+    fn safelist_schema() {
+        let py_mappings = load_mapping("safelist", "Safelist");
+        let mapping = build_mapping::<Safelist>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
 
-    
+    #[test]
+    fn service_delta_schema() {
+        let py_mappings = load_mapping("service_delta", "ServiceDelta");
+        let mapping = build_mapping::<ServiceDelta>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
+    #[test]
+    fn service_schema() {
+        let py_mappings = load_mapping("service", "Service");
+        let mapping = build_mapping::<Service>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
+
     #[test]
     fn submission_schema() {
         let mut py_mappings = load_mapping("submission", "Submission");
-        py_mappings.properties.remove("archive_ts");
+        py_mappings.properties.remove("params.ignore_dynamic_recursion_prevention");
         let mapping = build_mapping::<Submission>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
 
     #[test]
-    fn badlist_schema() {
-        let py_mappings = load_mapping("badlist", "Badlist");
-        // py_mappings.properties.remove("archive_ts");
-        let mapping = build_mapping::<Badlist>().unwrap();
+    fn tagging_schema() {
+        let py_mappings = load_mapping("tagging", "Tagging");
+        let mapping = build_mapping::<Tagging>().unwrap();
         assert_eq!(mapping, py_mappings);
     }
 
+    #[test]
+    fn user_schema() {
+        let py_mappings = load_mapping("user", "User");
+        // py_mappings.properties.remove("archive_ts");
+        let mapping = build_mapping::<User>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
 
-    // // Test that the classification components get expanded as expected
-    // #[test]
-    // fn classification_serialize() {
-    //     let time = DateTime::parse_from_rfc3339("2001-05-01T01:59:59Z").unwrap();
-    //     let sample = RetrohuntHit {
-    //         classification: "",
-    //         sha256: Sha256::from_str("00000000000000000000000000000000").unwrap(),
-    //         expiry_ts: Some(time.into()),
-    //         search: "abc123".to_owned(),
-    //     };
-    //     assert_eq!(crate::serialize::to_string(&sample).unwrap(), "");
-    // }
+    #[test]
+    fn workflow_schema() {
+        let py_mappings = load_mapping("workflow", "Workflow");
+        // py_mappings.properties.remove("archive_ts");
+        let mapping = build_mapping::<Workflow>().unwrap();
+        assert_eq!(mapping, py_mappings);
+    }
 
 }

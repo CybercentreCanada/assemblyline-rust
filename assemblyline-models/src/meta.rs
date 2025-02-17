@@ -55,6 +55,15 @@ pub struct ElasticMeta {
 }
 
 impl MetadataKind for ElasticMeta {
+    fn forward_propagate_context(&mut self, context: &Self) {
+        self.index = self.index.or(context.index);
+        self.store = self.store.or(context.store);
+        self.copyto = self.copyto.or(context.copyto);
+        self.mapping = self.mapping.or(context.mapping);
+        self.analyzer = self.analyzer.or(context.analyzer);
+        self.normalizer = self.normalizer.or(context.normalizer);        
+    }
+
     fn forward_propagate_child_defaults(&mut self, kind: &ElasticMeta) {
         self.index = self.index.or(kind.index);
         self.store = self.store.or(kind.store);
@@ -138,9 +147,12 @@ impl Mappings {
             field.doc_values = meta.index;
         }
 
-        field.copy_to = meta.copyto.map(ToOwned::to_owned);
-        field.analyzer = meta.analyzer.map(ToOwned::to_owned);
-        field.normalizer = meta.normalizer.map(ToOwned::to_owned);
+        field.copy_to = field.copy_to.or(meta.copyto.map(ToOwned::to_owned));
+        if field.copy_to.as_ref().is_some_and(|copyto| copyto.is_empty()) {
+            field.copy_to = None;
+        }
+        field.analyzer = field.analyzer.or(meta.analyzer.map(ToOwned::to_owned));
+        field.normalizer = field.normalizer.or(meta.normalizer.map(ToOwned::to_owned));
             
         self.properties.insert(name.trim_matches('.').to_owned(), field);
     }
@@ -158,13 +170,15 @@ impl Mappings {
 
         if let Some(mapping) = simple_mapping {
             if mapping.eq_ignore_ascii_case("classification") {
-                self.insert(&full_name, meta, FieldMapping{type_: "keyword".to_owned().into(), ..Default::default()});
+                self.insert(&full_name, meta, FieldMapping{ type_: "keyword".to_owned().into(), ..Default::default() });
                 if !full_name.contains('.') {
                     self.properties.insert("__access_lvl__".to_owned(), FieldMapping{type_: "integer".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_req__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_grp1__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                     self.properties.insert("__access_grp2__".to_owned(), FieldMapping{type_: "keyword".to_owned().into(), index: true.into(), ..Default::default()});
                 }
+            } else if mapping.eq_ignore_ascii_case("classification_string") {
+                self.insert(&full_name, meta, FieldMapping{ type_: "keyword".to_owned().into(), ..Default::default() });
             } else if mapping.eq_ignore_ascii_case("flattenedobject") {
                 if let Kind::Mapping(key_type, child_type) = kind {
                     if key_type.kind != Kind::String {
@@ -211,7 +225,7 @@ impl Mappings {
         match kind {
             Kind::Struct { children, .. } => {
                 for child in children {
-                    self.build_field(Some(child.label), &child.type_info.kind, &child.metadata, &path, _allow_refuse_implicit)?;
+                    self.build_field(Some(child.label), &child.type_info.kind, &child.metadata,  &path, _allow_refuse_implicit)?;
                 }
             },
             Kind::Aliased { kind, .. } => {
@@ -269,6 +283,7 @@ impl Mappings {
                 self.insert(&full_name, meta, FieldMapping{
                     type_: Some("keyword".to_string()),
                     index: Some(false),
+                    ignore_above: Some(8191),
                     doc_values: Some(false),
                     ..Default::default()
                 });
@@ -301,7 +316,7 @@ impl Mappings {
                         path_match: Some(name.to_owned()),
                         mapping: FieldMapping{
                             type_: mapping.to_owned().into(),
-                            index: index.into(),
+                            index: meta.index,
                             copy_to: meta.copyto.map(ToOwned::to_owned),
                             ..Default::default()
                         },

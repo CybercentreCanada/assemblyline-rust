@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{MD5, Sha256, Sha1, Domain, IP, Uri, ElasticMeta};
+use crate::{Domain, ElasticMeta, ExpandingClassification, Sha1, Sha256, Uri, Uuid, MD5};
 use super::workflow::{Statuses, Priorities};
 
 
@@ -136,13 +136,13 @@ pub struct ALResults {
     /// List of all IPs
     #[serde(default)]
     #[metadata(copyto="__text__")]
-    pub ip: Vec<IP>,
+    pub ip: Vec<std::net::IpAddr>,
     /// List of IPs found during Dynamic Analysis
     #[serde(default)]
-    pub ip_dynamic: Vec<IP>,
+    pub ip_dynamic: Vec<std::net::IpAddr>,
     /// List of IPs found during Static Analysis
     #[serde(default)]
-    pub ip_static: Vec<IP>,
+    pub ip_static: Vec<std::net::IpAddr>,
     /// Finish time of the Assemblyline submission
     #[serde(default)]
     #[metadata(index=false)]
@@ -150,7 +150,7 @@ pub struct ALResults {
     /// Maximum score found in the submission
     #[serde(default)]
     #[metadata(store=true)]
-    pub score: i64,
+    pub score: i32,
     /// List of all URIs
     #[serde(default)]
     #[metadata(copyto="__text__")]
@@ -186,11 +186,29 @@ pub struct File {
     pub sha256: Sha256,
     /// Size of the file in bytes
     #[metadata(store=false)]
-    pub size: u64,
+    pub size: i32,
     /// Type of file as identified by Assemblyline
     #[serde(rename = "type")]
     #[metadata(copyto="__text__")]
     pub file_type: String,
+    /// Screenshots taken of the file during analysis, if applicable.
+    #[serde(default)]
+    pub screenshots: Vec<Screenshot>,
+}
+
+/// Stores information about screenshots taken during the analysis of the file. Each screenshot has a name, description, and the hashes of the image and its thumbnail, offering a visual reference that can aid in manual review processes.
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=false)]
+pub struct Screenshot {
+    /// The name or title of the screenshot.
+    pub name: String,
+    /// A brief description of the screenshot's content.
+    pub description: String,
+    /// The SHA256 hash of the full-size screenshot image.
+    pub img: Sha256,
+    /// The SHA256 hash of the thumbnail version of the screenshot.
+    pub thumb: Sha256,
 }
 
 /// Verdict Block of Submission
@@ -232,7 +250,7 @@ pub struct Attack {
 /// Model of Workflow Event
 #[derive(Serialize, Deserialize, Described)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=true, store=true)]
+#[metadata(index=true, store=false)]
 pub struct Event {
     /// Type of entity associated to event
     pub entity_type: EntityType,
@@ -241,13 +259,32 @@ pub struct Event {
     /// Name of entity
     pub entity_name: String,
     /// Timestamp of event
+    #[serde(default="chrono::Utc::now")]
     pub ts: DateTime<Utc>,
     /// Labels added during event
+    #[serde(default)]
     pub labels: Vec<String>,
+    /// Labels that were removed from the alert during the event.
+    #[serde(default)]    
+    pub labels_removed: Vec<String>, 
     /// Status applied during event
+    #[serde(default)]    
     pub status: Option<Statuses>,
     /// Priority applied during event
+    #[serde(default)]    
     pub priority: Option<Priorities>,
+}
+
+/// Describes the relationship between different submissions that are linked to the formation of the alert, highlighting parent-child connections.
+#[derive(Serialize, Deserialize, Described)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=true, store=true)]
+pub struct Relationship {
+    /// The identifier of the child submission in the relationship.
+    pub child: Uuid,
+    /// The identifier of the parent submission, if applicable.
+    #[serde(default)]
+    pub parent: Option<Uuid>,
 }
 
 /// Model for Alerts
@@ -260,10 +297,13 @@ pub struct Alert {
     pub alert_id: String,
     /// Assemblyline Result Block
     pub al: ALResults,
+    /// Timestamp indicating when the alert was archived in the system.
+    pub archive_ts: Option<chrono::DateTime<chrono::Utc>>,
     /// ATT&CK Block
     pub attack: Attack,
     /// Classification of the alert
-    pub classification: String,
+    #[serde(flatten)]
+    pub classification: ExpandingClassification,
     /// Expiry timestamp
     #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
@@ -282,7 +322,7 @@ pub struct Alert {
     pub label: Vec<String>,
     /// Metadata submitted with the file
     #[serde(default)]
-    #[metadata(store=false)]
+    #[metadata(store=false, mapping="flattenedobject")]
     pub metadata: HashMap<String, String>,
     /// Owner of the alert
     pub owner: Option<String>,
@@ -290,6 +330,8 @@ pub struct Alert {
     pub priority: Option<Priorities>,
     /// Alert creation timestamp
     pub reporting_ts: DateTime<Utc>,
+    /// Describes the hierarchical relationships between submissions that contributed to this alert.
+    pub submission_relations: Vec<Relationship>,
     /// Submission ID related to this alert
     pub sid: String,
     /// Status applied to the alert
