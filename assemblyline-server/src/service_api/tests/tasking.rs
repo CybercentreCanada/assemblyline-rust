@@ -404,7 +404,8 @@ async fn test_finish_heuristic() {
         }),
         tags: Default::default(),
         safelisted_tags: Default::default(),
-        title_text: Default::default()
+        title_text: Default::default(),
+        promote_to: None,
     });
 
     let heur_id = format!("{}.HEUR1", service.name.to_uppercase());

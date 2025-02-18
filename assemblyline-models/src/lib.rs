@@ -207,7 +207,7 @@ impl rand::distr::Distribution<Sid> for rand::distr::StandardUniform {
     }
 }
 
-#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, Described, PartialEq, Eq, Debug, Clone, Default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(mapping="text")]
 pub struct Text(pub String);
@@ -221,6 +221,24 @@ impl From<&str> for Text {
 impl From<String> for Text {
     fn from(value: String) -> Self {
         Self(value)
+    }
+}
+
+impl From<Text> for String {
+    fn from(value: Text) -> String {
+        value.0
+    }
+}
+
+impl std::fmt::Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Text {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 

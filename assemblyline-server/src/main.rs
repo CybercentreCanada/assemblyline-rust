@@ -15,6 +15,7 @@
     dead_code 
 )]
 
+use std::time::Duration;
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::{Context, Result};
@@ -321,7 +322,7 @@ impl Core {
         let core = Self::setup(Arc::new(config), &prefix, false).await.unwrap();
         let elastic = core.datastore.clone();
         elastic.apply_test_settings().await.unwrap();
-        let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone() };
+        let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone(), cleaned: false };
         (core, guard)
     }
     
@@ -397,21 +398,41 @@ struct TestGuard {
     elastic: Arc<Elastic>,
     filestore: tempfile::TempDir,
     table: Arc<parking_lot::Mutex<Vec<i64>>>,
+    cleaned: bool
 }
+
+// #[cfg(test)]
+// impl TestGuard {
+//     pub async fn cleanup(mut self) -> Result<()> {
+//         self.table.lock().push(self.used);
+//         self.elastic.wipe_all().await?;
+//         self.cleaned = true;
+//         Ok(())
+//     }
+// }
 
 #[cfg(test)]
 impl Drop for TestGuard {
     fn drop(&mut self) {
-        self.running.set(false);
+        if !self.cleaned {
+            self.running.set(false);
+            // self.table.lock().push(self.used);
+            let table = self.table.clone();
+            let used = self.used;
 
-        self.table.lock().push(self.used);
+            let elastic = self.elastic.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(1));
+                let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+                runtime.block_on(async move {
+                    if let Err(err) = elastic.wipe_all().await {
+                        error!("Could not clear test data: {err}");
+                    }
+                });
 
-        let elastic = self.elastic.clone();
-        tokio::spawn(async move {
-            if let Err(err) = elastic.wipe_all().await {
-                error!("Could not clear test data: {err}");
-            }
-        });
+                table.lock().push(used);
+            });
+        }
     }
 }
 

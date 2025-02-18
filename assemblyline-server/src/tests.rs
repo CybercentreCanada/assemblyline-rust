@@ -1206,7 +1206,7 @@ async fn test_plumber_clearing() {
     assert_eq!(sub.results.len(), 3);
     assert_eq!(sub.errors.len(), 1);
     let error = context.core.datastore.error.get(&sub.errors[0], None).await.unwrap().unwrap();
-    assert!(error.response.message.contains("disabled"));
+    assert!(error.response.message.as_str().contains("disabled"));
 
     context.metrics.assert_metrics("ingester", &[("submissions_completed", 1)]).await;
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;

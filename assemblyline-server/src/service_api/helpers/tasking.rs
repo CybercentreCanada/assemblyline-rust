@@ -473,7 +473,7 @@ impl TaskingClient {
         };
 
         // We've got a task to process, consider us busy
-        let timeout = (Utc::now() + Duration::from_secs(service_data.timeout.into())).timestamp();
+        let timeout = (Utc::now() + Duration::from_secs(service_data.timeout as u64)).timestamp();
         self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Running, timeout)).await?;
         increment!(metric_factory, execute);
 
@@ -864,6 +864,7 @@ impl TaskingClient {
                 tags: Box::new(formatted_tags),
                 safelisted_tags: safelisted_tags.into_inner(),
                 title_text: section.title_text,
+                promote_to: section.promote_to,
             })
         }
 

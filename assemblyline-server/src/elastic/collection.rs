@@ -58,7 +58,7 @@ impl<T: CollectionType> Collection<T> {
 
             // Create HOT index
             if !self.database.does_index_exist(&alias).await.context("does_index_exist")? {
-                debug!("Index {} does not exist. Creating it now...", alias.to_uppercase());
+                debug!("Index {alias} does not exist. Creating it now as {index} with alias.");
 
                 let mut mapping = assemblyline_models::meta::build_mapping::<T>().map_err(ElasticError::fatal)?;
                 mapping.apply_defaults();
@@ -71,8 +71,7 @@ impl<T: CollectionType> Collection<T> {
                 let result = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &index)?, &body).await;
                 match result {
                     Ok(resp) => {
-                        let resp: responses::CreateIndex = resp.json().await?;
-                        debug!("created index {index}: {resp:?}");
+                        let _resp: responses::CreateIndex = resp.json().await?;
                     }
                     Err(err) => {
                         if err.is_resource_already_exists() {

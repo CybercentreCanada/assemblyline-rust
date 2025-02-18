@@ -293,11 +293,11 @@ async fn test_dispatch_extracted() {
     new_result.response.extracted = vec![result::File{
         sha256: second_file_hash.clone(), 
         name: "second-*".to_owned(),
-        description: "abc".to_owned(), 
+        description: "abc".into(), 
         classification: ClassificationString::unrestricted(&core.classification_parser),
         allow_dynamic_recursion: false,
         is_section_image: false,
-        parent_relation: "EXTRACTED".to_owned(),
+        parent_relation: "EXTRACTED".into(),
     }];
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();
 
@@ -385,11 +385,11 @@ async fn test_dispatch_extracted_bypass_drp()  {
     new_result.response.extracted = vec![result::File{
         sha256: second_file_hash.clone(), 
         name: "second-*".to_owned(),
-        description: "abc".to_owned(), 
+        description: "abc".into(), 
         classification: ClassificationString::unrestricted(&core.classification_parser),
         allow_dynamic_recursion: true,
         is_section_image: false,
-        parent_relation: "EXTRACTED".to_owned(),
+        parent_relation: "EXTRACTED".into(),
     }];
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();  
 

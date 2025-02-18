@@ -1,14 +1,18 @@
 
 
+use std::sync::Arc;
+
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::badlist::{BadhashTypes, Badlist, Hashes, Source, SourceTypes, Tag};
 use assemblyline_models::{ClassificationString, ExpandingClassification};
 use chrono::Utc;
 use log::info;
 use rand::seq::IndexedRandom;
+use reqwest::Client;
 
 use crate::service_api::helpers::badlist::{BadlistClient, CommonRequestBadlist, RequestBadlist};
 use crate::service_api::helpers::APIResponse;
+use crate::Core;
 
 use super::{setup, random_hash, AUTH_KEY};
 
@@ -86,9 +90,34 @@ fn into_request(value: Badlist) -> RequestBadlist {
     }
 }
 
+// #[test]
+// fn test_badlist_exist() {    
+//     let runtime = tokio::runtime::Runtime::new().unwrap();
+//     let _guard = runtime.block_on(async {
+//         let (client, core, (_guard, _server), address) = setup(headers()).await;
+
+//         let valid_hash = random_hash(64);
+//         let valid_resp = make_sha256_badlist(&valid_hash, &core.classification_parser);
+//         core.datastore.badlist.save(&valid_hash, &valid_resp, None, None).await.unwrap();
+
+//         let url = format!("{address}/api/v1/badlist/{valid_hash}/");
+//         let resp = client.get(url).send().await.unwrap();
+//         let status = resp.status();
+//         let body = resp.bytes().await.unwrap();
+//         assert!(status.is_success(), "{:?} {:?}", status, body);
+//         assert_eq!(serde_json::from_slice::<APIResponse<Badlist>>(&body).unwrap().api_response, valid_resp);
+
+
+//         _guard.running.set(false);
+//         _ = _server.await;
+//         _guard
+//     });
+//     runtime.block_on(_guard.cleanup()).unwrap();
+// }
+
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_badlist_exist() {
+async fn test_badlist_exist() {    
     let (client, core, _guard, address) = setup(headers()).await;
 
     let valid_hash = random_hash(64);

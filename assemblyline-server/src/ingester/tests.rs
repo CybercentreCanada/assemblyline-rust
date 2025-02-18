@@ -254,7 +254,7 @@ async fn test_ingest_score_exists() {
         score: 10, 
         errors: 0, 
         sid: "0".parse().unwrap(), 
-        time: chrono::Utc::now().timestamp() as f64,
+        time: chrono::Utc::now().timestamp() as f32,
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);
@@ -358,7 +358,7 @@ async fn test_ingest_always_create_submission() {
         score: 10, 
         errors: 0, 
         sid: sid_1, 
-        time: chrono::Utc::now().timestamp() as f64
+        time: chrono::Utc::now().timestamp() as f32
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);
@@ -498,7 +498,7 @@ async fn test_existing_score() {
         score: 10, 
         errors: 0, 
         sid: "0".parse().unwrap(), 
-        time: chrono::Utc::now().timestamp() as f64 
+        time: chrono::Utc::now().timestamp() as f32 
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);

@@ -2,6 +2,7 @@ use assemblyline_models::datastore::service::{DockerConfig, RegistryType};
 use assemblyline_models::datastore::{Service, ServiceDelta};
 use rand::seq::IndexedRandom;
 use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,14 +22,14 @@ mod tasking;
 
 const AUTH_KEY: &str = "test_key_abc_123";
 
-pub async fn launch(core: Arc<Core>) -> u16 {
+pub async fn launch(core: Arc<Core>) -> (u16, JoinHandle<()>) {
     let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let acceptor = TcpAcceptor::from_tokio(listener).unwrap();
     let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
 
     let app = crate::service_api::api(core.clone()).await.unwrap();
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         info!("Starting test server on {:?}", acceptor.local_addr());
         let result = Server::new_with_acceptor(acceptor)
             // .run(
@@ -46,21 +47,21 @@ pub async fn launch(core: Arc<Core>) -> u16 {
         }
     });
 
-    port
+    (port, handle)
 }
 
 
 
-pub async fn setup(headers: HeaderMap) -> (reqwest::Client, Arc<Core>, TestGuard, String) {
+pub async fn setup(headers: HeaderMap) -> (reqwest::Client, Arc<Core>, (TestGuard, JoinHandle<()>), String) {
     std::env::set_var("SERVICE_API_KEY", AUTH_KEY);
     let (core, guard) = Core::test_setup().await;
     let core = Arc::new(core);
-    let port = launch(core.clone()).await;
+    let (port, server) = launch(core.clone()).await;
     let client = reqwest::Client::builder()
         .default_headers(headers)
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(90))
         .build().unwrap();
-    (client, core, guard, format!("http://localhost:{port}"))
+    (client, core, (guard, server), format!("http://localhost:{port}"))
 }
 
 pub fn random_hash(length: usize) -> String {
@@ -112,11 +113,13 @@ fn build_service() -> Service {
             ram_mb: Default::default(),
             ram_mb_min: Default::default(),
             service_account: Default::default(),
+            labels: Default::default(),
         },
         dependencies: Default::default(),
         update_channel: assemblyline_models::datastore::service::ChannelKinds::Beta,
         update_config: Default::default(),
         recursion_prevention: Default::default(),
+        auto_update: Default::default(),
     }
 }
 

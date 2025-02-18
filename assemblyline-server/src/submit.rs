@@ -55,6 +55,7 @@ impl SubmitManager {
 
         // We should now have all the information we need to construct a submission object
         let mut sub = DatastoreSubmission{
+            archive_ts: None,
             archived: false,
             classification: ExpandingClassification::new(submission_obj.params.classification.as_str().to_owned(), self.classification_parser.as_ref())?,
             error_count: 0,

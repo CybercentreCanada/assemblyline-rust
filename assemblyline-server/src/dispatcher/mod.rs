@@ -319,7 +319,7 @@ impl SubmissionTask {
                     if !rescan.contains(&service) {
                         let extracted = result.response.extracted;
                         out.register_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
-                        let children_detail: Vec<(Sha256, String)> = extracted.into_iter().map(|file| (file.sha256, file.parent_relation)).collect();
+                        let children_detail: Vec<(Sha256, String)> = extracted.into_iter().map(|file| (file.sha256, file.parent_relation.into())).collect();
                         out.service_results.insert((sha256, service), ResultSummary {
                             key: k, 
                             drop: result.drop_file, 
@@ -1882,7 +1882,7 @@ impl Dispatcher {
                     created: chrono::Utc::now(),
                     expiry_ts: task.submission.expiry_ts,
                     response: error::Response {
-                        message: format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid),
+                        message: format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid).into(),
                         service_name: "Dispatcher".to_string(),
                         service_tool_version: None,
                         service_version: "4.0".to_string(),
@@ -2195,7 +2195,7 @@ impl Dispatcher {
             created: chrono::Utc::now(),
             expiry_ts,
             response: error::Response {
-                message: error_details,
+                message: error_details.into(),
                 service_name: service_name.to_string(),
                 service_version: "0".to_string(),
                 status: error::Status::FailNonrecoverable,
@@ -2358,7 +2358,7 @@ impl Dispatcher {
                         created: chrono::Utc::now(),
                         expiry_ts,
                         response: error::Response {
-                            message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped"),
+                            message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped").into(),
                             service_name: service_name.clone(),
                             service_tool_version: service_tool_version.clone(),
                             service_version: service_version.clone(),
@@ -2405,7 +2405,7 @@ impl Dispatcher {
                     created: chrono::Utc::now(),
                     expiry_ts,
                     response: error::Response {
-                        message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits"),
+                        message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits").into(),
                         service_name: service_name.clone(),
                         service_tool_version: service_tool_version.clone(),
                         service_version: service_version.clone(),

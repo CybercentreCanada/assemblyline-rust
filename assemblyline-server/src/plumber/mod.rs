@@ -141,7 +141,7 @@ impl Plumber {
                             created: Utc::now(),
                             expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                             response: error::Response {
-                                message: "The service was disabled while processing this task.".to_string(),
+                                message: "The service was disabled while processing this task.".into(),
                                 service_name: task.service_name.clone(),
                                 service_version: "0".to_string(),
                                 service_tool_version: None,
@@ -319,7 +319,7 @@ impl Plumber {
                     created: Utc::now(),
                     expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                     response: Response {
-                        message: "Task canceled due to execesive queuing.".to_string(),
+                        message: "Task canceled due to execesive queuing.".into(),
                         service_name: task.service_name.clone(),
                         service_version: "0".to_string(),
                         status: Status::FailNonrecoverable,

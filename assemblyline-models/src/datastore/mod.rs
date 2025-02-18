@@ -106,40 +106,6 @@ mod python {
         serde_json::from_value(py_mapping).unwrap()
     }
 
-    // fn get_index_settings(name: &str, archive: &str) -> serde_json::Value {
-    //     let output = std::process::Command::new("python").arg("-c").arg("from assemblyline.common.forge import get_datastore, get_config; import json; ds = get_datastore(); print(json.dumps(ds.".to_owned() + name + "._get_index_settings(archive=" + archive +")))").output().unwrap();
-    //     // let output = std::process::Command::new("python").arg("-c").arg("from assemblyline.common.forge import get_datastore; import json; ds = get_datastore(); print(ds.retrohunt._get_index_mappings(), ds.retrohunt._get_index_settings(archive=False))").output().unwrap();
-    //     let stderr = String::from_utf8(output.stderr).unwrap();
-    //     let stdout = String::from_utf8(output.stdout).unwrap();
-    //     if !output.status.success() || !stderr.is_empty() {
-    //         println!("{stderr}");
-    //         panic!();
-    //     }
-
-    //     serde_json::from_str(&stdout).unwrap()
-    // }
-
-    // fn get_index_mapping(name: &str) -> serde_json::Value {
-    //     let output = std::process::Command::new("python").arg("-c").arg("from assemblyline.common.forge import get_datastore, get_config; import json; ds = get_datastore(); print(json.dumps(ds.".to_owned() + name + "._get_index_mappings()))").output().unwrap();
-    //     // let output = std::process::Command::new("python").arg("-c").arg("from assemblyline.common.forge import get_datastore; import json; ds = get_datastore(); print(ds.retrohunt._get_index_mappings(), ds.retrohunt._get_index_settings(archive=False))").output().unwrap();
-    //     let stderr = String::from_utf8(output.stderr).unwrap();
-    //     let stdout = String::from_utf8(output.stdout).unwrap();
-    //     if !output.status.success() || !stderr.is_empty() {
-    //         println!("{stderr}");
-    //         panic!();
-    //     }
-
-    //     serde_json::from_str(&stdout).unwrap()
-    // }
-
-    // #[test]
-    // fn print_mapping(){
-    //     println!("{}", serde_json::to_string_pretty(&json!({
-    //         "mappings": get_index_mapping("retrohunt_hit"),
-    //         "settings": get_index_settings("retrohunt_hit", "False"),
-    //     })).unwrap())
-    // }
-
     #[test]
     fn alert_schema() {
         let py_mappings = load_mapping("alert", "Alert");

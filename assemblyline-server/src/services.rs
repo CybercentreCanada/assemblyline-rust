@@ -256,10 +256,10 @@ async fn service_daemon(datastore: Arc<Elastic>, mut changes: ChangeChannel, inf
 async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, service_info: Arc<RwLock<ServiceInfo>>) -> Result<()> {
     // 
     let mut refresh_interval = tokio::time::interval(REFRESH_INTERVAL);
+    debug!("Service info daemon starting.");
 
     // load services as long as someone is holding a pointer to the service list
     while Arc::strong_count(&service_info) > 1 {
-        debug!("Service info daemon is wating for new service info...");
         tokio::select!{
             // wait for a change notification
             change = changes.recv() => {

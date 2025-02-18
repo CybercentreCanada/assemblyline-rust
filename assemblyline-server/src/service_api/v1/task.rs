@@ -159,8 +159,8 @@ pub enum FinishedBody {
 pub mod models {
     use std::collections::HashMap;
 
-    use assemblyline_models::datastore::result::{BodyFormat, ResponseBody};
-    use assemblyline_models::{ClassificationString, JsonMap, Sha256};
+    use assemblyline_models::datastore::result::{BodyFormat, PromoteTo, ResponseBody};
+    use assemblyline_models::{ClassificationString, JsonMap, Sha256, Text};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Serialize};
 
@@ -190,7 +190,7 @@ pub mod models {
         pub result_type: Option<String>,
         /// ???
         #[serde(default)]
-        pub size: Option<u64>,
+        pub size: Option<i32>,
         /// Use to not pass to other stages after this run
         #[serde(default)]
         pub drop_file: bool,
@@ -220,7 +220,7 @@ pub mod models {
         pub auto_collapse: bool,
         /// Text body of the result section
         #[serde(default)]
-        pub body: Option<String>,
+        pub body: Option<Text>,
         /// Classification of the section
         pub classification: ClassificationString,
         /// Type of body in this section
@@ -229,7 +229,7 @@ pub mod models {
         #[serde(default)]
         pub body_config: Option<HashMap<String, serde_json::Value>>,
         /// Depth of the section
-        pub depth: i64,
+        pub depth: i32,
         /// Heuristic used to score result section
         #[serde(default)]
         pub heuristic: Option<Heuristic>,
@@ -240,11 +240,13 @@ pub mod models {
         #[serde(default)]
         pub safelisted_tags: HashMap<String, Vec<serde_json::Value>>,
         /// Title of the section
-        pub title_text: String,
+        pub title_text: Text,
         #[serde(default)]
         pub zeroize_on_sig_safe: bool,
         #[serde(default)]
         pub zeroize_on_tag_safe: bool,
+        #[serde(default)]
+        pub promote_to: Option<PromoteTo>,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -612,13 +612,13 @@ pub struct Ingester {
     // /// How many supplementary files may be added to a Submission. Overrideable via submission parameters
     // pub default_max_supplementary: int = odm.Integer()
     /// Period, in seconds, in which a task should be expired
-    pub expire_after: f64,
+    pub expire_after: f32,
     /// Drop a task altogether after this many seconds
-    pub stale_after_seconds: f64,
+    pub stale_after_seconds: f32,
     /// How long should scores be kept before expiry
-    pub incomplete_expire_after_seconds: f64,
+    pub incomplete_expire_after_seconds: f32,
     /// How long should scores be cached in the ingester
-    pub incomplete_stale_after_seconds: f64,
+    pub incomplete_stale_after_seconds: f32,
     /// Thresholds at certain buckets before sampling
     pub sampling_at: HashMap<Priority, i64>,
     /// How many files to send to dispatcher concurrently

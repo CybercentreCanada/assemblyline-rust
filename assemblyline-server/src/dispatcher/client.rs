@@ -421,7 +421,7 @@ impl DispatchClient {
             if extracted_data.allow_dynamic_recursion {
                 dynamic_recursion_bypass.push(extracted_data.sha256.clone());
             }
-            children.push((extracted_data.sha256, extracted_data.parent_relation));
+            children.push((extracted_data.sha256, extracted_data.parent_relation.into()));
         }
 
         // prepare report for the server

@@ -679,7 +679,7 @@ impl Ingester {
 
         // Reduce the priority by an order of magnitude for very old files.
         let current_time = Utc::now();
-        if priority > 0 && self.expired((current_time - task.submission.time).num_seconds() as f64, 0) {
+        if priority > 0 && self.expired((current_time - task.submission.time).num_seconds() as f32, 0) {
             priority = (priority / 10).max(1);
         }
         task.submission.params.priority = priority;
@@ -791,7 +791,7 @@ impl Ingester {
             psid,
             score,
             sid,
-            time: Utc::now().timestamp() as f64,
+            time: Utc::now().timestamp() as f32,
         };
         self.cache.lock().insert(scan_key.clone(), fs.clone());
         self.core.datastore.filescore.save(&scan_key, &fs, None, None).await?;
@@ -958,7 +958,7 @@ impl Ingester {
             },
         };
 
-        let current_time = Utc::now().timestamp() as f64;
+        let current_time = Utc::now().timestamp() as f32;
         let age = current_time - result.time;
         let errors = result.errors;
 
@@ -984,7 +984,7 @@ impl Ingester {
 //         self.submit_client.stop()
 //         self.postprocess_worker.stop()
 
-    fn expired(&self, delta: f64, errors: i32) -> bool {
+    fn expired(&self, delta: f32, errors: i32) -> bool {
         if errors > 0 {
             delta >= self.core.config.core.ingester.incomplete_expire_after_seconds
         } else {
@@ -992,7 +992,7 @@ impl Ingester {
         }
     }
 
-    fn stale(&self, delta: f64, errors: i32) -> bool {
+    fn stale(&self, delta: f32, errors: i32) -> bool {
         if errors > 0 {
             delta >= self.core.config.core.ingester.incomplete_stale_after_seconds
         } else {
@@ -1072,7 +1072,7 @@ impl Ingester {
         if retries > _MAX_RETRIES {
             error!("[{} :: {}] Max retries exceeded {err}", task.ingest_id, task.sha256());
             self.duplicate_queue.delete( scan_key).await?;
-        } else if self.expired((current_time - task.ingest_time).num_seconds() as f64, 0) {
+        } else if self.expired((current_time - task.ingest_time).num_seconds() as f32, 0) {
             info!("[{} :: {}] No point retrying expired submission", task.ingest_id, task.sha256());
             self.duplicate_queue.delete( scan_key).await?;
         } else {
