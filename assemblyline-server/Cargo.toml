@@ -79,8 +79,8 @@ regex = "*"
 
 [dependencies.magic-sys]
 version = "0.3"
-default-features = false
-features = ["v5-40"]
+# default-features = false
+# features = ["v5-44"]
 
 [dev-dependencies]
 

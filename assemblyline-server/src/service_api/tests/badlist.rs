@@ -1,18 +1,13 @@
 
-
-use std::sync::Arc;
-
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::badlist::{BadhashTypes, Badlist, Hashes, Source, SourceTypes, Tag};
 use assemblyline_models::{ClassificationString, ExpandingClassification};
 use chrono::Utc;
 use log::info;
 use rand::seq::IndexedRandom;
-use reqwest::Client;
 
 use crate::service_api::helpers::badlist::{BadlistClient, CommonRequestBadlist, RequestBadlist};
 use crate::service_api::helpers::APIResponse;
-use crate::Core;
 
 use super::{setup, random_hash, AUTH_KEY};
 

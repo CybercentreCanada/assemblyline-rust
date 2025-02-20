@@ -308,7 +308,7 @@ impl SubmissionTask {
                                 std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
                                     occupied_entry.get_mut().score += tag.score;
                                 },
-                                std::collections::hash_map::Entry::Vacant(mut vacant_entry) => {
+                                std::collections::hash_map::Entry::Vacant(vacant_entry) => {
                                     vacant_entry.insert(tag);
                                 },
                             }

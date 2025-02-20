@@ -63,13 +63,14 @@ use cart_container::cart::unpack_header;
 mod defaults;
 mod digests;
 mod entropy;
+mod test;
 
 const SYSTEM_DEFAULT_MAGIC: &str = "/usr/share/file/magic.mgc";
 
 
 /// An incomplete version of the File object stored in the datastore produced by identify.
 /// Non-observed information like classification/viewcount etc are not here.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct FileIdentity {
     /// Dotted ASCII representation of the first 64 bytes of the file
     pub ascii: String,
@@ -136,7 +137,15 @@ pub struct Identify {
 }
 
 impl Identify {
-    pub async fn new(cache: Option<CacheStore>, redis_volatile: Arc<RedisObjects>) -> Result<Arc<Self>> {
+    pub async fn new_with_cache(cache: CacheStore, redis_volatile: Arc<RedisObjects>) -> Result<Arc<Self>> {
+        Self::new(Some(cache), Some(redis_volatile)).await
+    }
+    
+    pub async fn new_without_cache() -> Result<Arc<Self>> {
+        Self::new(None, None).await
+    }
+
+    async fn new(cache: Option<CacheStore>, redis_volatile: Option<Arc<RedisObjects>>) -> Result<Arc<Self>> {
         // Load all data for the first time
         let (file_type, mime_type) = Self::_load_magic_file(&cache).await.context("_load_bagic_file")?;
         let yara_rules = Self::_load_yara_file(&cache).await.context("_load_yara_file")?;
@@ -157,12 +166,14 @@ impl Identify {
 
         // If cache is use, load the config and datastore objects to load potential items from cache
         if obj.cache.is_some() {
-            info!("Using cache with identify");
-            let messages = redis_volatile.subscribe("system.identify".to_owned());
-            let obj = obj.clone();
-            tokio::spawn(async move {
-                obj.watch_reloads(messages).await
-            });
+            if let Some(redis_volatile) = redis_volatile {
+                info!("Using cache with identify");
+                let messages = redis_volatile.subscribe("system.identify".to_owned());
+                let obj = obj.clone();
+                tokio::spawn(async move {
+                    obj.watch_reloads(messages).await
+                });
+            }
         }
 
         Ok(obj)
@@ -352,7 +363,7 @@ impl Identify {
 //         if self.reload_watcher:
 //             self.reload_watcher.stop()
 
-    pub fn ident(&self, buf: &[u8], path: &Path, digests: Option<Digests>) -> Result<FileIdentity> {
+    pub fn ident_blocking(&self, buf: &[u8], path: &Path, digests: Option<Digests>) -> Result<FileIdentity> {
         // data = {"ascii": None, "hex": None, "magic": None, "mime": None, "type": "unknown"}
         let mut file_type = "unknown".to_owned();
         let mut magic = String::new();
@@ -370,7 +381,10 @@ impl Identify {
         
         // Loop over the labels returned by libmagic, ...
         let mut labels: Vec<String> = match self.file_type.lock().0.file(path) {
-            Ok(output) => output.split('\n').map(|row| row.strip_prefix("- ").unwrap_or(row)).map(String::from).collect(),
+            Ok(output) => {
+                println!("magic output: {output}");
+                output.split('\n').map(|row| row.strip_prefix("- ").unwrap_or(row)).map(String::from).collect()
+            },
             Err(err) => {
                 error!("Magic error: {err}");
                 vec![]
@@ -602,7 +616,7 @@ impl Identify {
                 let mut digests = get_digests_for_file_blocking(&path, None, calculate_entropy, skip_fuzzy_hashes)?;
                 let mut first_block = vec![];
                 std::mem::swap(&mut first_block, &mut digests.first_block);
-                this.ident(&first_block, &path, Some(digests))?
+                this.ident_blocking(&first_block, &path, Some(digests))?
             } else {
                 let mut file = std::fs::File::open(&path)?;
                 let size = file.metadata()?.len();
@@ -611,7 +625,7 @@ impl Identify {
                 file.read_exact(&mut first_block)?;
                 // with open(path, "rb") as f:
                 //     first_block = f.read(DEFAULT_BLOCKSIZE)
-                let mut data = this.ident(&first_block, &path, None)?;
+                let mut data = this.ident_blocking(&first_block, &path, None)?;
                 data.size = size;
                 data
             };
@@ -977,68 +991,3 @@ fn uri_ident(path: &Path, info: &mut FileIdentity) -> Result<String> {
 //             )
 //             name = sys.stdin.readline().strip()
 
-#[cfg(test)]
-mod test {
-//     import os
-// import pytest
-
-// from cart import unpack_file
-// from json import loads
-// from pathlib import Path
-
-// from assemblyline.common import forge
-
-// SAMPLES_LOCATION = os.environ.get("SAMPLES_LOCATION", None)
-
-
-// def test_id_file_base():
-//     with forge.get_identify(use_cache=False) as identify:
-//         tests_dir = os.path.dirname(__file__)
-//         id_file_base = "id_file_base"
-//         file_base_dir = os.path.join(tests_dir, id_file_base)
-//         map_file = "id_file_base.json"
-//         map_path = os.path.join(file_base_dir, map_file)
-//         with open(map_path, "r") as f:
-//             contents = f.read()
-//             json_contents = loads(contents)
-//         for _, _, files in os.walk(file_base_dir):
-//             for file_name in files:
-//                 if file_name == map_file:
-//                     continue
-
-//                 file_path = os.path.join(file_base_dir, file_name)
-//                 data = identify.fileinfo(file_path, generate_hashes=False)
-//                 actual_value = data.get("type", "")
-//                 expected_value = json_contents[file_name]
-//                 assert actual_value == expected_value
-
-
-// def get_ids(filepath):
-//     if not isinstance(filepath, (str, bytes, os.PathLike)):
-//         return "skipped"
-//     return "-".join(split_sample(filepath))
-
-
-// def split_sample(filepath):
-//     target_file = os.path.join("/tmp", os.path.basename(filepath).rstrip(".cart"))
-//     identify_result = str(filepath.relative_to(Path(SAMPLES_LOCATION)).parent)
-//     return (target_file, identify_result)
-
-
-// @pytest.fixture()
-// def sample(request):
-//     target_file, identify_result = split_sample(request.param)
-//     try:
-//         unpack_file(request.param, target_file)
-//         yield (target_file, identify_result)
-//     finally:
-//         if target_file:
-//             os.unlink(target_file)
-
-
-// if SAMPLES_LOCATION:
-//     @pytest.mark.parametrize("sample", Path(SAMPLES_LOCATION).rglob("*.cart"), ids=get_ids, indirect=True)
-//     def test_identify_samples(sample):
-//         with forge.get_identify(use_cache=False) as identify:
-//             assert identify.fileinfo(sample[0], generate_hashes=False)["type"] == sample[1]
-}

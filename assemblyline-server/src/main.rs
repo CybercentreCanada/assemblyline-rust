@@ -218,7 +218,7 @@ impl Core {
         //
         let file_cache = FileStore::open(&config.filestore.cache).await.context("initializing cache filestore")?;
         let cachestore = CacheStore::new("system".to_owned(), datastore.clone(), file_cache).context("initializing cachestore")?;
-        let identify = Identify::new(Some(cachestore), redis_volatile.clone()).await.context("initializing identify")?;
+        let identify = Identify::new_with_cache(cachestore, redis_volatile.clone()).await.context("initializing identify")?;
 
         // load classification from given config blob or file
         let mut classification_config = config.classification.config.clone();

@@ -107,8 +107,8 @@ async fn upload_file(
         Ok(value) => value,
         Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "Could not parse ttl header as a number"))
     };
-    let is_section_image = require_header!(headers, "is-section-image", "false").trim().to_ascii_lowercase() == "true";
-    let is_supplementary = require_header!(headers, "is-supplementary", "false").trim().to_ascii_lowercase() == "true";
+    let is_section_image = require_header!(headers, "is-section-image", "false").trim().eq_ignore_ascii_case("true");
+    let is_supplementary = require_header!(headers, "is-supplementary", "false").trim().eq_ignore_ascii_case("true");
 
     let temp_file = match multipart_body {
         Some(mut body) => {

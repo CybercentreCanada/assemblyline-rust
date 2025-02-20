@@ -8,7 +8,7 @@ rule code_javascript {
         score = 1
 
     strings:
-        $not_html = /^\s*<\w/
+        $not_html = /^\s*<(\w|!--)/
 
         // Supported by https://github.com/CAPESandbox/sflock/blob/1e0ed7e18ddfe723c2d2603875ca26d63887c189/sflock/ident.py#L431
         $strong_js2  = /\beval[ \t]*\(['"]/ ascii wide
@@ -47,6 +47,12 @@ rule code_javascript {
         // This method of function declaration is shared with PowerShell, so it should be considered weak-ish
         $function_declaration  = /(^|;|\s|\(|\*\/)function([ \t]*|[ \t]+[\w|_]+[ \t]*)\([\w_ \t,]*\)[ \t\n\r]*{/ ascii wide
 
+        // In javascript empty parentheses are mandatory for a function without parameters.
+        // In powershell empty parentheses are legal but optional and so are usually omitted.
+        $empty_function_param = /\bfunction\s+\w+\s*\(\)\s*{/ ascii wide
+        // In powershell function calls can have arguments in parentheses or no parentheses, but not empty parentheses.
+        $empty_function_call = /\w\(\);/ ascii wide
+
         $weak_js2 = /String(\[['"]|\.)(fromCharCode|raw)(['"]\])?\(/ ascii wide
         // Supported by https://github.com/CAPESandbox/sflock/blob/1e0ed7e18ddfe723c2d2603875ca26d63887c189/sflock/ident.py#L431
         $weak_js3 = /Math\.(round|pow|sin|cos)\(/ ascii wide
@@ -80,6 +86,10 @@ rule code_javascript {
                                 1 of ($strong_js*)
                                 or 2 of ($weak_js*)
                             )
+                        )
+                        or (
+                            $empty_function_param
+                            and $empty_function_call
                         )
                     )
                 )
@@ -157,7 +167,7 @@ rule code_vbs {
         $strong_vbs2 = /(^|\n|\()(Private|Public)?[ \t]*(Sub|Function)[ \t]+\w+\([ \t]*((ByVal[ \t]+)?\w+([ \t]+As[ \t]+\w+)?,?)*\)[ \t]*[\)\r]/i ascii wide
         // Supported by https://github.com/CERT-Polska/karton-classifier/blob/4cf125296e3a0c1d6c1cb8c16f97d608054c7f19/karton/classifier/classifier.py#L650
         // Supported by https://github.com/CAPESandbox/sflock/blob/1e0ed7e18ddfe723c2d2603875ca26d63887c189/sflock/ident.py#L485
-        $strong_vbs3 = /(^|\n)[ \t]*End[ \t]+(Module|Function|Sub|If)/i ascii wide
+        $strong_vbs3 = /(^|\n)[ \t]*End[ \t]+(Module|Function|Sub|If)($|\s)/i ascii wide
         $strong_vbs4 = "\nExecuteGlobal" ascii wide
         // Supported by https://github.com/CAPESandbox/sflock/blob/1e0ed7e18ddfe723c2d2603875ca26d63887c189/sflock/ident.py#L485
         $strong_vbs6 = /(^|\n|:)(Attribute|Set|const)[ \t]+\w+[ \t]+=/i ascii wide
@@ -169,10 +179,10 @@ rule code_vbs {
         $strong_vbs10 = "GetObject(" nocase ascii wide
         $strong_vbs11 = "\nEval(" nocase ascii wide
         // Supported by https://github.com/CERT-Polska/karton-classifier/blob/4cf125296e3a0c1d6c1cb8c16f97d608054c7f19/karton/classifier/classifier.py#L650
-        $strong_vbs12 = "Execute(" nocase ascii wide
+        $strong_vbs12 = "Execute(" nocase ascii wide fullword
         $strong_vbs13 = "\nMsgBox \"" nocase ascii wide
         // Inspired by https://github.com/CERT-Polska/karton-classifier/blob/4cf125296e3a0c1d6c1cb8c16f97d608054c7f19/karton/classifier/classifier.py#L650
-        $strong_vbs14 = "Array(" nocase ascii wide
+        $strong_vbs14 = /[ \t(=]Array\(/i ascii wide
         $weak_vbs1 = "\"Scripting.FileSystemObject\"" nocase ascii wide
         $weak_vbs2 = ".OpenAsTextStream(" nocase ascii wide
         $weak_vbs3 = ".CreateTextFile" nocase ascii wide
@@ -287,9 +297,18 @@ rule code_html_2 {
 
     strings:
         $html_tag = /(^|\n)\s*<(div|script|body|head|img|iframe|pre|span|style|table|title|strong|link|input|form)[ \t>]/i
+        $html_comment_start = "<!--"
+        $html_comment_end = "-->"
 
     condition:
-        code_xml_tags
+        (
+            code_xml_start_tag
+            or $html_comment_start in (0..64)
+        )
+        and (
+            code_xml_end_tag
+            or $html_comment_end in (filesize-64..filesize)
+        )
         and $html_tag
 }
 
@@ -783,6 +802,12 @@ rule code_python {
 
         $strong_py20 = "asyncio.run("
         $strong_py21 = "asyncio.sleep("
+        $strong_py22 = "pty.spawn("
+        $strong_py23 = "platform.system()"
+        $strong_py24 = "subprocess.run("
+        $strong_py25 = "subprocess.Popen("
+        $strong_py26 = "base64.b64decode("
+        $strong_py27 = "socket.socket("
 
         // Setup.py indicators
         $strong_py50 = "python_requires" ascii wide
@@ -819,9 +844,9 @@ rule code_python {
         $strong_py152 = "os.rename("
 
 
-        // High confidence one-liner used to execute base64 blobs
+        // High confidence one-liner used to execute encoded blobs
         // reference: https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/sourcecode/exec-base64.yml
-        $executor1 = /((exec|eval|check_output|run|call|[Pp]open|os\.system)\(|lambda[ \t]+\w{1,100}[ \t]*:[ \t]*)((zlib|__import__\((['"]zlib['"]|['"]\\x0*7a\\x0*6c\\x0*69\\x0*62['"]|['"]\\0*172\\0*154\\0*151\\0*142['"])\))\.decompress\()?(base64|__import__\((['"]base64['"]|['"]\\x0*62\\x0*61\\x0*73\\x0*65\\x0*36\\x0*34['"]|['"]\\0*142\\0*141\\0*163\\0*145\\0*66\\0*64['"])\))\.b64decode\(/
+        $executor1 = /((exec|eval|check_output|run|call|[Pp]open|os\.system)\(|lambda[ \t]+\w{1,100}[ \t]*:)\s*(((zlib|__import__\((['"]zlib['"]|['"]\\x0*7a\\x0*6c\\x0*69\\x0*62['"]|['"]\\0*172\\0*154\\0*151\\0*142['"])\)|lzma|__import__\((['"]lzma['"]|['"]\\x0*6c\\x0*7a\\x0*6d\\x0*61['"]|['"]\\0*154\\0*172\\0*155\\0*141['"])\))\.decompress\()|(base64|__import__\((['"]base64['"]|['"]\\x0*62\\x0*61\\x0*73\\x0*65\\x0*36\\x0*34['"]|['"]\\0*142\\0*141\\0*163\\0*145\\0*66\\0*64['"])\))\.b64decode\()/
         $executor2 = /(marshal|__import__\((['"]marshal['"]|['"]\\x0*6d\\x0*61\\x0*72\\x0*73\\x0*68\\x0*61\\x0*6c['"]|['"]\\0*155\\0*141\\0*162\\0*163\\0*150\\0*141\\0*154['"])\)|pickle|__import__\((['"]pickle['"]|['"]\\x0*70\\x0*69\\x0*63\\x0*6b\\x0*6c\\x0*65['"]|['"]\\0*160\\0*151\\0*143\\0*153\\0*154\\0*145['"])\))\.loads\(/
 
     condition:
@@ -829,6 +854,10 @@ rule code_python {
         and (
             2 of ($strong_py*)
             or any of ($executor*)
+            or (
+                filesize < 1024
+                and 1 of ($strong_py*)
+            )
         )
 }
 
@@ -957,9 +986,9 @@ rule code_batch {
         $cmd6 = /(^|\n|@|&)%comspec%/i
         $cmd7 = /(^|\n|@|&)timeout[ \t](\/\w+|[-]?\d{1,5})/i
         $cmd8 = /(^|\n|@|&)for[ \t]\/f[ \t]/i
-        $rem1 = /(^|\n|@|&)\^?r\^?e\^?m\^?[ \t]\w+/i
+        $rem1 = /(^|\n|@|&)\^?r\^?e\^?m\^?[ \t]\^?\w+/i
         $rem2 = /(^|\n)::/
-        $set = /(^|\n|@|&)\^?s\^?e\^?t\^?[ \t]\^?\w+\^?=\^?%?\^?\w+/i
+        $set = /(^|\n|@|&)\^?s\^?e\^?t\^?[ \t]\^?["']?\w+\^?=\^?%?\^?\w+/i
         $exp = /setlocal[ \t](enableDelayedExpansion|disableDelayedExpansion|enableExtensions|disableExtensions)/i
 
     condition:
@@ -1027,9 +1056,9 @@ rule code_batch_small {
         $batch3 = /(^|\n|@|&| )\^?f\^?i\^?n\^?d\^?s\^?t\^?r\^?[ \t]+["][^"]+["][ \t]+(["][^"]+["]|[^[ \t]+)[ \t]+>[ \t]+[^[ \t\n]+/i
         $batch4 = /(^|\n| )[ "]*([a-zA-Z]:)?(\.?\\[^\\\n]+|\.?\/[^\/\n]+)+\.(exe|bat|cmd|ps1)[ "]*(([\/\-]?\w+[ "]*|&)[ \t]*)*($|\n)/i
         $batch5 = /(^|\n| ) *[\w\.]+\.(exe|bat|cmd|ps1)( [\-\/"]?[^ \n]+"?)+ *($|\n)/i
-        $batch6 = /(^|\n|@|&| )(timeout|copy|taskkill|tasklist|vssadmin|schtasks)( ([\/"]?[\w\.:\\\/]"?|&)+)+/i
-        $rem = /(^|\n|@|&)\^?r\^?e\^?m\^?[ \t]\w+/i
-        $set = /(^|\n|@|&)\^?s\^?e\^?t\^?[ \t]\^?\w+\^?=\^?\w+/i
+        $batch6 = /(^|\n|@|&| )(timeout|taskkill|tasklist|vssadmin|schtasks)( ([\/"]?[\w\.:\\\/]"?|&)+)+/i
+        $rem = /(^|\n|@|&)\^?r\^?e\^?m\^?[ \t]\^?\w+/i
+        $set = /(^|\n|@|&)\^?s\^?e\^?t\^?[ \t]\^?["']?\w+\^?=\^?\w+/i
 
     condition:
         (
@@ -1093,11 +1122,15 @@ rule code_sql {
         type = "code/sql"
 
     strings:
-        $ = /(^|\n)(create|drop|select|returns|declare)[ \t]+(view|table)[ \t]+/i
+        $create_or_replace = "CREATE OR REPLACE"
+        $table = /(^|\n)(create|drop|select|returns|declare)[ \t]+(view|table)[ \t]+/i
 
     condition:
         mime startswith "text"
-        and for all of them : ( # > 2 )
+        and (
+            #table > 2
+            or $create_or_replace
+        )
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1324,6 +1357,7 @@ rule code_au3 {
     condition:
         // First off, we want at least one strong keyword
         #strong_keywords >= 1
+        and mime startswith "text"
         and (
             // Next we are looking for a high-confidence amount of functions
             // If we have 5 or more strong functions, great
@@ -1335,4 +1369,130 @@ rule code_au3 {
                 and #strong_functions >= 2
             )
         )
+}
+
+rule text_rdp {
+
+    meta:
+        type = "text/rdp"
+        score = -2
+
+    strings:
+        // Documentation: https://learn.microsoft.com/en-us/azure/virtual-desktop/rdp-properties
+        // Connections
+        $optional1  = "alternate full address:s:" ascii wide
+        $optional2  = "alternate shell:s:" ascii wide
+        $optional3  = "authentication level:i:" ascii wide
+        $optional4  = "disableconnectionsharing:i:" ascii wide
+        $optional5  = "domain:s:" ascii wide
+        $optional6  = "enablecredsspsupport:i:" ascii wide
+        $optional7  = "enablerdsaadauth:i:" ascii wide
+        $mandatory  = "full address:s:" ascii wide // The only mandatory property
+        $optional8  = "gatewaycredentialssource:i:" ascii wide
+        $optional9  = "gatewayhostname:s:" ascii wide
+        $optional10 = "gatewayprofileusagemethod:i:" ascii wide
+        $optional11 = "gatewayusagemethod:i:" ascii wide
+        $optional12 = "kdcproxyname:s:" ascii wide
+        $optional13 = "promptcredentialonce:i:" ascii wide
+        $optional14 = "targetisaadjoined:i:" ascii wide
+        $optional15 = "username:s:" ascii wide
+        // Session behavior
+        $optional16 = "autoreconnection enabled:i:" ascii wide
+        $optional17 = "bandwidthautodetect:i:" ascii wide
+        $optional18 = "compression:i:" ascii wide
+        $optional19 = "networkautodetect:i:" ascii wide
+        $optional20 = "videoplaybackmode:i:" ascii wide
+        // Device redirection
+        $optional21 = "audiocapturemode:i:" ascii wide
+        $optional22 = "audiomode:i:" ascii wide
+        $optional23 = "camerastoredirect:s:" ascii wide
+        $optional24 = "devicestoredirect:s:" ascii wide
+        $optional25 = "drivestoredirect:s:" ascii wide
+        $optional26 = "encode redirected video capture:i:" ascii wide
+        $optional27 = "keyboardhook:i:" ascii wide
+        $optional28 = "redirectclipboard:i:" ascii wide
+        $optional29 = "redirectcomports:i:" ascii wide
+        $optional30 = "redirected video capture encoding quality:i:" ascii wide
+        $optional31 = "redirectlocation:i:" ascii wide
+        $optional32 = "redirectprinters:i:" ascii wide
+        $optional33 = "redirectsmartcards:i:" ascii wide
+        $optional34 = "redirectwebauthn:i:" ascii wide
+        $optional35 = "usbdevicestoredirect:s:" ascii wide
+        // Display settings
+        $optional36 = "desktop size id:i:" ascii wide
+        $optional37 = "desktopheight:i:" ascii wide
+        $optional38 = "desktopscalefactor:i:" ascii wide
+        $optional39 = "desktopwidth:i:" ascii wide
+        $optional40 = "dynamic resolution:i:" ascii wide
+        $optional41 = "maximizetocurrentdisplays:i:" ascii wide
+        $optional42 = "screen mode id:i:" ascii wide
+        $optional43 = "selectedmonitors:s:" ascii wide
+        $optional44 = "singlemoninwindowedmode:i:" ascii wide
+        $optional45 = "smart sizing:i:" ascii wide
+        $optional46 = "use multimon:i:" ascii wide
+        // RemoteApp
+        $optional47 = "remoteapplicationcmdline:s:" ascii wide
+        $optional48 = "remoteapplicationexpandcmdline:i:" ascii wide
+        $optional49 = "remoteapplicationexpandworkingdir:i:" ascii wide
+        $optional50 = "remoteapplicationfile:s:" ascii wide
+        $optional51 = "remoteapplicationicon:s:" ascii wide
+        $optional52 = "remoteapplicationmode:i:" ascii wide
+        $optional53 = "remoteapplicationname:s:" ascii wide
+        $optional54 = "remoteapplicationprogram:s:" ascii wide
+
+        // https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-r2-and-2008/ff393699(v=ws.10)
+        $optional55 = "administrative session:i:" ascii wide
+        $optional56 = "autoreconnect max retries:i:" ascii wide
+        $optional57 = "bitmapcachepersistenable:i:" ascii wide
+        $optional58 = "connection type:i:" ascii wide
+        $optional59 = "disable ctrl+alt+del:i:" ascii wide
+        $optional60 = "disableprinterredirection:i:" ascii wide
+        $optional61 = "disableclipboardredirection:i:" ascii wide
+        $optional62 = "displayconnectionbar:i:" ascii wide
+        $optional63 = "loadbalanceinfo:s:" ascii wide
+        $optional64 = "negotiate security layer:i:" ascii wide
+        $optional65 = "pinconnectionbar:i:" ascii wide
+        $optional66 = "prompt for credentials on client:i:" ascii wide
+        $optional67 = "redirectdrives:i:" ascii wide
+        $optional68 = "server port:i:" ascii wide
+        $optional69 = "session bpp:i:" ascii wide
+        $optional70 = "span monitors:i:" ascii wide
+        $optional71 = "winposstr:s:" ascii wide
+        $optional72 = "workspaceid:s:" ascii wide
+
+        // https://www.donkz.nl/overview-rdp-file-settings/
+        $optional73 = "allow desktop composition:i:" ascii wide
+        $optional74 = "allow font smoothing:i:" ascii wide
+        $optional75 = "audioqualitymode:i:" ascii wide
+        $optional76 = "bitmapcachesize:i:" ascii wide
+        $optional77 = "connect to console:i:" ascii wide
+        $optional78 = "disable full window drag:i:" ascii wide
+        $optional79 = "disable menu anims:i:" ascii wide
+        $optional80 = "disable themes:i:" ascii wide
+        $optional81 = "disable wallpaper:i:" ascii wide
+        $optional82 = "disableremoteappcapscheck:i:" ascii wide
+        $optional83 = "enablesuperpan:i:" ascii wide
+        $optional84 = "password 51:b:" ascii wide
+        $optional85 = "prompt for credentials:i:" ascii wide
+        $optional86 = "public mode:i:" ascii wide
+        $optional87 = "redirectdirectx:i:" ascii wide
+        $optional88 = "redirectposdevices:i:" ascii wide
+        $optional89 = "shell working directory:s:" ascii wide
+        $optional90 = "signature:s:" ascii wide
+        $optional91 = "signscope:s:" ascii wide
+        $optional92 = "superpanaccelerationfactor:i:" ascii wide
+
+        // Others
+        $optional93 = "rdgiskdcproxy:i:" ascii wide
+        $optional94 = "use redirection server name:i:" ascii wide
+        $optional95 = "gatewaybrokeringtype:i:" ascii wide
+        $optional96 = "disable cursor setting:i:" ascii wide
+        $optional97 = "enableworkspacereconnect:i:" ascii wide
+        $optional98 = "bitmapcachesize:i:" ascii wide
+
+    condition:
+        mime startswith "text"
+        and $mandatory
+        // Add two optionals, to reduce false positives.
+        and 2 of ($optional*)
 }
