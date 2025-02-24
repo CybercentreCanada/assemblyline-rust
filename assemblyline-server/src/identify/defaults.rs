@@ -7,145 +7,145 @@ use uuid::uuid;
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
 pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
-    ("network/tnef", r"Transport Neutral Encapsulation Format"),
-    ("archive/chm", r"MS Windows HtmlHelp Data"),
-    ("executable/web/wasm", r"WebAssembly \\(wasm\\) binary module"),
-    ("executable/windows/dll64", r"pe32\\+[^\\|]+dll[^\\|]+x86\\-64"),
+    ("network/tnef", "Transport Neutral Encapsulation Format"),
+    ("archive/chm", "MS Windows HtmlHelp Data"),
+    ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
+    ("executable/windows/dll64", "pe32\\+[^\\|]+dll[^\\|]+x86\\-64"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L159
-    ("executable/windows/dll64", r"pe32\\+[^\\|]+dll[^\\|]+windows"),
+    ("executable/windows/dll64", "pe32\\+[^\\|]+dll[^\\|]+windows"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L157
-    ("executable/windows/dll32", r"pe32[^\\|]+dll"),
-    ("executable/windows/pe64", r"pe32\\+[^\\|]+x86\\-64[^\\|]+windows"),
+    ("executable/windows/dll32", "pe32[^\\|]+dll"),
+    ("executable/windows/pe64", "pe32\\+[^\\|]+x86\\-64[^\\|]+windows"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L155
-    ("executable/windows/pe64", r"pe32\\+[^\\|]+windows"),
+    ("executable/windows/pe64", "pe32\\+[^\\|]+windows"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L153
-    ("executable/windows/pe32", r"pe32[^\\|]+windows"),
-    ("executable/windows/ia/dll64", r"pe32\\+?[^\\|]+dll[^\\|]+Intel Itanium[^\\|]+windows"),
-    ("executable/windows/ia/pe64", r"pe32\\+?[^\\|]+Intel Itanium[^\\|]+windows"),
-    ("executable/windows/arm/dll64", r"pe32\\+?[^\\|]+dll[^\\|]+Aarch64[^\\|]+windows"),
-    ("executable/windows/arm/pe64", r"pe32\\+?[^\\|]+Aarch64[^\\|]+windows"),
-    ("executable/windows/pe", r"pe unknown[^\\|]+windows"),
+    ("executable/windows/pe32", "pe32[^\\|]+windows"),
+    ("executable/windows/ia/dll64", "pe32\\+?[^\\|]+dll[^\\|]+Intel Itanium[^\\|]+windows"),
+    ("executable/windows/ia/pe64", "pe32\\+?[^\\|]+Intel Itanium[^\\|]+windows"),
+    ("executable/windows/arm/dll64", "pe32\\+?[^\\|]+dll[^\\|]+Aarch64[^\\|]+windows"),
+    ("executable/windows/arm/pe64", "pe32\\+?[^\\|]+Aarch64[^\\|]+windows"),
+    ("executable/windows/pe", "pe unknown[^\\|]+windows"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L183
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L185
-    ("executable/windows/dos", r"(ms-)?dos executable"),
+    ("executable/windows/dos", "(ms-)?dos executable"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L187
-    ("executable/windows/com", r"^com executable"),
-    ("executable/windows/dos", r"^8086 relocatable"),
-    ("executable/windows/coff", r"^MS Windows COFF"),
+    ("executable/windows/com", "^com executable"),
+    ("executable/windows/dos", "^8086 relocatable"),
+    ("executable/windows/coff", "^MS Windows COFF"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_elf.yara
-    ("executable/linux/elf32", r"^elf 32-bit (l|m)sb executable"),
-    ("executable/linux/elf64", r"^elf 64-bit (l|m)sb executable"),
-    ("executable/linux/pie32", r"^elf 32-bit (l|m)sb pie executable"),
-    ("executable/linux/pie64", r"^elf 64-bit (l|m)sb pie executable"),
-    ("executable/linux/so32", r"^elf 32-bit (l|m)sb +shared object"),
-    ("executable/linux/so64", r"^elf 64-bit (l|m)sb +shared object"),
-    ("executable/linux/coff32", r"^(Intel 80386|i386|80386) COFF"),
-    ("executable/linux/coff64", r"^64-bit XCOFF"),
-    ("executable/linux/ia/coff64", r"^Intel ia64 COFF"),
-    ("executable/linux/misp/ecoff", r"^MIPS[^\\|]+ ECOFF"),
-    ("executable/linux/a.out", r"^a.out"),
+    ("executable/linux/elf32", "^elf 32-bit (l|m)sb executable"),
+    ("executable/linux/elf64", "^elf 64-bit (l|m)sb executable"),
+    ("executable/linux/pie32", "^elf 32-bit (l|m)sb pie executable"),
+    ("executable/linux/pie64", "^elf 64-bit (l|m)sb pie executable"),
+    ("executable/linux/so32", "^elf 32-bit (l|m)sb +shared object"),
+    ("executable/linux/so64", "^elf 64-bit (l|m)sb +shared object"),
+    ("executable/linux/coff32", "^(Intel 80386|i386|80386) COFF"),
+    ("executable/linux/coff64", "^64-bit XCOFF"),
+    ("executable/linux/ia/coff64", "^Intel ia64 COFF"),
+    ("executable/linux/misp/ecoff", "^MIPS[^\\|]+ ECOFF"),
+    ("executable/linux/a.out", "^a.out"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_macho.yara
-    ("executable/mach-o", r"^Mach-O"),
+    ("executable/mach-o", "^Mach-O"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L171
-    ("archive/7-zip", r"^7-zip archive data"),
-    ("archive/ace", r"^ACE archive data"),
-    ("archive/asar", r"^Electron ASAR archive"),
+    ("archive/7-zip", "^7-zip archive data"),
+    ("archive/ace", "^ACE archive data"),
+    ("archive/asar", "^Electron ASAR archive"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L173
-    ("archive/bzip2", r"^bzip2 compressed data"),
-    ("archive/cabinet", r"^installshield cab"),
+    ("archive/bzip2", "^bzip2 compressed data"),
+    ("archive/cabinet", "^installshield cab"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_cab.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L199
-    ("archive/cabinet", r"^microsoft cabinet archive data"),
-    ("archive/cpio", r"cpio archive"),
+    ("archive/cabinet", "^microsoft cabinet archive data"),
+    ("archive/cpio", "cpio archive"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L175
-    ("archive/gzip", r"^gzip compressed data"),
-    ("archive/iso", r"ISO 9660"),
-    ("archive/lzma", r"^LZMA compressed data"),
+    ("archive/gzip", "^gzip compressed data"),
+    ("archive/iso", "ISO 9660"),
+    ("archive/lzma", "^LZMA compressed data"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_rar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L179
-    ("archive/rar", r"^rar archive data"),
+    ("archive/rar", "^rar archive data"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_tar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L177
-    ("archive/tar", r"^(GNU|POSIX) tar archive"),
-    ("archive/ar", r"^current ar archive"),
-    ("archive/vhd", r"^Microsoft Disk Image"),
-    ("archive/vmdk", r"^VMware4? disk image"),
-    ("archive/xz", r"^XZ compressed data"),
+    ("archive/tar", "^(GNU|POSIX) tar archive"),
+    ("archive/ar", "^current ar archive"),
+    ("archive/vhd", "^Microsoft Disk Image"),
+    ("archive/vmdk", "^VMware4? disk image"),
+    ("archive/xz", "^XZ compressed data"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_zip.yara
-    ("archive/zip", r"^zip archive data"),
-    ("archive/zstd", r"^Zstandard compressed data"),
-    ("archive/zpaq", r"^ZPAQ file"),
-    ("network/tcpdump", r"^(tcpdump|pcap)"),
+    ("archive/zip", "^zip archive data"),
+    ("archive/zstd", "^Zstandard compressed data"),
+    ("archive/zpaq", "^ZPAQ file"),
+    ("network/tcpdump", "^(tcpdump|pcap)"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_pdf.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L149
-    ("document/pdf", r"^pdf document"),
-    ("document/epub", r"^EPUB document"),
-    ("document/mobi", r"^Mobipocket E-book"),
-    ("resource/map/warcraft3", r"^Warcraft III map file$"),
+    ("document/pdf", "^pdf document"),
+    ("document/epub", "^EPUB document"),
+    ("document/mobi", "^Mobipocket E-book"),
+    ("resource/map/warcraft3", "^Warcraft III map file$"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L169
-    ("image/bmp", r"^pc bitmap"),
+    ("image/bmp", "^pc bitmap"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L145
-    ("image/gif", r"^gif image data"),
+    ("image/gif", "^gif image data"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L147
-    ("image/jpg", r"^jpeg image data"),
+    ("image/jpg", "^jpeg image data"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L151
-    ("image/png", r"^png image data"),
+    ("image/png", "^png image data"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L167
-    ("image/tiff", r"^TIFF image data"),
-    ("image/webp", r"Web/P image"),
-    ("document/installer/windows", r"(Installation Database|Windows Installer)"),
+    ("image/tiff", "^TIFF image data"),
+    ("image/webp", "Web/P image"),
+    ("document/installer/windows", "(Installation Database|Windows Installer)"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L141
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L143
-    ("document/office/excel", r"Microsoft[^\\|]+Excel"),
+    ("document/office/excel", "Microsoft[^\\|]+Excel"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L135
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L137
-    ("document/office/powerpoint", r"Microsoft.*PowerPoint"),
+    ("document/office/powerpoint", "Microsoft.*PowerPoint"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L131
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L133
-    ("document/office/word", r"Microsoft[^\\|]+Word"),
+    ("document/office/word", "Microsoft[^\\|]+Word"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_rtf.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L139
-    ("document/office/rtf", r"Rich Text Format"),
-    ("document/office/ole", r"OLE 2"),
-    ("document/office/hwp", r"Hangul \\(Korean\\) Word Processor File"),
+    ("document/office/rtf", "Rich Text Format"),
+    ("document/office/ole", "OLE 2"),
+    ("document/office/hwp", "Hangul \\(Korean\\) Word Processor File"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_ole_cf.yara
-    ("document/office/unknown", r"Composite Document File|CDFV2"),
-    ("document/office/unknown", r"Microsoft[^\\|]+(OOXML|Document)"),
-    ("document/office/unknown", r"Number of (Characters|Pages|Words)"),
+    ("document/office/unknown", "Composite Document File|CDFV2"),
+    ("document/office/unknown", "Microsoft[^\\|]+(OOXML|Document)"),
+    ("document/office/unknown", "Number of (Characters|Pages|Words)"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_swf.yara
-    ("audiovisual/flash", r"Macromedia Flash"),
-    ("code/autorun", r"microsoft windows autorun"),
-    ("code/batch", r"dos batch file"),
+    ("audiovisual/flash", "Macromedia Flash"),
+    ("code/autorun", "microsoft windows autorun"),
+    ("code/batch", "dos batch file"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L181
-    ("java/jar", r"[ (]Jar[) ]"),
+    ("java/jar", "[ (]Jar[) ]"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_java_class.yara
-    ("java/class", r"java class data"),
-    ("resource/pyc", r"python [^\\|]+byte"),
-    ("resource/pyc", r"^Byte-compiled Python module"),
-    ("android/apk", r"Android package \\(APK\\)"),
-    ("code/xml", r"OpenGIS KML"),
+    ("java/class", "java class data"),
+    ("resource/pyc", "python [^\\|]+byte"),
+    ("resource/pyc", "^Byte-compiled Python module"),
+    ("android/apk", "Android package \\(APK\\)"),
+    ("code/xml", "OpenGIS KML"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L161
-    ("code/xml", r"xml"),
-    ("image/tim", r"TIM image"),
-    ("network/sff", r"Frame Format"),
+    ("code/xml", "xml"),
+    ("image/tim", "TIM image"),
+    ("network/sff", "Frame Format"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L197
-    ("shortcut/windows", r"^MS Windows shortcut"),
-    ("document/email", r"Mime entity text"),
-    ("document/email", r"MIME entity, ASCII text"),
-    ("metadata/sysmon/evt", r"MS Windows Vista Event Log"),
-    ("metadata/sysmon/evt", r"MS Windows 10-11 Event Log"),
-    ("metadata/minidump", r"Mini DuMP crash report"),
+    ("shortcut/windows", "^MS Windows shortcut"),
+    ("document/email", "Mime entity text"),
+    ("document/email", "MIME entity, ASCII text"),
+    ("metadata/sysmon/evt", "MS Windows Vista Event Log"),
+    ("metadata/sysmon/evt", "MS Windows 10-11 Event Log"),
+    ("metadata/minidump", "Mini DuMP crash report"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L165
-    ("image/emf", r"Windows Enhanced Metafile"),
-    ("resource/msvc", r"MSVC \\.res"),
-    ("pgp/pubkey", r"^PGP public key"),
-    ("pgp/privkey", r"^PGP private key block"),
-    ("pgp/encrypted", r"^PGP RSA encrypted session key"),
-    ("pgp/message", r"^PGP message Public-Key Encrypted Session Key"),
-    ("gpg/symmetric", r"^GPG symmetrically encrypted data"),
-    ("video/asf", r"^Microsoft ASF"),
+    ("image/emf", "Windows Enhanced Metafile"),
+    ("resource/msvc", "MSVC \\.res"),
+    ("pgp/pubkey", "^PGP public key"),
+    ("pgp/privkey", "^PGP private key block"),
+    ("pgp/encrypted", "^PGP RSA encrypted session key"),
+    ("pgp/message", "^PGP message Public-Key Encrypted Session Key"),
+    ("gpg/symmetric", "^GPG symmetrically encrypted data"),
+    ("video/asf", "^Microsoft ASF"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L201
-    ("code/php", r"^PHP script"),
+    ("code/php", "^PHP script"),
 ];
 
 
@@ -461,3 +461,15 @@ pub fn ole_clsid_guids() -> &'static HashMap<Uuid, String> {
 //     "shortcut/windows": ".lnk",
 //     "text/windows/registry": ".reg",
 // }
+
+// LibMagic mimetypes that we will fallback to when we can't determine a type
+pub fn untrusted_mimes(mime: &str) -> Option<&'static str> {
+    match mime {
+        "application/javascript" => Some("code/javascript"),
+        "text/x-java" => Some("code/java"),
+        "text/html" => Some("code/html"),
+        "text/x-c++" => Some("code/c++"),
+        "text/x-c" => Some("code/c"),
+        _ => None
+    }
+}

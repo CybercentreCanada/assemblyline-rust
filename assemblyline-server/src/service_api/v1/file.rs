@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use assemblyline_models::Sha256;
 use log::{error, info, warn};
 use poem::http::{HeaderMap, StatusCode};
 use poem::web::{Data, Multipart, Path};
@@ -24,7 +25,7 @@ use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::tasking::TaskingClient;
 use crate::service_api::helpers::{copy_to_file, make_api_error, make_api_response, make_empty_api_error};
 use crate::service_api::v1::require_header;
-use crate::string_utils::safe_str;
+// use crate::string_utils::safe_str;
 use crate::Core;
 
 // SUB_API = 'file'
@@ -56,10 +57,14 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// <THE FILE BINARY>
 #[handler]
 async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo>, core: Data<&Arc<Core>>) -> Result<Response> {
+    let sha256: Sha256 = match sha256.parse() {
+        Ok(sha) => sha,
+        Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, "A sha256 must be provided")),
+    };
     match core.filestore.stream(&sha256).await {
         Ok((size, stream)) => {
             let body = Body::from_bytes_stream(ReceiverStream::new(stream));
-            let filename = format!("UTF-8''{}", urlencoding::encode(&safe_str(&sha256)));
+            let filename = format!("UTF-8''{}", urlencoding::encode(&sha256));
             Ok(Response::builder()
                 .content_type("application/octet-stream")
                 .header("Content-Length", size.to_string())

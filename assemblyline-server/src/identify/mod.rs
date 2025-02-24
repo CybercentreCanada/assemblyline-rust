@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use assemblyline_models::datastore::file::URIInfo;
 use assemblyline_models::{SSDeepHash, Sha1, Sha256, MD5};
 use digests::{get_digests_for_file_blocking, Digests, DEFAULT_BLOCKSIZE};
-use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use redis_objects::RedisObjects;
@@ -20,13 +19,12 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
-use magic_sys as _;
 
 use crate::cachestore::CacheStore;
-use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence, safe_str};
+use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence};
 use crate::IBool;
 
-use defaults::{ole_clsid_guids, MAGIC_PATTERNS as default_magic_patterns, TRUSTED_MIMES};
+use defaults::{ole_clsid_guids, untrusted_mimes, MAGIC_PATTERNS as default_magic_patterns, TRUSTED_MIMES};
 
 // import json
 // import logging
@@ -63,10 +61,13 @@ use cart_container::cart::unpack_header;
 mod defaults;
 mod digests;
 mod entropy;
+
+#[cfg(test)]
 mod test;
 
 const SYSTEM_DEFAULT_MAGIC: &str = "/usr/share/file/magic.mgc";
-
+const UNKNOWN: &str = "unknown";
+const TEXT_PLAIN: &str = "text/plain";
 
 /// An incomplete version of the File object stored in the datastore produced by identify.
 /// Non-observed information like classification/viewcount etc are not here.
@@ -131,7 +132,7 @@ pub struct Identify {
     compiled_magic_patterns: Mutex<Arc<Vec<(String, regex::Regex)>>>,
     trusted_mimes: Mutex<Arc<HashMap<String, String>>>,
     cache: Option<CacheStore>,
-    custom: regex::Regex,
+    // custom: regex::Regex,
     pdf_encrypted: regex::bytes::Regex,
     pdf_portfolio: regex::bytes::Regex,
 }
@@ -158,7 +159,7 @@ impl Identify {
             yara_rules: Mutex::new(yara_rules),
             compiled_magic_patterns: Mutex::new(compiled_magic_patterns),
             trusted_mimes: Mutex::new(trusted_mimes),
-            custom: regex::RegexBuilder::new("^custom: ").ignore_whitespace(true).build()?,
+            // custom: regex::RegexBuilder::new("^custom: ").ignore_whitespace(true).build()?,
             pdf_encrypted: regex::bytes::Regex::new("/Encrypt")?,
             pdf_portfolio: regex::bytes::Regex::new("/Type/Catalog/Collection")?,
             cache
@@ -286,7 +287,7 @@ impl Identify {
 
         // setup our magic paths
         let databases: magic::cookie::DatabasePaths = [
-            magic_file.path(), 
+            magic_file.path(),
             &system_default,
         ].try_into()?;
 
@@ -303,9 +304,9 @@ impl Identify {
         }
 
         use magic::cookie::Flags;
-        let file_type = magic::Cookie::open(Flags::COMPRESS | Flags::RAW)?;
+        let file_type = magic::Cookie::open(Flags::CONTINUE | Flags::RAW)?;
         let file_type = file_type.load(&databases).map_err(|err| anyhow::anyhow!("couldn't load magic config: {err}"))?;
-        let mime_type = magic::Cookie::open(Flags::COMPRESS | Flags::RAW | Flags::MIME)?;
+        let mime_type = magic::Cookie::open(Flags::CONTINUE | Flags::RAW | Flags::MIME)?;
         let mime_type = mime_type.load(&databases).map_err(|err| anyhow::anyhow!("couldn't load magic config: {err}"))?;
         Ok((Magic(file_type), Magic(mime_type)))
     }
@@ -319,37 +320,52 @@ impl Identify {
 
     async fn _load_yara_file(cache: &Option<CacheStore>) -> Result<yara::Rules> {
         // make sure the default yara file is available
-        let yara_default = std::include_bytes!("./default.yara");
-        let default_file = tempfile::NamedTempFile::new()?;
-        let custom_file = tempfile::NamedTempFile::new()?;
-        tokio::fs::write(default_file.path(), yara_default).await?;
+        let yara_default = std::include_str!("./default.yara");
+        if yara_default.is_empty() {
+            return Err(anyhow::anyhow!("Identify yara rules default didn't pack."))
+        }
 
-        let mut active_yara = default_file.path();
-
+        // try to load from cache
+        let mut apply = None;
         if let Some(cache) = cache {
             info!("Checking for custom yara file...");
+            let custom_file = tempfile::NamedTempFile::new()?;
             let result = cache.download("custom_yara", custom_file.path()).await;
             match result {
                 Ok(_) => {
                     info!("Custom yara file loaded!");
-                    active_yara = custom_file.path();
+                    apply = Some(custom_file);
                 },
                 Err(_) => info!("No custom yara file found."),
             }
         }
 
+        // set up the compiler
         let mut compiler = yara::Compiler::new()?;
         for (var, value) in YARA_DEFAULT_EXTERNALS {
             compiler.define_variable(var, value)?;
         }
-        compiler = compiler.add_rules_file(active_yara)?;
+
+        // if we didn't load from cache apply the default
+        match apply {
+            None => {
+                compiler = compiler.add_rules_str(yara_default)?;
+            },
+            Some(custom_file) => {
+                compiler = compiler.add_rules_file(custom_file.path())?;
+            }
+        }
 
         // yara_rules = yara.compile(filepaths={"default": self.yara_file}, externals=self.yara_default_externals)
         Ok(compiler.compile_rules()?)
     }
 
     async fn load_yara_file(&self) -> Result<()> {
-        *self.yara_rules.lock() = Self::_load_yara_file(&self.cache).await?;
+        let rules = match Self::_load_yara_file(&self.cache).await {
+            Ok(rules) => rules,
+            Err(error) => return Err(anyhow::anyhow!("Could not load yara rules: {error}")),
+        };
+        *self.yara_rules.lock() = rules;
         Ok(())
     }
 
@@ -364,15 +380,15 @@ impl Identify {
 //             self.reload_watcher.stop()
 
     pub fn ident_blocking(&self, buf: &[u8], path: &Path, digests: Option<Digests>) -> Result<FileIdentity> {
-        // data = {"ascii": None, "hex": None, "magic": None, "mime": None, "type": "unknown"}
-        let mut file_type = "unknown".to_owned();
+        // data = {"ascii": None, "hex": None, "magic": None, "mime": None, "type": UNKNOWN}
+        let mut file_type = UNKNOWN.to_owned();
         let mut magic = String::new();
         let mut mime = None;
 
         if buf.is_empty() {
             return Ok(FileIdentity { 
                 ascii: "".to_string(), entropy: None, hex: "".to_string(), md5: None, magic: "".to_string(), 
-                mime: None, sha1: None, sha256: None, size: 0, ssdeep: None, file_type: "unknown".to_string(), tlsh: None, uri_info: None 
+                mime: None, sha1: None, sha256: None, size: 0, ssdeep: None, file_type: UNKNOWN.to_string(), tlsh: None, uri_info: None 
             })
         }
 
@@ -382,7 +398,6 @@ impl Identify {
         // Loop over the labels returned by libmagic, ...
         let mut labels: Vec<String> = match self.file_type.lock().0.file(path) {
             Ok(output) => {
-                println!("magic output: {output}");
                 output.split('\n').map(|row| row.strip_prefix("- ").unwrap_or(row)).map(String::from).collect()
             },
             Err(err) => {
@@ -399,11 +414,11 @@ impl Identify {
             }
         };
 
-        for line in labels.iter_mut() {
-            if let Some(content) = line.strip_prefix("- ") {
-                *line = content.to_string();
-            }
-        }
+        // for line in labels.iter_mut() {
+        //     if let Some(content) = line.strip_prefix("- ") {
+        //         *line = content.to_string();
+        //     }
+        // }
 
         // For user feedback set the mime and magic meta data to always be the primary
         // libmagic responses
@@ -435,35 +450,34 @@ impl Identify {
                 }
             }
             if let Some(label) = labels.first() {
-                magic = safe_str(label.as_str());
+                magic = label.clone();
             }
         }
 
         for possible_mime in &mimes {
-            if !possible_mime.is_empty() {
-                mime = Some(safe_str(possible_mime));
+            if possible_mime.is_empty() { continue }
+            mime = Some(possible_mime.clone());
+            break
+        }
+
+        // First lets try to find any custom types
+        println!("{labels:?}");
+        for label in &labels {
+            let label = dotdump(label);
+            if let Some(item) = label.strip_prefix("custom: ") {
+                // Some things, like executable have additional data appended to their identification, like
+                // ", dynamically linked, stripped" that we do not want to use as part of the type.
+                if let Some((front, _)) = item.split_once(",") {
+                    file_type = front.trim().to_owned();
+                } else {
+                    file_type = item.trim().to_owned();
+                }
                 break
             }
         }
 
-        // First lets try to find any custom types
-        for label in &labels {
-            let label = dotdump(label);
-
-            if self.custom.is_match(&label) {
-                // Some things, like executable have additional data appended to their identification, like
-                // ", dynamically linked, stripped" that we do not want to use as part of the type.
-                if let Some(item) = label.split("custom: ").get(1..=1).next() {
-                    if let Some((front, _tail)) = item.split_once(",") {
-                        file_type = front.trim().to_owned();
-                        break
-                    }
-                }
-            }
-        }
-
         // Second priority is mime times marked as trusted
-        if file_type == "unknown" {
+        if file_type == UNKNOWN {
             let trusted_mimes = self.trusted_mimes.lock().clone();
 
             for mime in &mimes {
@@ -473,16 +487,25 @@ impl Identify {
                     file_type = new_type.to_owned();
                     break
                 }
+
+                if let Some((mime, _)) = mime.split_once(";") {
+                    if let Some(new_type) = trusted_mimes.get(mime) {
+                        file_type = new_type.to_owned();
+                        break
+                    }    
+                }
             }
         }
+        println!("AAAA  {file_type} {mimes:?} {labels:?}");
 
         // As a third priority try matching the magic_patterns
-        if file_type == "unknown" {
+        if file_type == UNKNOWN {
             let compiled_magic_patterns = self.compiled_magic_patterns.lock().clone();
 
             'labels: for label in labels {
+                let label = dotdump(&label);
                 for (new_type, pattern) in compiled_magic_patterns.iter() {
-                    if pattern.find(&dotdump(&label)).is_some() {
+                    if pattern.is_match(&label) {
                         file_type = new_type.to_string();
                         break 'labels
                     }
@@ -497,8 +520,8 @@ impl Identify {
         // If mime is text/* and type is unknown, set text/plain to trigger
         // language detection later.
         if let Some(mime) = &mime {
-            if file_type == "unknown" && mime.starts_with("text/") {
-                file_type = "text/plain".to_string();
+            if file_type == UNKNOWN && mime.starts_with("text/") {
+                file_type = TEXT_PLAIN.to_string();
             }
         }
 
@@ -558,6 +581,7 @@ impl Identify {
     }
 
     fn yara_ident(&self, path: &Path, info: &FileIdentity) -> Result<Option<String>> {
+        println!("yara_ident");
         // externals = {k: v or "" for k, v in info.items() if k in self.yara_default_externals}
         // set up the parameters for the yara scan
         let yara = self.yara_rules.lock();
@@ -575,6 +599,7 @@ impl Identify {
                 return Ok(None)
             }
         };
+        println!("matches: {}", scan_matches.len());
 
         // matches.sort(key=lambda x: x.meta.get("score", 0), reverse=True)
         scan_matches.sort_by_key(|rule| {
@@ -630,6 +655,10 @@ impl Identify {
                 data
             };
 
+            println!("type: {}", data.file_type);
+            println!("mime: {:?}", data.mime);
+            println!("magic: {}", data.magic);
+
             // Check if file empty
             if data.size == 0 {
                 data.file_type = "empty".to_string();
@@ -650,18 +679,58 @@ impl Identify {
             } else if data.file_type == "uri" {
                 data.file_type = uri_ident(&path, &mut data)?;
 
-            // If we're so far failed to identified the file, lets run the yara rules
-            } else if data.file_type.contains("unknown") {
+            // If we've so far failed to identified the file, lets run the yara rules
+            } else if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN {
+                let mime = data.mime.clone().unwrap_or_default();
+                // We do not trust magic/mimetype's CSV identification, so we test it first
+                if data.magic == "CSV text" || ["text/csv", "application/csv"].contains(&mime.as_str()) {
+                    todo!()
+                    // with open(path, newline='') as csvfile:
+                    //     try:
+                    //         # Try to read the file as a normal csv without special sniffed dialect
+                    //         complete_data = [x for x in islice(csv.reader(csvfile), 100)]
+                    //         if len(complete_data) > 2 and len(set([len(x) for x in complete_data])) == 1:
+                    //             data["type"] = "text/csv"
+                    //             # Final type identified, shortcut further processing
+                    //             return data
+                    //     except Exception:
+                    //         pass
+                    //     csvfile.seek(0)
+                    //     try:
+                    //         # Normal CSV didn't work, try sniffing the csv to see how we could parse it
+                    //         dialect = csv.Sniffer().sniff(csvfile.read(1024))
+                    //         csvfile.seek(0)
+                    //         complete_data = [x for x in islice(csv.reader(csvfile, dialect), 100)]
+                    //         if len(complete_data) > 2 and len(set([len(x) for x in complete_data])) == 1:
+                    //             data["type"] = "text/csv"
+                    //             # Final type identified, shortcut further processing
+                    //             return data
+                    //     except Exception:
+                    //         pass
+                }
+    
+                if data.file_type == TEXT_PLAIN {
+                    println!("json parse");
+                    // Check if the file is a misidentified json first before running the yara rules
+                    let body = std::fs::OpenOptions::new().read(true).open(&path)?;
+                    if serde_json::from_reader::<_, serde_json::Value>(&body).is_ok() {
+                        println!("json parse OK");
+                        data.file_type = "text/json".to_string();
+                        // Final type identified, shortcut further processing
+                        return Ok(data)
+                    } 
+                }
+    
+                // Only if the file was not identified as a csv or a json
                 if let Some(new_type) = this.yara_ident(&path, &data)? {
                     data.file_type = new_type;
                 }
-            } else if data.file_type == "text/plain" {
-                // Check if the file is a misidentified json first before running the yara rules
-                let body = std::fs::read_to_string(&path)?;
-                if serde_json::from_str::<serde_json::Value>(&body).is_ok() {
-                    data.file_type = "text/json".to_string();
-                } else if let Some(new_type) = this.yara_ident(&path, &data)? {
-                    data.file_type = new_type;
+    
+                if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN {
+                    if let Some(new_type) = untrusted_mimes(&mime) {
+                        // Rely on untrusted mimes
+                        data.file_type = new_type.to_string();
+                    }
                 }
             }
 
@@ -884,25 +953,25 @@ fn uri_ident(path: &Path, info: &mut FileIdentity) -> Result<String> {
 
     let data: serde_yaml::Mapping = match serde_yaml::from_reader(file) {
         Ok(data) => data,
-        Err(_) => return Ok("text/plain".to_string())
+        Err(_) => return Ok(TEXT_PLAIN.to_string())
     };
 
     let uri_data = match data.get("uri") {
         Some(field) => match field.as_str() {
             Some(field) => field,
-            None => return Ok("text/plain".to_string())
+            None => return Ok(TEXT_PLAIN.to_string())
         },
-        None => return Ok("text/plain".to_string())
+        None => return Ok(TEXT_PLAIN.to_string())
     };
 
     let url: url::Url = match uri_data.parse() {
         Ok(url) => url,
-        Err(_) => return Ok("text/plain".to_string()),
+        Err(_) => return Ok(TEXT_PLAIN.to_string()),
     };
 
     let scheme = url.scheme();
     if scheme.is_empty() {
-        return Ok("text/plain".to_string())
+        return Ok(TEXT_PLAIN.to_string())
     }
 
     info.uri_info = Some(URIInfo{
