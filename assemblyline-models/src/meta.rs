@@ -3,6 +3,7 @@ use std::collections::{HashMap, BTreeMap};
 use serde::{Serialize, Deserialize};
 use serde_json::json;
 use struct_metadata::{Described, Descriptor, Kind, MetadataKind};
+use crate::serialize::{deserialize_bool, deserialize_string_or_list};
 
 
 /// Retrieve all subfields recursively flattened into a single listing.    
@@ -10,6 +11,9 @@ use struct_metadata::{Described, Descriptor, Kind, MetadataKind};
 /// This method strips direct information about whether a field is optional or part of a sequence and includes it as boolean flags.
 /// response type is mapping from path to (type info, bool flag for multivalued, bool flag for optional)
 pub fn flatten_fields(target: &Descriptor<ElasticMeta>) -> HashMap<Vec<String>, (&Descriptor<ElasticMeta>, bool, bool)> {    
+    // if target.metadata.mapping.is_some() {
+    //     return [(vec![], (target, false, false))].into_iter().collect()
+    // }
     match &target.kind {
         Kind::Struct { children , ..} => {
             let mut fields = HashMap::<_, _>::new();
@@ -100,18 +104,21 @@ pub struct FieldMapping {
     pub doc_values: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignore_above: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copy_to: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with="deserialize_string_or_list")]
+    pub copy_to: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analyzer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normalizer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, FieldMapping>,
 }
 
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Eq, Debug)]
+#[serde(default)]
 pub struct DynamicTemplate {
     #[serde(rename="match", skip_serializing_if = "Option::is_none")]
     pub match_: Option<String>,
@@ -122,11 +129,13 @@ pub struct DynamicTemplate {
     pub mapping: FieldMapping,
 }
 
+
 fn dynamic_default() -> bool { true }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[serde(default)]
 pub struct Mappings {
-    #[serde(default="dynamic_default")]
+    #[serde(default="dynamic_default", deserialize_with="deserialize_bool")]
     pub dynamic: bool,
     pub properties: BTreeMap<String, FieldMapping>,
     pub dynamic_templates: Vec<HashMap<String, DynamicTemplate>>,
@@ -147,10 +156,16 @@ impl Mappings {
             field.doc_values = meta.index;
         }
 
-        field.copy_to = field.copy_to.or(meta.copyto.map(ToOwned::to_owned));
-        if field.copy_to.as_ref().is_some_and(|copyto| copyto.is_empty()) {
-            field.copy_to = None;
+        if let Some(value) = meta.copyto {
+            field.copy_to.push(value.to_owned());
+            field.copy_to.sort_unstable();
+            field.copy_to.dedup();
+            field.copy_to.retain(|s|!s.is_empty());
         }
+        // field.copy_to = field.copy_to.or(meta.copyto.map(ToOwned::to_owned));
+        // if field.copy_to.as_ref().is_some_and(|copyto| copyto.is_empty()) {
+        //     field.copy_to = None;
+        // }
         field.analyzer = field.analyzer.or(meta.analyzer.map(ToOwned::to_owned));
         field.normalizer = field.normalizer.or(meta.normalizer.map(ToOwned::to_owned));
             
@@ -211,6 +226,12 @@ impl Mappings {
                     type_: Some(mapping.to_owned()), 
                     // The maximum always safe value in elasticsearch
                     ignore_above: Some(8191),
+                    ..Default::default()
+                });
+            } else if mapping.eq_ignore_ascii_case("wildcard") {
+                self.properties.insert(full_name, FieldMapping{ 
+                    type_: Some(mapping.to_owned()), 
+                    copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
                     ..Default::default()
                 });
             } else {
@@ -317,7 +338,8 @@ impl Mappings {
                         mapping: FieldMapping{
                             type_: mapping.to_owned().into(),
                             index: meta.index,
-                            copy_to: meta.copyto.map(ToOwned::to_owned),
+                            // copy_to: meta.copyto.map(ToOwned::to_owned),
+                            copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
                             ..Default::default()
                         },
                         ..Default::default()
@@ -328,6 +350,20 @@ impl Mappings {
                 return Ok(())
             },
             
+            Kind::Aliased {name: name_, kind } if *name_ == "Wildcard" => {
+                self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
+                    path_match: Some(name.to_owned()),
+                    mapping: FieldMapping{
+                        type_: Some("wildcard".to_owned()),
+                        // copy_to: meta.copyto.map(ToOwned::to_owned),
+                        copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+                return Ok(())
+            }
+
             // elif isinstance(field, (Mapping, List)):
             Kind::Mapping(_, child) | Kind::Sequence(child) => {
                 // let temp_name = if field {
@@ -392,7 +428,7 @@ impl Mappings {
     }
 
     pub fn apply_defaults(&mut self) {
-        self.dynamic_templates.insert(0, [("strings_as_keywords".to_owned(), DynamicTemplate {
+        self.dynamic_templates.push([("strings_as_keywords".to_owned(), DynamicTemplate {
             match_: None,
             path_match: None,
             match_mapping_type: Some("string".to_owned()),
@@ -408,6 +444,7 @@ impl Mappings {
                 store: true.into(),
                 doc_values: Some(true),
                 type_: "keyword".to_owned().into(),
+                copy_to: vec!["__text__".to_string()],
                 ..Default::default()
             });
         }
@@ -475,7 +512,7 @@ pub fn build_mapping<T: Described<ElasticMeta>>() -> Result<Mappings, MappingErr
 }
 
 /// The mapping for Elasticsearch based on a model object.
-fn build_mapping_inner(children: &[(Option<&'static str>, &Kind<ElasticMeta>, &ElasticMeta)], prefix: Vec<&str>, allow_refuse_implicit: bool) -> Result<Mappings, MappingError> {
+pub fn build_mapping_inner(children: &[(Option<&'static str>, &Kind<ElasticMeta>, &ElasticMeta)], prefix: Vec<&str>, allow_refuse_implicit: bool) -> Result<Mappings, MappingError> {
     let mut mappings = Mappings::default();
 
     // Fill in the sections

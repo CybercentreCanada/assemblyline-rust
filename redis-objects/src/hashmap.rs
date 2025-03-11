@@ -26,17 +26,17 @@ end
 return 0
 "#;
 
-const _limited_add: &str = r#"
-local set_name = KEYS[1]
-local key = ARGV[1]
-local value = ARGV[2]
-local limit = tonumber(ARGV[3])
+// const LIMITED_ADD: &str = r#"
+// local set_name = KEYS[1]
+// local key = ARGV[1]
+// local value = ARGV[2]
+// local limit = tonumber(ARGV[3])
 
-if redis.call('hlen', set_name) < limit then
-    return redis.call('hsetnx', set_name, key, value)
-end
-return nil
-"#;
+// if redis.call('hlen', set_name) < limit then
+//     return redis.call('hsetnx', set_name, key, value)
+// end
+// return nil
+// "#;
 
 
 /// Hashmap opened by `RedisObjects::hashmap`
@@ -66,6 +66,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
         }
     }
 
+    /// set the expiry in redis but only if we haven't called it recently
     async fn conditional_expire(&self) -> Result<(), ErrorTypes> {
         // load the ttl of this object has one set
         if let Some(ttl) = self.ttl {
@@ -73,11 +74,11 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
                 // the last expire time is behind a mutex so that the queue object is threadsafe
                 let mut last_expire_time = self.last_expire_time.lock();
 
-                // figure out if its time to update the expiry, wait until we are half way through the
+                // figure out if its time to update the expiry, wait until we are 25% through the
                 // ttl to avoid resetting something only milliseconds old
                 let call = match *last_expire_time {
                     Some(time) => {
-                        time.elapsed() > (ttl / 2)
+                        time.elapsed() > (ttl / 4)
                     },
                     None => true // always update the expiry if we haven't run it before on this object
                 };
@@ -91,7 +92,8 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
             };
 
             if call {
-                retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
+                let ttl = ttl.as_secs() as i64;
+                let _: () = retry_call!(self.store.pool, expire, &self.name, ttl)?;
             }
         }
         Ok(())

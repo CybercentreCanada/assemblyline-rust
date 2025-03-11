@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 
 pub use self::queue::PriorityQueue;
 pub use self::queue::Queue;
-pub use self::quota::QuotaGuard;
+// pub use self::quota::QuotaGuard;
 pub use self::hashmap::Hashmap;
 pub use self::counters::{AutoExportingMetrics, AutoExportingMetricsBuilder, MetricMessage};
 pub use self::pubsub::{JsonListenerBuilder, ListenerBuilder, Publisher};
@@ -53,6 +53,7 @@ impl RedisObjects {
         })
     }
    
+    /// Open a connection using the local tls configuration
     pub fn open_host_native_tls(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
         Self::open(redis::ConnectionInfo{
             addr: redis::ConnectionAddr::TcpTls { 
@@ -110,6 +111,7 @@ impl RedisObjects {
         retry_call!(self.pool, publish, channel, data)
     }
 
+    /// Write a json message directly to the channel given
     pub async fn publish_json<T: Serialize>(&self, channel: &str, value: &T) -> Result<u32, ErrorTypes> {
         self.publish(channel, &serde_json::to_vec(value)?).await
     }
@@ -119,45 +121,54 @@ impl RedisObjects {
         AutoExportingMetricsBuilder::new(self.clone(), name, counter_type)
     }
 
+    /// Start building a json listener that produces a stream of events
     pub fn pubsub_json_listener<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>) -> JsonListenerBuilder<T> {
         JsonListenerBuilder::new(self.clone())
     }
 
+    /// Build a json listener that produces a stream of events using the default configuration
     pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<T>> {
         self.pubsub_json_listener()
             .subscribe(channel)
             .listen()
     }
 
+    /// Start building a raw data listener that produces a stream of events
     pub fn pubsub_listener(self: &Arc<Self>) -> ListenerBuilder {
         ListenerBuilder::new(self.clone())
     }
 
+    /// Build a raw data listener that produces a stream of events using the default configuration
     pub fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<Msg>> {
         self.pubsub_listener()
             .subscribe(channel)
             .listen()
     }
 
+    /// Open an interface for tracking user quotas on redis
     pub fn user_quota_tracker(self: &Arc<Self>, prefix: String) -> UserQuotaTracker {
         UserQuotaTracker::new(self.clone(), prefix)
     }
 
+    /// Open a set of values
     pub fn set<T: Serialize + DeserializeOwned>(self: &Arc<Self>, name: String) -> Set<T> {
         Set::new(name, self.clone(), None)
     }
 
+    /// Open a set of values with an expiration policy
     pub fn expiring_set<T: Serialize + DeserializeOwned>(self: &Arc<Self>, name: String, ttl: Option<Duration>) -> Set<T> {
         let ttl = ttl.unwrap_or_else(|| Duration::from_secs(86400));
         Set::new(name, self.clone(), Some(ttl))
     }
 
+    /// Erase all data on the redis server
     pub async fn wipe(&self) -> Result<(), ErrorTypes> {
         let mut con = self.pool.get().await?;
-        redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut con).await?;
+        let _: () = redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut con).await?;
         Ok(())
     }
 
+    /// List all keys on the redis server that satisfies the given pattern
     pub async fn keys(&self, pattern: &str) -> Result<Vec<String>, ErrorTypes> {
         Ok(retry_call!(self.pool, keys, pattern)?)
     }

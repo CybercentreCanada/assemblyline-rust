@@ -1,3 +1,4 @@
+//! Objects and helpers for publishing metrics in an efficent manner. 
 
 use std::{borrow::BorrowMut, sync::Arc};
 use std::marker::PhantomData;

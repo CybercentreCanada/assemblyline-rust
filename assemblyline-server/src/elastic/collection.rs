@@ -1,10 +1,10 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use assemblyline_models::meta::flatten_fields;
+use assemblyline_models::meta::{build_mapping, build_mapping_inner, flatten_fields, FieldMapping};
 use assemblyline_models::{ElasticMeta, JsonMap, Readable};
 use itertools::Itertools;
 use log::{debug, error, warn};
@@ -15,6 +15,7 @@ use serde_json::json;
 use struct_metadata::Described;
 use thiserror::Error;
 
+use crate::common::odm::flat_fields;
 use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
 
 use super::bulk::TypedBulkPlan;
@@ -26,29 +27,39 @@ use super::error::{ElasticErrorInner, WithContext};
 pub (super) const DEFAULT_SORT: &str = "_id asc";
 pub (super) const DEFAULT_ROW_SIZE: u64 = 25;
 
+/// Regex to match valid elasticsearch/json field names. 
+/// Compile it once on first access, from then on just share a compiled regex instance.
+static FIELD_SANITIZER: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new("^[a-z][a-z0-9_\\-.]+$").unwrap()
+});
+
+
 pub trait CollectionType: Serialize + DeserializeOwned + Readable + Described<ElasticMeta> { }
 impl<T: Serialize + DeserializeOwned + Readable + Described<ElasticMeta>> CollectionType for T {}
-
 
 pub struct Collection<T: CollectionType> {
     pub(super) database: Arc<ElasticHelper>,
     name: String,
     archive_name: Option<String>,
+    validate: bool,
     _data: PhantomData<T>,
 }
 
 impl<T: CollectionType> Collection<T> {
 
-    pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String) -> Result<Self> {
+    pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String, validate: bool) -> Result<Self> {
         let collection = Collection {
             database: es,
             name: prefix.to_lowercase() + &name.to_lowercase(),
             archive_name: archive_name.map(|name| prefix.to_lowercase() + &name.to_lowercase()),
+            validate,
             _data: Default::default()
         };
         collection.ensure_collection().await?;
         Ok(collection)
     }
+
+    // pub async fn _create_index(&self) -> Result<()> {
 
     /// This function should test if the collection that you are trying to access does indeed exist
     /// and should create it if it does not.
@@ -85,29 +96,280 @@ impl<T: CollectionType> Collection<T> {
                 self.database.put_alias(&index, &alias).await.context("put_alias")?;
             } else if !self.database.does_index_exist(&index).await? && !self.database.does_alias_exist(&alias).await.context("does_alias_exist")? {
                 // Hold a write block for the rest of this section
-                // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_block_settings)
-                let settings_request = Request::put_index_settings(&self.database.host, &index)?;
-                self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": true})).await.context("create write block")?;
-        
-                // Create a copy on the result index
-                self.database.safe_index_copy(CopyMethod::Clone, &alias, &index, None, None).await?;
+                self.with_write_block(&index, || async {
+                    // Create a copy on the result index
+                    self.database.safe_index_copy(CopyMethod::Clone, &alias, &index, None, None).await?;
 
-                // Make the hot index the new clone
-                // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
-                self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
-                    "actions": [
-                        {"add":  {"index": index, "alias": alias}}, 
-                        {"remove_index": {"index": alias}}
-                    ]
-                })).await?;
-
-                // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_unblock_settings)
-                self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": null})).await?;
+                    // Make the hot index the new clone
+                    // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
+                    self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
+                        "actions": [
+                            {"add":  {"index": index, "alias": alias}}, 
+                            {"remove_index": {"index": alias}}
+                        ]
+                    })).await?;
+                    Ok(())
+                }).await?;
             }
         }
 
-        // todo!("self._check_fields()")
+        self.check_fields().await?;
         Ok(())
+    }
+
+    /// Run a section of code with a write block in place
+    async fn with_write_block(&self, index: &str, callback: impl AsyncFnOnce() -> Result<()>) -> Result<()> {
+        // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_block_settings)
+        let settings_request = Request::put_index_settings(&self.database.host, &index)?;
+        self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": true})).await.context("create write block")?;
+
+        let result = callback().await;
+
+        // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_unblock_settings)
+        self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": null})).await?;
+
+        return result;
+    }
+
+    async fn check_fields(&self) -> Result<()> {
+        if !self.validate {
+            return Ok(())
+        }
+
+        let fields = self.fields().await?;
+        let model = flat_fields(T::metadata()).map_err(ElasticError::fatal)?;
+
+        // find all fields in the model that are missing from the elastic fields and add them
+        let mut missing = HashMap::new();
+        for (field, descriptor) in &model {
+            if !fields.contains_key(field) { 
+                missing.insert(field, descriptor);
+            }
+        }
+        if !missing.is_empty() {
+            self._add_fields(missing).await?;
+        }
+
+        // for all fields that exist in both elastic and the mapping check if they match
+        for (field_name, descriptor) in model {
+            let mapping = match fields.get(&field_name) {
+                Some(mapping) => mapping,
+                None => continue
+            };
+
+            if let Some(index) = descriptor.metadata.index {
+                if index && mapping.indexed != index {
+                    error!("Field {field_name} should be indexed but is not.");
+                }
+            }
+
+            // let possible_field_types = self.__get_possible_fields(descriptor.__class__);
+
+            // if !possible_field_types.contains(mapping._type) {
+            //     raise RuntimeError(f"Field {field_name} didn't have the expected store "
+            //                        f"type. [{fields[field_name]['type']} != "
+            //                        f"{model[field_name].__class__.__name__.lower()}]")
+            // }
+        }
+
+        Ok(())
+    }
+
+    // def __get_possible_fields(self, field):
+    //     field_types = [field.__name__.lower()]
+    //     if field.__bases__[0] != _Field:
+    //         field_types.extend(self.__get_possible_fields(field.__bases__[0]))
+
+    //     return field_types
+
+    ///     This function should return all the fields in the index with their types
+    // include_description=False
+    pub async fn fields(&self) -> Result<HashMap<String, FieldInformation>> {
+
+        fn flatten_fields(props: BTreeMap<String, FieldMapping>) -> BTreeMap<String, FieldMapping> {
+            let mut out = BTreeMap::new();
+            for (name, value) in props {
+                if value.properties.is_empty() {
+                    out.insert(name, value);
+                } else {
+                    for (child, cprops) in flatten_fields(value.properties) {
+                        out.insert(name.clone() + "." + &child, cprops);
+                    }
+                }
+            }
+            return out
+        }
+
+        let request = Request::get_index(&self.database.host, &self.name)?;
+        let data: responses::DescribeIndex = self.database.make_request(&mut 0, &request).await?.json().await?;
+        
+        let Some((_idx_name, spec)) = data.indices.into_iter().next() else {
+            return Err(ElasticError::fatal("No indices returned when asking for fields."));
+        };
+
+        let properties = flatten_fields(spec.mappings.properties);
+
+        // let model_fields = flat_fields(T::metadata())?;
+        // // if self.model_class:
+        // //     model_fields = self.model_class.flat_fields()
+        // // else:
+        // //     model_fields = {}
+
+        let mut collection_data = HashMap::new();
+
+        for (p_name, p_val) in properties {
+            if p_name.starts_with("_") || p_name.contains("//") {
+                continue
+            }
+            if !FIELD_SANITIZER.is_match(&p_name) {
+                continue
+            }
+
+            let mapping = p_val.type_.unwrap_or_default();
+            collection_data.insert(p_name, FieldInformation {
+                default: p_val.copy_to.iter().any(|item| item == "__text__"),
+                indexed: p_val.index.unwrap_or(true),
+                stored: p_val.store.unwrap_or_default(),
+                mapping,
+            });
+
+            // let field_model = model_fields.get(p_name, None);
+            // let f_type = self._get_odm_type(p_val.get('analyzer', None) or p_val['type']);
+            // collection_data.insert(p_name, FieldInformation{
+            //     default: self.DEFAULT_SEARCH_FIELD in p_val.get('copy_to', []),
+            //     indexed: p_val.get('index', p_val.get('enabled', True)),
+            //     list: field_model.multivalued if field_model else False,
+            //     stored: field_model.store if field_model else False,
+            //     mapping: 
+            //     type_: f_type
+            // });
+            // if include_description {
+            //     collection_data[p_name]['description'] = field_model.description if field_model else ''
+            // }
+        }
+
+        return Ok(collection_data)
+    }
+
+    async fn _add_fields(&self, missing_fields: HashMap<&String, &struct_metadata::Descriptor<ElasticMeta>>) -> Result<()> {
+        let mut no_fix = vec![];
+        let mut properties = BTreeMap::new();
+        for (name, field) in missing_fields {
+            // Figure out the path of the field in the document, if the name is set in the field, it
+            // is going to be duplicated in the path from missing_fields, so drop it
+            let prefix: Vec<&str> = name.split('.').collect();
+            // if field.name {
+            //     prefix = prefix[:-1]
+            // }
+            // let label = prefix;
+
+            // Build the fields and templates for this new mapping
+            let mut mapping = build_mapping_inner(&[(None, &field.kind, &field.metadata)], prefix, false).map_err(ElasticError::fatal)?;
+            properties.append(&mut mapping.properties);
+            if !mapping.dynamic_templates.is_empty() {
+                no_fix.push(name)
+            }
+        }
+
+        // If we have collected any fields that we can't just blindly add, as they might conflict
+        // with existing things, (we might have the refuse_all_implicit_mappings rule in place)
+        // simply raise an exception
+        if !no_fix.is_empty() {
+            return Err(ElasticError::fatal(format!("Can't update database mapping for {}, couldn't safely amend mapping for {no_fix:?}", self.name)))
+        }
+
+        // If we got this far, the missing fields have been described in properties, upload them to the
+        // server, and we should be able to move on.
+        for index in self.get_index_list(None)? {
+            // self.with_retries(self.datastore.client.indices.put_mapping, index=index, properties=properties)
+            let request = Request::put_index_mapping(&self.database.host, &index)?;
+            self.database.make_request_json(&mut 0, &request, &json!({
+                "properties": properties
+            })).await?;
+        }
+        Ok(())
+    }
+
+    /// This function triggers a reindex of the current index, this should almost never be used because:
+    ///     1. There is no crash recovery
+    ///     2. Even if the system is still accessible during that time the data is partially accessible
+    ///
+    /// :param index_type: Type of indices to target
+    /// :return: Should return True of the commit was successful on all hosts
+    pub async fn reindex(&self, index_type: Option<Index>) -> Result<()> {
+        for name in self.get_index_list(index_type)? {
+            let index = format!("{name}_hot");
+            let archive = self.is_archive_index(&index);
+            let new_name = format!("{index}__reindex");
+            let index_settings = self.database.get_index_settings(&self.name, archive);
+
+            if self.database.does_index_exist(&index).await? && !self.database.does_index_exist(&new_name).await? {
+
+                // Create reindex target
+                // self.with_retries(self.datastore.client.indices.create, index=new_name,
+                //                 mappings=self._get_index_mappings(),
+                //                 settings=self._get_index_settings(archive=archive))
+                let mut mapping = assemblyline_models::meta::build_mapping::<T>().map_err(ElasticError::fatal)?;
+                mapping.apply_defaults();
+
+                let body = json!({
+                    "mappings": mapping,
+                    "settings": index_settings
+                });
+
+                let _result: responses::CreateIndex = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &new_name)?, &body).await?.json().await?;
+
+                // Swap indices
+                // actions = [{"add": {"index": new_name, "alias": name}},
+                //         {"remove": {"index": index, "alias": name}}, ]
+                // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
+                self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
+                    "actions": [
+                        {"add":  {"index": new_name, "alias": name}}, 
+                        {"remove": {"index": index, "alias": name}}
+                    ]
+                })).await?;
+
+                // Reindex data into target
+                let task: responses::TaskId = self.database.make_request_json(&mut 0, &Request::post_reindex(&self.database.host, false)?, &json!({
+                    "source": {"index": index},
+                    "dest": {"index": new_name}, 
+                })).await?.json().await?;
+                self.database.get_task_results(&task.task).await?;
+
+                // Commit reindexed data
+                self.make_request(&Request::post_refresh_index(&self.database.host, &new_name)?).await?;
+                self.make_request(&Request::post_clear_index_cache(&self.database.host, &new_name)?).await?;
+    
+                // Delete old index
+                self.database.remove_index(&index).await?;
+
+                // Block write to the index
+                self.with_write_block(&name, || async {
+                    // Rename reindexed index
+                    self.database.safe_index_copy(CopyMethod::Clone, &new_name, &index, Some(index_settings), None).await?;
+
+                    // Restore original aliases for the index
+                    // actions = [{"add": {"index": index, "alias": name}},
+                    //         {"remove": {"index": new_name, "alias": name}}, ]
+                    // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
+                    self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
+                        "actions": [
+                            {"add":  {"index": index, "alias": name}}, 
+                            {"remove": {"index": new_name, "alias": name}}
+                        ]
+                    })).await?;
+
+                    // Delete the reindex target if it still exists
+                    if self.database.does_index_exist(&new_name).await? {
+                        self.database.remove_index(&new_name).await?;
+                    }
+                    Ok(())
+                }).await?;
+            }
+        }
+
+        return Ok(())
     }
 
     /// Make an http request with no body
@@ -616,6 +878,22 @@ impl<T: CollectionType> Collection<T> {
     pub async fn bulk(&self, bulk: TypedBulkPlan<T>) -> Result<responses::Bulk> {
         let request = Request::bulk(&self.database.host)?;
         Ok(self.make_request_data(&request, bulk.get_plan_data().as_bytes()).await?.json().await?)
+    }
+
+    #[cfg(test)]
+    pub async fn wipe(&self, recreate: bool, index_type: Option<Index>) -> Result<()> {
+
+        for name in self.get_index_list(index_type)? {
+            let index = format!("{name}_hot");
+            debug!("Wipe operation started for collection: {}", name.to_uppercase());
+            self.database.remove_index(&index).await?;
+        }
+
+        if recreate {
+            self.ensure_collection().await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1162,4 +1440,14 @@ fn test_check_type() {
 
     // let kind = flatten_fields(&TestObject::metadata());
     // assert!(check_type(&kind, &mut json!({"an_optional_date": null})).is_ok(), "{kind:?}");
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct FieldInformation{
+    pub default: bool,
+    pub indexed: bool,
+    // list: bool,
+    pub stored: bool,
+    pub mapping: String,
+    // type_: f_type
 }

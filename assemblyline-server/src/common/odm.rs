@@ -4,7 +4,8 @@ use anyhow::Result;
 use assemblyline_models::ElasticMeta;
 
 
-
+// show_compounds = false
+// skip_mappings = true
 pub fn flat_fields(data: struct_metadata::Descriptor<ElasticMeta>) -> Result<HashMap<String, struct_metadata::Descriptor<ElasticMeta>>> {
     use struct_metadata::Kind;
     if let Kind::Struct { children, .. } = data.kind {
@@ -18,6 +19,10 @@ fn _flat_fields(children: Vec<struct_metadata::Entry<ElasticMeta>>) -> HashMap<S
     use struct_metadata::Kind;
     let mut fields = HashMap::new();
     for child in children {
+        // if child.metadata.mapping.is_some() {
+        //     fields.insert(child.label.to_owned(), child.type_info);
+        //     continue
+        // }
         let child_fields = match child.type_info.kind {
             Kind::Struct { children, .. } => Child::Struct(_flat_fields(children)),
             Kind::Aliased { kind, .. } => _child_flat_fields(*kind),

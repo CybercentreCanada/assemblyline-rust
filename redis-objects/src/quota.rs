@@ -1,4 +1,4 @@
-
+//! Object specialized in tracking user quotas
         
 // import redis
 // from assemblyline.remote.datatypes import get_client, retry_call
@@ -11,15 +11,15 @@ use redis::AsyncCommands;
 use crate::{retry_call, ErrorTypes, RedisObjects};
 
 
-pub struct QuotaGuard {
+// pub struct QuotaGuard {
 
-}
+// }
 
-impl QuotaGuard {
-    pub fn new() -> Self {
-        todo!()
-    }
-}
+// impl QuotaGuard {
+//     pub fn new() -> Self {
+//         todo!()
+//     }
+// }
 
         // if submission.params.quota_item and submission.params.submitter:
         //     self.log.info(f"[{sid}] Submission no longer counts toward {submission.params.submitter.upper()} quota")
@@ -43,6 +43,7 @@ else
 end
 "#;
 
+/// Track the active tasks being run for a user in a queue with an age-out policy
 #[derive(Clone)]
 pub struct UserQuotaTracker {
     store: Arc<RedisObjects>,
@@ -61,6 +62,7 @@ impl UserQuotaTracker {
         }
     }
     
+    /// Set the time before a task started by a user will age out if not ended normally.
     pub fn set_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -70,14 +72,16 @@ impl UserQuotaTracker {
         format!("{}-{user}", self.prefix)
     }
 
+    /// Start a task for the given user assuming the task queue would not rise above the given maximum
     pub async fn begin(&self, user: &str, max_quota: u32) -> Result<bool, ErrorTypes> {
         let mut call = self.begin.key(self.queue_name(user));
         let call = call.arg(max_quota).arg(self.timeout.as_secs());
         Ok(retry_call!(method, self.store.pool, call, invoke_async)?)
     }
 
+    /// End the longest running task owned by the given user
     pub async fn end(&self, user: &str) -> Result<(), ErrorTypes> {
-        retry_call!(self.store.pool, zpopmin, &self.queue_name(user), 1)?;
+        let _: () = retry_call!(self.store.pool, zpopmin, &self.queue_name(user), 1)?;
         Ok(())
     }
 }

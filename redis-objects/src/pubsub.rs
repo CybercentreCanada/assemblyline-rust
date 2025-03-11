@@ -1,3 +1,4 @@
+//! objects for interacting with pubsubs
 use std::{marker::PhantomData, sync::Arc};
 
 use futures::StreamExt;
@@ -50,8 +51,7 @@ impl ListenerBuilder {
                 }
                 exponent = (exponent + 1.0).min(maximum);
 
-                // let connection = self.store.client.get_async_pubsub().await?;
-                let connection = match self.store.client.get_async_connection().await {
+                let mut pubsub = match self.store.client.get_async_pubsub().await {
                     Ok(connection) => connection,
                     Err(connection_error) => {
                         error!("Error connecting to pubsub: {connection_error}");
@@ -59,7 +59,6 @@ impl ListenerBuilder {
                     }
                 };
 
-                let mut pubsub = connection.into_pubsub();
                 for channel in &self.channels {
                     if pubsub.subscribe(channel).await.is_err() {
                         continue 'reconnect;
@@ -158,6 +157,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
     }
 }
 
+/// Hold connection and channel name for publishing to a pubsub
 pub struct Publisher {
     store: Arc<RedisObjects>,
     channel: String,
@@ -168,10 +168,12 @@ impl Publisher {
         Publisher { store, channel }
     }
 
+    /// Publish a message in a serializable type
     pub async fn publish<T: Serialize>(&self, data: &T) -> Result<(), ErrorTypes> {
         self.publish_data(&serde_json::to_vec(data)?).await
     }
 
+    /// Publish raw data as a pubsub message
     pub async fn publish_data(&self, data: &[u8]) -> Result<(), ErrorTypes> {
         retry_call!(self.store.pool, publish, &self.channel, data)
     }

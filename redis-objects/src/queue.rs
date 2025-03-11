@@ -1,3 +1,5 @@
+//! Objects for using lists and sorted sets in redis as queues.
+
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -134,6 +136,7 @@ impl RawQueue {
         }
     }
 
+    /// set the expiry on the queue if it has not been recently set
     async fn conditional_expire(&self) -> Result<(), ErrorTypes> {
         // load the ttl of this object has one set
         if let Some(ttl) = self.ttl {
@@ -141,10 +144,10 @@ impl RawQueue {
                 // the last expire time is behind a mutex so that the queue object is threadsafe
                 let mut last_expire_time = self.last_expire_time.lock().unwrap();
 
-                // figure out if its time to update the expiry, wait until we are half way through the
+                // figure out if its time to update the expiry, wait until we are 25% through the
                 // ttl to avoid resetting something only milliseconds old
                 if let Some(time) = *last_expire_time {
-                    if time.elapsed() < (ttl / 2) {
+                    if time.elapsed() < (ttl / 4) {
                         return Ok(())
                     }
                 };
@@ -153,14 +156,14 @@ impl RawQueue {
                 // while we make the call to the redis server
                 *last_expire_time = Some(std::time::Instant::now());
             }
-            retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
+            let _: () = retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
         }
         Ok(())
     }
 
     /// enqueue a single item
     pub async fn push(&self, data: &[u8]) -> Result<(), ErrorTypes> {
-        retry_call!(self.store.pool, rpush, &self.name, data)?;
+        let _: () = retry_call!(self.store.pool, rpush, &self.name, data)?;
         self.conditional_expire().await
     }
 
@@ -170,13 +173,13 @@ impl RawQueue {
         for item in data {
             pipe.rpush(&self.name, item);
         }
-        retry_call!(method, self.store.pool, pipe, query_async)?;
+        let _: () = retry_call!(method, self.store.pool, pipe, query_async)?;
         self.conditional_expire().await
     }
 
     /// Put all messages passed back at the head of the FIFO queue.
     pub async fn unpop(&self, data: &[u8]) -> Result<(), ErrorTypes> {
-        retry_call!(self.store.pool, lpush, &self.name, data)?;
+        let _: () = retry_call!(self.store.pool, lpush, &self.name, data)?;
         self.conditional_expire().await
     }
 
@@ -280,15 +283,10 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         }
     }
 
+    /// get key name used for this queue
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
-
-// class PriorityQueue(Generic[T]):
-//     def __init__(self, name, host=None, port=None, private=False):
-//         self.c = get_client(host, port, private)
-//         self._deque_range = self.c.register_script(pq_dequeue_range_script)
-//         self.name = name
 
     fn encode(item: &T) -> Result<Vec<u8>, ErrorTypes> {
         let vip = false;
@@ -378,7 +376,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
 
         let call = call.arg(inner_lower).arg(inner_upper).arg(skip).arg(num);
         let results: Vec<Vec<u8>> = retry_call!(method, self.store.pool, call, invoke_async)?;
-        return results.iter()
+        results.iter()
             .map(|row| Self::decode(row))
             .collect()
         // results = retry_call(self._deque_range, keys=[self.name], args=[lower_limit, upper_limit, skip, num])
@@ -456,6 +454,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     
 }
 
+/// Object represeting a colleciton of simple queues with the same prefix and message type 
 pub struct MultiQueue<Message: Serialize + DeserializeOwned> {
     store: Arc<RedisObjects>,
     prefix: String,
@@ -467,14 +466,17 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
         Self {store, prefix, _data: Default::default()}
     }
 
+    /// Delete one of the queues
     pub async fn delete(&self, name: &str) -> Result<(), ErrorTypes> {
         retry_call!(self.store.pool, del, self.prefix.clone() + name)
     }
 
+    /// Get the length of one of the queues
     pub async fn length(&self, name: &str) -> Result<u64, ErrorTypes> {
         retry_call!(self.store.pool, llen, self.prefix.clone() + name)
     }
 
+    /// Pop from one of the queues, returning asap if no values are available.
     pub async fn pop_nonblocking(&self, name: &str) -> Result<Option<Message>, ErrorTypes> {
         let result: Option<String> = retry_call!(self.store.pool, lpop, self.prefix.clone() + name, None)?;
         match result {
@@ -483,6 +485,7 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
         }
     }
 
+    /// Pop from one of the queues, wait up to `timeout` if no values are available.
     pub async fn pop(&self, name: &str, timeout: Duration) -> Result<Option<Message>, ErrorTypes> {
         let result: Option<(String, String)> = retry_call!(self.store.pool, blpop, self.prefix.clone() + name, timeout.as_secs_f64())?;
         match result {
@@ -491,8 +494,9 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
         }
     }
 
+    /// Insert an item into one of the queues
     pub async fn push(&self, name: &str, message: &Message) -> Result<(), ErrorTypes> {
-        retry_call!(self.store.pool, rpush, self.prefix.clone() + name, serde_json::to_string(message)?)?;
+        let _: () = retry_call!(self.store.pool, rpush, self.prefix.clone() + name, serde_json::to_string(message)?)?;
         Ok(())
     }
 }

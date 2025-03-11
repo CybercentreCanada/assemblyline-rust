@@ -71,17 +71,47 @@ impl std::error::Error for ModelError {}
 /// Short name for serde json's basic map type
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[metadata_type(ElasticMeta)]
+#[metadata(mapping="wildcard")]
+pub struct Wildcard(String);
+
+impl std::fmt::Display for Wildcard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::ops::Deref for Wildcard {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<String> for Wildcard {
+    fn from(s: String) -> Self {
+        Wildcard(s)
+    }
+}
+
+impl From<&str> for Wildcard {
+    fn from(s: &str) -> Self {
+        Wildcard(s.to_string())
+    }
+}
+
+
 /// Uppercase String
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[metadata_type(ElasticMeta)]
-#[metadata(mapping="keyword")]
-pub struct UpperString {
-    value: String
-}
+pub struct UpperString(String);
+
 
 impl std::fmt::Display for UpperString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value)
+        f.write_str(&self.0)
     }
 }
 
@@ -89,7 +119,7 @@ impl std::ops::Deref for UpperString {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.value
+        &self.0
     }
 }
 
@@ -98,24 +128,22 @@ impl std::str::FromStr for UpperString {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let value = s.trim().to_uppercase();
-        Ok(UpperString{ value })
+        Ok(UpperString(value))
     }
 }
 
 impl From<&str> for UpperString {
     fn from(s: &str) -> Self {
         let value = s.trim().to_uppercase();
-        UpperString{ value }
+        UpperString(value)
     }
 }
 
 /// sha256 hash of a file
 #[derive(Debug, SerializeDisplay, DeserializeFromStr, Described, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[metadata(mapping="keyword", normalizer="lowercase_normalizer")]
+#[metadata(normalizer="lowercase_normalizer")]
 #[metadata_type(ElasticMeta)]
-pub struct Sha256 {
-    hex: String
-}
+pub struct Sha256(String);
 
 // impl Described<ElasticMeta> for internment::ArcIntern<String> {
 //     fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
@@ -125,7 +153,7 @@ pub struct Sha256 {
 
 impl std::fmt::Display for Sha256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.hex)
+        f.write_str(&self.0)
     }
 }
 
@@ -133,7 +161,7 @@ impl std::ops::Deref for Sha256 {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        &self.hex
+        &self.0
     }
 }
 
@@ -145,7 +173,7 @@ impl FromStr for Sha256 {
         if hex.len() != 64 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
             return Err(ModelError::InvalidSha256(hex))
         }
-        Ok(Sha256{ hex })
+        Ok(Sha256(hex))
     }
 }
 
@@ -170,7 +198,7 @@ pub fn random_hex<R: rand::prelude::Rng + ?Sized>(rng: &mut R, size: usize) -> S
 #[cfg(feature = "rand")]
 impl rand::distr::Distribution<Sha256> for rand::distr::StandardUniform {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> Sha256 {
-        Sha256{hex: random_hex(rng, 64) }
+        Sha256(random_hex(rng, 64))
     }
 }
 

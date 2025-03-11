@@ -86,7 +86,6 @@ async fn sample_identification() {
             if !file_name.ends_with(".cart") {
                 continue
             }
-            println!("");
             println!("{type_string}  {file_name}");
             if type_string == "text/rdp" || type_string == "text/csv" {
                 failures.push((type_string.clone(), None));

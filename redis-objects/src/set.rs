@@ -1,5 +1,5 @@
+//! Storing collections of unique objects in redis
 
-use std::i64;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ end
 return false
 "#;
 
-
+/// A collection of unique values in a redis object
 pub struct Set<T> {
     name: String,
     store: Arc<RedisObjects>,
@@ -55,25 +55,30 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
         }
     }
 
+    /// set expiry on the remote object if it has not been recently set
     async fn _conditional_expire(&self) -> Result<(), ErrorTypes> {
         if let Some(ttl) = self.ttl {
             let ctime = chrono::Utc::now().timestamp();
             let last_expire_time: i64 = self.last_expire_time.load(std::sync::atomic::Ordering::Acquire);
             if ctime > last_expire_time + (ttl / 2) {
-                retry_call!(self.store.pool, expire, &self.name, ttl)?;
+                let _: () = retry_call!(self.store.pool, expire, &self.name, ttl)?;
                 self.last_expire_time.store(ctime, std::sync::atomic::Ordering::Release);
             }
         }
         Ok(())
     }
 
+    /// Insert an item into the set. 
+    /// Return whether the item is new to the set.
     pub async fn add(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         let result = retry_call!(self.store.pool, sadd, &self.name, &data)?;
         self._conditional_expire().await?;
         Ok(result)
     }    
-    
+
+    /// Insert a batch of items to the set.
+    /// Return how many items were new to the set.
     pub async fn add_batch(&self, values: &[T]) -> Result<usize, ErrorTypes> {
         let mut data = vec![];
         for item in values {
@@ -93,15 +98,18 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
         Ok(result)
     }
 
+    /// Check if an item is in the set
     pub async fn exist(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         retry_call!(self.store.pool, sismember, &self.name, &data)
     }
 
+    /// Read the number of items in the set
     pub async fn length(&self) -> Result<u64, ErrorTypes> {
         retry_call!(self.store.pool, scard, &self.name)
     }
 
+    /// Read the entire content of the set
     pub async fn members(&self) -> Result<Vec<T>, ErrorTypes> {
         let data: Vec<Vec<u8>> = retry_call!(self.store.pool, smembers, &self.name)?;
         Ok(data.into_iter()
@@ -115,6 +123,8 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
         retry_call!(self.store.pool, srem, &self.name, &data)
     }
 
+    /// Try to remove multiple items from the set.
+    /// Return how many items were removed.
     pub async fn remove_batch(&self, values: &[T]) -> Result<usize, ErrorTypes> {
         let mut data = vec![];
         for item in values {

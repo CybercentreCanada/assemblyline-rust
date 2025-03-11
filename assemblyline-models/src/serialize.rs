@@ -1,8 +1,44 @@
 
-// pub fn from_json<'de, T: ValidatedDeserialize<'de, Arc<ClassificationParser>>>(data: &'de str, parser: &Arc<ClassificationParser>) -> Result<T, serde_json::Error> {
-//     let mut deserializer = serde_json::Deserializer::from_str(data);
-//     T::deserialize_and_validate(&mut deserializer, parser)
-// }
+use serde::de;
+use serde::Deserialize;
+
+pub fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Value<'a> {
+        Raw(bool),
+        Str(&'a str)
+    }
+
+    let value: Value = de::Deserialize::deserialize(deserializer)?;
+
+    match value {
+        Value::Raw(value) => Ok(value),
+        Value::Str(string) => Ok(string.trim().eq_ignore_ascii_case("true")),
+    }    
+}
+
+pub fn deserialize_string_or_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Value {
+        Str(String),
+        Vec(Vec<String>)
+    }
+
+    let value: Value = de::Deserialize::deserialize(deserializer)?;
+
+    match value {
+        Value::Vec(value) => Ok(value),
+        Value::Str(string) => Ok(vec![string]),
+    }    
+}
 
 
 #[cfg(test)]
