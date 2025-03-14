@@ -64,10 +64,12 @@ fn get_samples_location() -> Option<String> {
 
 #[tokio::test]
 async fn sample_identification() {
+    let _ = env_logger::builder().filter_level(log::LevelFilter::Debug).is_test(true).try_init();
     let identify = super::Identify::new_without_cache().await.unwrap();
 
     let mut directories = vec![(String::new(), PathBuf::from(get_samples_location().unwrap()))];
     let mut failures  = vec![];
+    let mut counter = 0;
 
     while let Some((type_string, dir)) = directories.pop() {
         let mut cursor = tokio::fs::read_dir(&Path::new(&dir)).await.unwrap();
@@ -86,11 +88,9 @@ async fn sample_identification() {
             if !file_name.ends_with(".cart") {
                 continue
             }
-            println!("{type_string}  {file_name}");
-            if type_string == "text/rdp" || type_string == "text/csv" {
-                failures.push((type_string.clone(), None));
-                continue
-            }
+            println!("");
+            println!("{counter}  {type_string}  {file_name}");
+            counter += 1;
 
             let temp = tokio::task::spawn_blocking(move || {
                 let istream = std::fs::OpenOptions::new().read(true).open(file.path()).unwrap();
@@ -101,15 +101,19 @@ async fn sample_identification() {
 
 
             let ident = identify.fileinfo(temp.path().to_path_buf(), false, false, false).await.unwrap();
-            // assert_eq!(type_string, ident.file_type);
-            // println!("{type_string}  {}", ident.file_type);
+
+            println!("{type_string}  {}", ident.file_type);
             if ident.file_type != type_string {
-                failures.push((type_string.clone(), Some(ident)));
+                failures.push((file_name, type_string.clone(), ident));
             }
         }
     }
 
-    assert!(failures.is_empty(), "{} {failures:?}", failures.len());
+    for (file_name, expected_type, ident) in &failures {
+        println!("{file_name} expected {expected_type} got {}", ident.file_type);
+    }
+
+    assert!(failures.is_empty());
 
     //     @pytest.mark.parametrize("sample", Path(SAMPLES_LOCATION).rglob("*.cart"), ids=get_ids, indirect=True)
 //     def test_identify_samples(sample):

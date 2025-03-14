@@ -12,8 +12,12 @@ use anyhow::{Context, Result};
 use assemblyline_models::datastore::file::URIInfo;
 use assemblyline_models::{SSDeepHash, Sha1, Sha256, MD5};
 use digests::{get_digests_for_file_blocking, Digests, DEFAULT_BLOCKSIZE};
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
+use pyo3::ffi::c_str;
+use pyo3::intern;
+use pyo3::types::{IntoPyDict, PyAnyMethods};
 use redis_objects::RedisObjects;
 use serde::Serialize;
 use tokio::sync::mpsc;
@@ -69,6 +73,18 @@ mod test;
 const SYSTEM_DEFAULT_MAGIC: &str = "/usr/share/file/magic.mgc";
 const UNKNOWN: &str = "unknown";
 const TEXT_PLAIN: &str = "text/plain";
+const MSOFFCRYPTO_SRC: &std::ffi::CStr = c_str!(r#"
+import msoffcrypto
+from msoffcrypto.exceptions import FileFormatError
+file_type = None
+try:
+    msoffcrypto_obj = msoffcrypto.OfficeFile(open(path, "rb"))
+    if msoffcrypto_obj and msoffcrypto_obj.is_encrypted():
+        file_type = "document/office/passwordprotected"
+except FileFormatError:
+    pass
+"#);
+
 
 /// An incomplete version of the File object stored in the datastore produced by identify.
 /// Non-observed information like classification/viewcount etc are not here.
@@ -462,7 +478,6 @@ impl Identify {
         }
 
         // First lets try to find any custom types
-        println!("{labels:?}");
         for label in &labels {
             let label = dotdump(label);
             if let Some(item) = label.strip_prefix("custom: ") {
@@ -497,7 +512,6 @@ impl Identify {
                 }
             }
         }
-        println!("AAAA  {file_type} {mimes:?} {labels:?}");
 
         // As a third priority try matching the magic_patterns
         if file_type == UNKNOWN {
@@ -582,7 +596,6 @@ impl Identify {
     }
 
     fn yara_ident(&self, path: &Path, info: &FileIdentity) -> Result<Option<String>> {
-        println!("yara_ident");
         // externals = {k: v or "" for k, v in info.items() if k in self.yara_default_externals}
         // set up the parameters for the yara scan
         let yara = self.yara_rules.lock();
@@ -600,7 +613,7 @@ impl Identify {
                 return Ok(None)
             }
         };
-        println!("matches: {}", scan_matches.len());
+        debug!("yara matches: {:?}", scan_matches.iter().map(|rule| rule.identifier).collect_vec());
 
         // matches.sort(key=lambda x: x.meta.get("score", 0), reverse=True)
         scan_matches.sort_by_key(|rule| {
@@ -656,9 +669,8 @@ impl Identify {
                 data
             };
 
-            println!("type: {}", data.file_type);
-            println!("mime: {:?}", data.mime);
-            println!("magic: {}", data.magic);
+            debug!("mime: {:?}", data.mime);
+            debug!("magic: {}", data.magic);
 
             // Check if file empty
             if data.size == 0 {
@@ -685,7 +697,7 @@ impl Identify {
                 let mime = data.mime.clone().unwrap_or_default();
                 // We do not trust magic/mimetype's CSV identification, so we test it first
                 if data.magic == "CSV text" || ["text/csv", "application/csv"].contains(&mime.as_str()) {
-                    todo!()
+                    error!("csv testing not implemented");
                     // with open(path, newline='') as csvfile:
                     //     try:
                     //         # Try to read the file as a normal csv without special sniffed dialect
@@ -711,11 +723,9 @@ impl Identify {
                 }
     
                 if data.file_type == TEXT_PLAIN {
-                    println!("json parse");
                     // Check if the file is a misidentified json first before running the yara rules
                     let body = std::fs::OpenOptions::new().read(true).open(&path)?;
                     if serde_json::from_reader::<_, serde_json::Value>(&body).is_ok() {
-                        println!("json parse OK");
                         data.file_type = "text/json".to_string();
                         // Final type identified, shortcut further processing
                         return Ok(data)
@@ -743,7 +753,22 @@ impl Identify {
                 "document/office/powerpoint",
                 "document/office/unknown",
             ].contains(&data.file_type.as_str()) {
-                todo!()
+                let output = pyo3::Python::with_gil(|py| {
+                    let locals = [("path", &path)].into_py_dict(py)?;
+                    py.run(MSOFFCRYPTO_SRC, None, Some(&locals))?;
+                    let value = locals.get_item(intern!(py, "file_type"))?;       
+                    value.extract::<Option<String>>()
+                });
+
+                match output {
+                    Ok(Some(new_type)) => {
+                        data.file_type = new_type;
+                    },
+                    Ok(None) => {},
+                    Err(error) => {
+                        warn!("Could not process file in msoffcrypto: {error}");
+                    },
+                }
                 // try:
                 //     msoffcrypto_obj = msoffcrypto.OfficeFile(open(path, "rb"))
                 //     if msoffcrypto_obj and msoffcrypto_obj.is_encrypted():

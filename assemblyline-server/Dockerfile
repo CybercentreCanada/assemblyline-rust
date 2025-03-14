@@ -1,7 +1,7 @@
-FROM rust:1.84.1-bookworm AS builder
+FROM rust:1.85.0-bookworm AS builder
 
 # Add more build tools
-RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev
+RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev libpython3-dev
 
 # Copy in the source to build
 WORKDIR /usr/src/
@@ -46,6 +46,11 @@ RUN cargo build --bin assemblyline-server --release --target-dir /out/
 RUN test -f "/out/release/assemblyline-server"
 RUN ls -lah /out 
 
+# Download python packages we need
+FROM python:3.11 AS pybuilder
+RUN pip install --target /packages msoffcrypto-tool
+
+
 # Start over with an empty image
 FROM debian:bookworm-slim
 
@@ -53,6 +58,10 @@ FROM debian:bookworm-slim
 # RUN apt-get update && apt-get install -yy libssl1.1 && rm -rf /var/lib/apt/lists/*
 # (Already installed on this base image)
 RUN apt-get update && apt-get install -yy ca-certificates libmagic1 && rm -rf /var/lib/apt/lists/*
+
+# copy in python packages from container that downloaded them
+COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/
+ENV PYTHONPATH=/usr/local/lib/python3/dist-packages/
 
 # lock root
 RUN passwd -l root
