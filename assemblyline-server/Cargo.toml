@@ -28,7 +28,7 @@ uuid = "1.10"
 async-trait = "0.1"
 urlencoding = "2.1"
 
-zip = "2.2"
+zip = "2.3"
 cart_container = "1.0"
 
 yara = { version = "0.30", features = ["serde", "vendored"] }
