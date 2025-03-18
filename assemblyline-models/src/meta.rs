@@ -350,7 +350,7 @@ impl Mappings {
                 return Ok(())
             },
             
-            Kind::Aliased {name: name_, kind } if *name_ == "Wildcard" => {
+            Kind::Aliased {name: name_, kind: _ } if *name_ == "Wildcard" => {
                 self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
                     path_match: Some(name.to_owned()),
                     mapping: FieldMapping{
