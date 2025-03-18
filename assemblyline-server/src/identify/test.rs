@@ -88,8 +88,7 @@ async fn sample_identification() {
             if !file_name.ends_with(".cart") {
                 continue
             }
-            println!("");
-            println!("{counter}  {type_string}  {file_name}");
+            println!("\n{counter}  {type_string}  {file_name}");
             counter += 1;
 
             let temp = tokio::task::spawn_blocking(move || {

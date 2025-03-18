@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
-use assemblyline_models::meta::{build_mapping, build_mapping_inner, flatten_fields, FieldMapping};
+use assemblyline_models::meta::{build_mapping_inner, flatten_fields, FieldMapping};
 use assemblyline_models::{ElasticMeta, JsonMap, Readable};
 use itertools::Itertools;
 use log::{debug, error, warn};
@@ -120,7 +120,7 @@ impl<T: CollectionType> Collection<T> {
     /// Run a section of code with a write block in place
     async fn with_write_block(&self, index: &str, callback: impl AsyncFnOnce() -> Result<()>) -> Result<()> {
         // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_block_settings)
-        let settings_request = Request::put_index_settings(&self.database.host, &index)?;
+        let settings_request = Request::put_index_settings(&self.database.host, index)?;
         self.database.make_request_json(&mut 0, &settings_request, &json!({"index.blocks.write": true})).await.context("create write block")?;
 
         let result = callback().await;

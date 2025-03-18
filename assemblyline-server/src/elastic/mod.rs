@@ -1,6 +1,5 @@
 
-use std::borrow::Cow;
-use std::collections::HashMap;
+
 use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -58,7 +57,7 @@ pub enum Version {
 const ALT_ELASTICSEARCH_USERS: &[&str] = &["plumber"];
 
 /// Methods supported for copying indices
-enum CopyMethod {
+pub enum CopyMethod {
     /// Copy the index by cloning it
     Clone,
 }

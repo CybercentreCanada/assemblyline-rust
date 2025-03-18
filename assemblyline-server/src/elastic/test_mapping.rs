@@ -13,10 +13,8 @@ use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
 use crate::elastic::collection::{Collection, FieldInformation};
-use crate::elastic::Elastic;
 use crate::{get_datastore_ca, get_datastore_verify};
 
-use super::collection::CollectionType;
 use super::ElasticHelper;
 
 async fn build_elastic_helper() -> ElasticHelper {
@@ -48,8 +46,8 @@ struct OdmTestMapping2 {
     pub swapped_number_field: i64,
 }
 
-impl Readable for OdmTestMapping1 {fn set_from_archive(&mut self, from_archive: bool) {}}
-impl Readable for OdmTestMapping2 {fn set_from_archive(&mut self, from_archive: bool) {}}
+impl Readable for OdmTestMapping1 {fn set_from_archive(&mut self, _from_archive: bool) {}}
+impl Readable for OdmTestMapping2 {fn set_from_archive(&mut self, _from_archive: bool) {}}
 
 /// Test that the example models produce the expected mapping types
 #[test]
@@ -139,7 +137,7 @@ async fn test_metadata_indexing() {
         #[metadata(copyto="__text__")]
         pub metadata: HashMap<String, Wildcard>,
     }
-    impl Readable for TestMapping {fn set_from_archive(&mut self, from_archive: bool) {}}
+    impl Readable for TestMapping {fn set_from_archive(&mut self, _from_archive: bool) {}}
 
     // Clean up from any previous runs
     let collection =  Collection::<TestMapping>::new(connection.clone(), "test_metadata_indexing".to_string(), None, "".to_string(), false).await.unwrap();
@@ -160,7 +158,7 @@ async fn test_metadata_indexing() {
     fields.remove("id");
 
     assert_eq!(fields.len(), 4);
-    for (field_name, field) in fields {
+    for (_field_name, field) in fields {
         assert_eq!(field.mapping, "wildcard");
         assert!(field.indexed);
         assert!(field.default);

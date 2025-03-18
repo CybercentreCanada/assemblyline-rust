@@ -31,7 +31,7 @@ urlencoding = "2.1"
 zip = "2.2"
 cart_container = "1.0"
 
-yara = { version = "0.28", features = ["serde", "vendored"] }
+yara = { version = "0.30", features = ["serde", "vendored"] }
 magic = "0.16"
 
 # Core framework

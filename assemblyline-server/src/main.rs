@@ -15,7 +15,6 @@
     dead_code 
 )]
 
-use std::time::Duration;
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::{Context, Result};
@@ -422,7 +421,7 @@ impl Drop for TestGuard {
 
             let elastic = self.elastic.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(std::time::Duration::from_secs(1));
                 let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
                 runtime.block_on(async move {
                     if let Err(err) = elastic.wipe_all().await {
