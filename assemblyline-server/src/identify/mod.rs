@@ -298,6 +298,10 @@ impl Identify {
     async fn _load_magic_file(cache: &Option<CacheStore>) -> Result<(Magic, Magic)> {
         // make sure the default magic file is available
         let magic_default = std::include_bytes!("./default.magic");
+        if magic_default.is_empty() {
+            return Err(anyhow::anyhow!("Identify magic rules default didn't pack."))
+        }
+
         let magic_file = tempfile::NamedTempFile::new()?;
         tokio::fs::write(magic_file.path(), magic_default).await?;
         let system_default: PathBuf = SYSTEM_DEFAULT_MAGIC.parse()?;
@@ -374,7 +378,9 @@ impl Identify {
         }
 
         // yara_rules = yara.compile(filepaths={"default": self.yara_file}, externals=self.yara_default_externals)
-        Ok(compiler.compile_rules()?)
+        let rules = compiler.compile_rules()?;
+        debug!("Loaded {} yara rules", rules.get_rules().len());
+        Ok(rules)
     }
 
     async fn load_yara_file(&self) -> Result<()> {
@@ -604,15 +610,17 @@ impl Identify {
         scanner.define_variable("mime", info.mime.as_deref().unwrap_or(""))?;
         scanner.define_variable("magic", info.magic.as_str())?;
         scanner.define_variable("type", info.file_type.as_str())?;
+        scanner.set_timeout(60);
 
         // matches = yara_rules.match(path, externals=externals, fast=True)
-        let mut scan_matches = match yara.scan_file(path, 60) {
+        let mut scan_matches = match scanner.scan_file(path) {
             Ok(scan_matches) => scan_matches,
             Err(err) => {
                 warn!("Yara file identifier failed with error: {err}");
                 return Ok(None)
             }
         };
+
         debug!("yara matches: {:?}", scan_matches.iter().map(|rule| rule.identifier).collect_vec());
 
         // matches.sort(key=lambda x: x.meta.get("score", 0), reverse=True)
