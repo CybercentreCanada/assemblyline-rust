@@ -52,7 +52,6 @@ pub struct ServiceAuthImpl<E> {
     endpoint: E,
 }
 
-#[async_trait::async_trait]
 impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
     type Output = Response;
 
@@ -106,6 +105,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ClientInfo {
     pub client_id: String,
     pub service_name: String,

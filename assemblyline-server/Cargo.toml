@@ -6,21 +6,21 @@ edition = "2021"
 [dependencies]
 # Logging
 log = "0.4"
-flexi_logger = { version = "0.28", features=["syslog_writer"] }
-gethostname = "0.4"
+flexi_logger = { version = "0.29", features=["syslog_writer"] }
+gethostname = "1.0"
 local-ip-address = "0.6"
 
 # Utilities
-chrono = "*"
-tempfile = "*"
-rand = "*"
+chrono = "0.4"
+tempfile = "3.19"
+rand = "0.9"
 itertools = "*"
 anyhow = "*"
 thiserror = "*"
 bytes = "*"
 parking_lot = { version = "0.12", features = [] }
-strum = { version = "0.26", features = ["derive"] }
-strum_macros = "0.26"
+strum = { version = "0.27", features = ["derive"] }
+# strum_macros = "0.27"
 environment_template = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 hex = "*"
@@ -37,11 +37,11 @@ magic = "0.16"
 # Core framework
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-futures = "*"
+futures = "0.3"
 
 # Network libraries
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
-poem = { version = "1.3", features = ["websocket", "openssl-tls", "anyhow", "multipart"] }
+poem = { version = "3.1", features = ["websocket", "openssl-tls", "anyhow", "multipart"] }
 url = "*"
 tokio-tungstenite = "0.20"
 # http = "*"
@@ -68,10 +68,10 @@ assemblyline-markings = { version = "0.1.10", path = "../assemblyline-markings" 
 assemblyline-filestore = { version = "0.1", path = "../assemblyline-filestore" }
 assemblyline-models = { version = "0.3", path = "../assemblyline-models", features = ["rand"] }
 struct-metadata = { version = "1.3", features = ["serde_json"] }
-serde = { version = "*", features = ["derive", "rc"] }
-serde_json = "*"
-serde_yaml = "*"
-serde_with = "*"
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+serde_with = "3.12"
 
 # data parsing
 nom = "7"

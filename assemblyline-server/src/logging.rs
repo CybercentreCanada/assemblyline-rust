@@ -33,7 +33,6 @@ pub struct LoggerMiddlewareImpl<E> {
 }
 
 
-#[poem::async_trait]
 impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
     type Output = E::Output;
 
@@ -61,7 +60,7 @@ static LOCAL_IP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     use flexi_logger::*;
-    use flexi_logger::writers::{FileLogWriter, Syslog, SyslogWriter};
+    use flexi_logger::writers::{FileLogWriter, SyslogConnection, SyslogWriter};
     
     // make sure we only init logging once
     {
@@ -158,16 +157,24 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
 
     if config.logging.log_to_syslog {
         let connection = match config.logging.syslog_transport {
-            SyslogTransport::Udp => Syslog::try_udp(("0.0.0.0", 0), (&config.logging.syslog_host, config.logging.syslog_port))?,
-            SyslogTransport::Tcp => Syslog::try_tcp( (config.logging.syslog_host.as_str(), config.logging.syslog_port))?,
+            SyslogTransport::Udp => SyslogConnection::try_udp(("0.0.0.0", 0), (&config.logging.syslog_host, config.logging.syslog_port))?,
+            SyslogTransport::Tcp => SyslogConnection::try_tcp( (config.logging.syslog_host.as_str(), config.logging.syslog_port))?,
         };
-        builder = builder.add_writer("Syslog", SyslogWriter::try_new(
+
+        builder = builder.add_writer("Syslog", SyslogWriter::builder(
+            connection,
+            writers::SyslogLineHeader::Rfc5424("assemblyline".to_owned()),
             writers::SyslogFacility::SystemDaemons,
-            None,
-            log_level.to_level_filter(),
-            "assemblyline".to_owned(),
-            connection
-        )?);
+        ).max_log_level(log_level.to_level_filter()).build()?
+        );
+
+        // builder = builder.add_writer("Syslog", SyslogWriter::try_new(
+        //     writers::SyslogFacility::SystemDaemons,
+        //     None,
+        //     log_level.to_level_filter(),
+        //     "assemblyline".to_owned(),
+        //     connection
+        // )?);
     }
 
     Ok(builder.start()?)
