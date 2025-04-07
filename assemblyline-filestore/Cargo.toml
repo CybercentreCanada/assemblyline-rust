@@ -2,6 +2,10 @@
 name = "assemblyline-filestore"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
+description = """A blob storage layer for the Assemblyline malware analysis platform."""
 
 [dependencies]
 # framework
@@ -21,7 +25,7 @@ percent-encoding = "2.3"
 
 # Error handling utilities
 anyhow = "1.0"
-thiserror = "*"
+thiserror = "2.0"
 
 # Azure cloud service libraries
 azure_core = { version = "0.21", features = ["tokio-fs"]}

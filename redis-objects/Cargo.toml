@@ -5,12 +5,12 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
 homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
-description = """Object oriented wrapper around redis client."""
+description = """Object oriented wrapper around redis client for the Assemblyline malware analysis platform."""
 
 [dependencies]
 # Async Runtime 
 tokio = { version = "1", features = ["full"] }
-futures = "*"
+futures = "0.3"
 
 # Serialization
 serde = { version = "1.0", features = ["derive", "std"] }
