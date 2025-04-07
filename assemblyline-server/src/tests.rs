@@ -89,6 +89,7 @@ struct MockService {
     // self.queue = get_service_queue(name, redis)
 
     hits: Mutex<HashMap<String, u64>>,
+    finish: Mutex<HashMap<String, u64>>,
     drops: Mutex<HashMap<String, u64>>,
 
     running: Arc<Flag>,
@@ -96,6 +97,7 @@ struct MockService {
     stopped: Flag,
     dispatch_client: DispatchClient,
     signal: Arc<Notify>,
+    local_signal: Notify,
 }
 
 impl MockService {
@@ -115,8 +117,10 @@ impl MockService {
             filestore: core.filestore.clone(),
             dispatch_client: DispatchClient::new_from_core(core).await.unwrap(),
             hits: Mutex::new(Default::default()),
+            finish: Mutex::new(Default::default()),
             drops: Mutex::new(Default::default()),
             signal,
+            local_signal: Notify::new(),
         })
     }
 
@@ -158,6 +162,12 @@ impl MockService {
             if let Some(lock) = instructions.get("lock") {
                 if let Some(lock) = lock.as_i64() {
                     _ = tokio::time::timeout(Duration::from_secs(lock as u64), self.signal.notified()).await;
+                }
+            }
+
+            if let Some(lock) = instructions.get("local_lock") {
+                if let Some(lock) = lock.as_i64() {
+                    _ = tokio::time::timeout(Duration::from_secs(lock as u64), self.local_signal.notified()).await;
                 }
             }
 
@@ -260,7 +270,9 @@ impl MockService {
             };
 
             debug!("result: {result_key} -> {result:?}");
+            let sha = task.fileinfo.sha256.to_string();
             self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None).await.unwrap();
+            *self.finish.lock().entry(sha).or_default() += 1;
         }
         self.stopped.set(true);
     }
@@ -272,7 +284,7 @@ fn test_services() -> HashMap<String, Service> {
     return [
         ("pre", dummy_service("pre", "pre", None, None, None, Some(true))),
         ("core-a", dummy_service("core-a", "core", None, None, None, None)),
-        ("core-b", dummy_service("core-b", "core", None, None, None, None)),
+        ("core-b", dummy_service("core-b", "core", None, None, None, Some(true))),
         ("finish", dummy_service("finish", "post", None, None, None, None)),
     ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
 }
@@ -1440,6 +1452,109 @@ async fn test_temp_data_monitoring() {
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 
+    let mut partial_results = 0;
+    for res in sub.results {
+        info!("loading result: {res}");
+        let result = context.core.datastore.get_single_result(&res, 
+            context.core.config.submission.emptyresult_dtl.into(),
+            &context.core.classification_parser).await.unwrap().unwrap();
+        if result.partial {
+            partial_results += 1;
+        }
+    }
+    assert_eq!(partial_results, 0, "partial_results");
+}
+
+// MARK: final-partial
+#[tokio::test(flavor = "multi_thread")]
+async fn test_final_partial() {
+    let context = setup().await;
+
+    // This test was written to cover an error where a partial result produced as the final
+    // result of a submission would not trigger dispatching when it should due to data
+    // that was produced while it was running.
+
+    // Both services run at the same time, but one requires info from the other.
+    // We lock down the timing of the service completion so that:
+    // a) both run at the same time so that in its first run core-b does not have the
+    //    temp data it wants and produces a partial result.
+    // b) core-a finishes before core-b adding the temporary data to the dispatcher
+    // c) core-b finishes and should trigger a rerun with the data to produce a full result
+    let (sha, size) = ready_body(&context.core, json!({
+        "core-a": {"local_lock": 10, "temporary_data": {"passwords": ["test_temp_data_monitoring"]}},
+        "core-b": {"local_lock": 10, "partial": {"passwords": "test_temp_data_monitoring"}},
+    })).await;
+
+    let core_a = context.services.get("core-a").unwrap();
+    let core_b = context.services.get("core-b").unwrap();
+
+    context.ingest_queue.push(&MessageSubmission {
+        sid: rand::rng().random(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&["core-a", "core-b"])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("temp-final-partial".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
+
+    // Wait until both of the services have started (so service b doesn't get the temp data a produces on its first run)
+    let start = std::time::Instant::now();
+    while core_a.hits.lock().get(&*sha).copied().unwrap_or_default() + core_b.hits.lock().get(&*sha).copied().unwrap_or_default() != 2 {
+        if start.elapsed() > RESPONSE_TIMEOUT {
+            panic!();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Release a
+    core_a.local_signal.notify_one();
+
+    // Let a finish so that the temporary data is added in the dispatcher
+    while core_a.finish.lock().get(&*sha).copied().unwrap_or_default() < 1 {
+        if start.elapsed() > RESPONSE_TIMEOUT {
+            panic!()
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Let b finish, it should produce a partial result then rerun right away
+    core_b.local_signal.notify_one();
+    while core_b.finish.lock().get(&*sha).copied().unwrap_or_default() < 1 {
+        if start.elapsed() > RESPONSE_TIMEOUT {
+            panic!()
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    core_b.local_signal.notify_one();
+
+    let notification_queue = context.core.notification_queue("temp-final-partial");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+
+    // The submission should produce no errors and two results
+    assert_eq!(sub.errors.len(), 0);
+    assert_eq!(sub.results.len(), 2);
+
+    // b service should have run twice to produce the results
+    assert!(core_b.hits.lock().get(&*sha).copied().unwrap_or_default() >= 2);
+
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
+    // Verify thath there are no partial results in the final submission
     let mut partial_results = 0;
     for res in sub.results {
         info!("loading result: {res}");

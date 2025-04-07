@@ -430,14 +430,17 @@ impl SubmissionTask {
     }
 
     /// Note that a partial result has been recieved. If a dispatch was requested process that now.
-    fn partial_result(&mut self, sha256: Sha256, service_name: String) {
+    fn partial_result(&mut self, sha256: Sha256, service_name: String) -> bool {
         let monitoring_entry = match self.monitoring.get(&(sha256.clone(), service_name.clone())) {
             Some(entry) => entry,
-            None => return
+            None => return false
         };
 
         if monitoring_entry.dispatch_needed {
-            self.redispatch_service(sha256, service_name)
+            self.redispatch_service(sha256, service_name);
+            true
+        } else {
+            false
         }
     }
 
@@ -2247,9 +2250,12 @@ impl Dispatcher {
         } = data;
 
         // check for/clear old partial results
+        let mut force_redispatch = HashSet::new();
         if summary.partial {
             info!("[{sid}/{sha256}] {service_name} returned partial results");
-            task.partial_result(sha256.clone(), service_name.clone());
+            if task.partial_result(sha256.clone(), service_name.clone()) {
+                force_redispatch.insert(sha256.clone());
+            }
         } else {
             task.clear_monitoring_entry(sha256.clone(), service_name.clone());
         }
@@ -2314,7 +2320,6 @@ impl Dispatcher {
             }
         }
 
-        let mut force_redispatch = HashSet::new();
         for key in changed_keys {
             for hash in task.temporary_data_changed(&key) {
                 force_redispatch.insert(hash);
@@ -2327,7 +2332,9 @@ impl Dispatcher {
         //     summary.children = [(c, 'EXTRACTED') for c in old_children]
 
         // Record the result as a summary
-        task.service_results.insert(key, summary.clone());
+        if force_redispatch.is_empty() {
+            task.service_results.insert(key, summary.clone());
+        }
         task.register_children(&sha256, summary.children.iter().map(|row| row.0.clone()));
 
         // Set the depth of all extracted files, even if we won't be processing them

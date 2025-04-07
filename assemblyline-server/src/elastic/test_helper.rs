@@ -1,8 +1,13 @@
 use std::sync::Arc;
 
+use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_markings::config::ready_classification;
 use assemblyline_models::datastore::{File, Service};
+use assemblyline_models::Sha256;
 use log::debug;
 use rand::Rng;
+
+use crate::elastic::create_empty_result_from_key;
 
 use super::Elastic;
 
@@ -225,28 +230,37 @@ async fn test_save_or_freshen_file() {
 //     assert stats['cluster']['status'] in ["green", "yellow"]
 
 
-// def test_create_empty_result(ds: AssemblylineDatastore):
-//     cl_engine = forge.get_classification()
+#[tokio::test]
+async fn test_create_empty_result() {
+    let cl_engine = ClassificationParser::new(ready_classification(None).unwrap()).unwrap();
 
-//     # Set expected values
-//     classification = cl_engine.normalize_classification(cl_engine.UNRESTRICTED)
-//     svc_name = "TEST"
-//     svc_version = "4"
-//     sha256 = "a123" * 16
+    // Set expected values
+    let classification = cl_engine.unrestricted();
+    let svc_name = "TEST";
+    let svc_version = "4";
+    let sha256: Sha256 = "a123".repeat(16).parse().unwrap();
 
-//     # Build result key
-//     result_key = Result.help_build_key(sha256=sha256, service_name=svc_name, service_version=svc_version, is_empty=True)
+    // Build result key
+    let result_key = assemblyline_models::datastore::Result::help_build_key(
+        &sha256, 
+        svc_name, 
+        svc_version, 
+        true,
+        false,
+        None,
+        None
+    ).unwrap();
 
-//     # Create an empty result from the key
-//     empty_result = ds.create_empty_result_from_key(result_key, cl_engine=cl_engine)
+    // Create an empty result from the key
+    let empty_result = create_empty_result_from_key(&result_key, 5, &cl_engine).unwrap();
 
-//     # Test the empty result
-//     assert empty_result.is_empty()
-//     assert empty_result.response.service_name == svc_name
-//     assert empty_result.response.service_version == svc_version
-//     assert empty_result.sha256 == sha256
-//     assert empty_result.classification.long() == classification
-
+    // Test the empty result
+    assert!(empty_result.is_empty());
+    assert_eq!(empty_result.response.service_name, svc_name);
+    assert_eq!(empty_result.response.service_version, svc_version);
+    assert_eq!(empty_result.sha256, sha256);
+    assert_eq!(empty_result.classification.as_str(), classification);
+}
 
 // DELETE_TREE_PARAMS = [
 //     (True, "bulk"),
