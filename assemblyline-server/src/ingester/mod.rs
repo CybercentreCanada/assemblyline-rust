@@ -17,7 +17,7 @@ use assemblyline_models::config::Priority;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::{ExpandingClassification, Sha256, Sid, UpperString};
+use assemblyline_models::{ExpandingClassification, Sha256, Sid, types::UpperString};
 use assemblyline_models::datastore::alert::ExtendedScanValues;
 use assemblyline_models::messages::submission::{Submission as MessageSubmission, SubmissionMessage};
 use assemblyline_models::datastore::submission::Submission as DatabaseSubmission;
@@ -755,7 +755,7 @@ impl Ingester {
         let sha256 = sub.files[0].sha256.clone();
         let ingest_id = match sub.metadata.get("ingest_id") {
             Some(id) => id.to_owned(),
-            None => serde_json::Value::String("unknown".to_owned()),
+            None => "unknown".into(),
         };
         let scan_key = match sub.scan_key {
             Some(key) => key,

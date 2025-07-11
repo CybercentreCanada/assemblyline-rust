@@ -8,7 +8,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
-use assemblyline_models::{ClassificationString, JsonMap, Sha256, Sid, UpperString};
+use assemblyline_models::{ClassificationString, JsonMap, Sha256, Sid, types::UpperString};
 use itertools::Itertools;
 use rand::Rng;
 use serde_json::json;
@@ -195,7 +195,7 @@ async fn test_ingest_simple() {
     let task = ingester.unique_queue.blocking_pop(std::time::Duration::from_secs(2), false).await.unwrap().unwrap();
     assert_eq!(task.submission.files[0].sha256.to_string(), uniform_string('0', 64)); // Only the valid sha passed through
     assert!(!task.submission.metadata.contains_key("tobig")); // The bad metadata was stripped
-    assert_eq!(task.submission.metadata.get("small"), Some(&json!("100"))); // The valid metadata is unchanged
+    assert_eq!(task.submission.metadata.get("small"), Some(&"100".into())); // The valid metadata is unchanged
     assert_eq!(task.submission.params.submitter, "user");
     assert_eq!(task.submission.params.groups, custom_user_groups.iter().map(|v| UpperString::from(*v)).collect_vec());
 

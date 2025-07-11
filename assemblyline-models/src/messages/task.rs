@@ -5,6 +5,7 @@ use rand::Rng;
 use serde::{Serialize, Deserialize};
 
 use crate::random_word;
+use crate::types::Wildcard;
 use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInfo, config::ServiceSafelist};
 
 
@@ -66,7 +67,7 @@ pub struct Task {
     /// Submission ID
     pub sid: Sid,
     /// Metadata associated to the submission
-    pub metadata: HashMap<String, serde_json::Value>,
+    pub metadata: HashMap<String, Wildcard>,
     /// Minimum classification of the file being scanned
     pub min_classification: String,
     /// File info block

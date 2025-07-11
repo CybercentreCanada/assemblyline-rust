@@ -280,7 +280,7 @@ async fn test_task_dispatch() {
     let mut read_task = body.api_response.unwrap();
     let read_worker = read_task.metadata.remove("worker__").unwrap();
     assert_eq!(read_task, task);
-    assert_eq!(read_worker, container_id());
+    assert_eq!(*read_worker, container_id());
 
     // there should not be any hanging queue content
     assert_eq!(queue.length().await.unwrap(), 0);

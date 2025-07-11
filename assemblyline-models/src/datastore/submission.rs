@@ -12,6 +12,22 @@ use crate::types::Wildcard;
 use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, types::UpperString};
 
 
+
+/// A logging event describing the processing of a submission
+#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[metadata_type(ElasticMeta)]
+#[metadata(index=false, store=false)]
+pub struct TraceEvent {
+    #[serde(default="default_now")]
+    pub timestamp: DateTime<Utc>,
+    pub event_type: String,
+    pub service: Option<String>,
+    pub file: Option<Sha256>,
+    pub message: Option<String>,
+}
+
+fn default_now() -> DateTime<Utc> { Utc::now() }
+
 /// Model of Submission
 #[derive(Serialize, Deserialize, Debug, Described, Clone)]
 #[metadata_type(ElasticMeta)]
@@ -25,6 +41,10 @@ pub struct Submission {
     /// Classification of the submission
     #[serde(flatten)]
     pub classification: ExpandingClassification,
+    /// A log of events describing the processing sequence.
+    #[serde(default)]
+    #[metadata(store=false, index=false)]
+    pub tracing_events: Vec<TraceEvent>,
     /// Total number of errors in the submission
     pub error_count: i32,
     /// List of error keys
@@ -76,6 +96,7 @@ impl rand::distr::Distribution<Submission> for rand::distr::StandardUniform {
             archive_ts: None,
             archived: rng.random(),
             classification: ExpandingClassification::try_unrestricted().unwrap(),
+            tracing_events: Default::default(),
             error_count: 0,
             errors: vec![],
             expiry_ts: None,

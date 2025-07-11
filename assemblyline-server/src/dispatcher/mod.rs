@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result, anyhow};
 use assemblyline_models::config::TemporaryKeyType;
-use assemblyline_models::datastore::submission::SubmissionState;
+use assemblyline_models::datastore::submission::{SubmissionState, TraceEvent};
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{error, Service, Submission};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, FileTreeData, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
@@ -19,6 +19,7 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
+use assemblyline_models::types::Wildcard;
 use assemblyline_models::{ExpandingClassification, JsonMap, Readable, Sha256, Sid};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
@@ -512,6 +513,50 @@ impl SubmissionTask {
         // Try to get the service to run again by reseting the schedule for that service
         self.file_schedules.remove(&sha256);
     }
+
+    fn trace_event(&mut self, event_type: &str) {
+        if self.submission.params.trace {
+            self.submission.tracing_events.push(TraceEvent { 
+                event_type: event_type.to_owned(), 
+                service: None, 
+                file: None, 
+                message: None, 
+                timestamp: chrono::Utc::now()
+            })
+        }
+    }
+
+}
+
+macro_rules! option {
+    () => { None };
+    ($value:expr) => { Some($value.clone()) };
+}
+
+macro_rules! optional_format {
+    () => { None };
+    ($message:literal $(,$arg:expr)*) => { Some(format!($message $(,$arg)*)) };
+}
+
+
+macro_rules! trace_event {
+    ($task:expr, $event:expr $(,file $file:expr)? $(,service $service:expr)? $(,$message:literal $(,$arg:expr)*)?) => {
+        if $task.submission.params.trace {
+
+            let mut __file: Option<Sha256> = option!($($file)?);
+            let mut __service: Option<String> = option!($($service)?);
+            let __message = optional_format!($($message $(,$arg)*)?);
+
+
+            $task.submission.tracing_events.push(TraceEvent {
+                timestamp: chrono::Utc::now(),
+                event_type: $event.into(),
+                file: __file,
+                service: __service,
+                message: __message,
+            })
+        }
+    };
 }
 
 #[derive(Clone)]
@@ -1342,12 +1387,14 @@ impl Dispatcher {
 
         if !self.active_submissions.exists(&sid).await? {
             info!("[{sid}] New submission received");
+            task.trace_event("submission_start");
             self.active_submissions.add(&sid, &SubmissionDispatchMessage::simple(task.submission.clone(),  task.completed_queue.clone())).await?;
 
             // Write all new submissions to the traffic queue
             self.traffic_queue.publish(&SubmissionMessage::started((&task.submission).into())).await?;
 
         } else {
+            trace_event!(task, "submission_start", "Received a pre-existing submission");
             warn!("[{sid}] Received a pre-existing submission, check if it is complete");
         }
 
@@ -1464,9 +1511,14 @@ impl Dispatcher {
                     if start.elapsed() > *duration {
                         let key = (sha.clone(), service_name.clone());
                         service_timeouts.push(key.clone());
+
+                        let log = format!("Service timeout at {} on worker {worker}", chrono::Utc::now());
+                        trace_event!(task, "service_timeout", file sha, service service_name, "{log}");
                         let logs = task.service_logs.entry(key).or_default();
-                        logs.push(format!("Service timeout at {} on worker {worker}", chrono::Utc::now()));
+                        logs.push(log);
+
                         self.timeout_service(task, sha, service_name, worker).await?;
+
                     }
                 }
 
@@ -1495,6 +1547,8 @@ impl Dispatcher {
             // process the message
             match message {
                 DispatchAction::Start(message, started) => {
+                    trace_event!(task, "service_start", file &message.sha, service &message.service_name, "{}", message.worker_id);
+
                     let finish = |message: Result<()>| {
                         started.map(|socket| socket.send(message))
                     };
@@ -1610,6 +1664,7 @@ impl Dispatcher {
         // let submission = &task.submission;
         // let params = &submission.params;
         let sid = task.submission.sid;
+        trace_event!(task, "dispatch_file", file sha256);
 
         // We are processing this file, load the file info
         let file_info = match self.get_fileinfo(task, sha256).await.context("get_fileinfo")? {
@@ -1641,7 +1696,7 @@ impl Dispatcher {
                     task.service_access_control.clone()
                 ).context("build_schedule")?;
                 let schedule_names = get_schedule_names(&schedule);
-                debug!("[{sid}::{sha256}] schedule: {:?}", schedule_names);
+                trace_event!(task, "schedule_built", file sha256, "{:?}", schedule_names);
                 task.file_schedules.insert(sha256.clone(), schedule_names.clone());
                 schedule_names
             }
@@ -1827,9 +1882,9 @@ impl Dispatcher {
                     priority: task.submission.params.priority as i32,
                     safelist_config: self.core.config.services.safelist.clone()
                 };
-                service_task.metadata.insert("dispatcher__".to_string(), serde_json::json!(self.instance_id));
-                service_task.metadata.insert("dispatcher_address__".to_string(), serde_json::json!(self.instance_address));
-                service_task.metadata.insert("task_id__".to_string(), serde_json::json!(service_task.task_id));
+                service_task.metadata.insert("dispatcher__".to_string(), self.instance_id.clone().into());
+                service_task.metadata.insert("dispatcher_address__".to_string(), self.instance_address.clone().into());
+                service_task.metadata.insert("task_id__".to_string(), service_task.task_id.to_string().into());
 
                 // Its a new task, send it to the service
                 let queue_key = service_queue.push(service_task.priority as f64, &service_task).await?;
@@ -1841,6 +1896,7 @@ impl Dispatcher {
             if !sent.is_empty() || !enqueued.is_empty() || !running.is_empty() {
                 // If we have confirmed that we are waiting, or have taken an action, log that.
                 info!("[{sid}] File {sha256} sent to: {sent:?} already in queue for: {enqueued:?} running on: {running:?}");
+                trace_event!(task, "dispatch_file_result", file sha256, "sent to: {sent:?} already in queue for: {enqueued:?} running on: {running:?}");
                 return Ok(());
             } else if !skipped.is_empty() {
                 // Not waiting for anything, and have started skipping what is left over
@@ -1858,9 +1914,11 @@ impl Dispatcher {
 
         increment!(self.counter, files_completed);
         if task.queue_keys.is_empty() && task.running_services.is_empty() {
+            trace_event!(task, "file_finished", file sha256);
             info!("[{sid}] Finished processing file '{sha256}', checking if submission complete");
             task.send_dispatch_action(DispatchAction::Check(sid));
         } else {
+            trace_event!(task, "file_finished", file sha256, "queued: {} running: {}", task.queue_keys.len(), task.running_services.len());
             info!("[{sid}] Finished processing file '{sha256}', submission incomplete (queued: {} running: {})",
                 task.queue_keys.len(), task.running_services.len())
         }
@@ -2035,13 +2093,16 @@ impl Dispatcher {
         // file isn't done yet, and hasn't been filtered by any of the previous few steps
         // poke those files.
         if !pending_files.is_empty() {
+            trace_event!(task, "submission_check", "Dispatching {pending_files:?}");
             debug!("[{sid}] Dispatching {} files: {:?}", pending_files.len(), pending_files);
             for file_hash in pending_files {
                 task.send_dispatch_action(DispatchAction::DispatchFile(sid, file_hash));
             }
         } else if !processing_files.is_empty() {
+            trace_event!(task, "submission_check", "Waiting for {processing_files:?}");
             debug!("[{sid}] Not finished waiting on {} files: {}", processing_files.len(), processing_files.len());
         } else {
+            trace_event!(task, "submission_check", "Finished");
             debug!("[{sid}] Finalizing submission.");
             // accumulate the score, submissions with no results have no score
             // max_score = max(file_scores.values()) if file_scores else 0
@@ -2079,7 +2140,7 @@ impl Dispatcher {
         let sid = submission.sid;
         // if self.tasks.pop(task.sid, None) {
 
-        let results: Vec<String> = task.service_results.values().map(|summary| summary.key.clone()).collect();
+        let results: Vec<Wildcard> = task.service_results.values().map(|summary| summary.key.clone().into()).collect();
         let mut errors: Vec<String> = task.service_errors.values().cloned().collect();
         errors.extend(task.extra_errors.clone());
 
@@ -2248,6 +2309,8 @@ impl Dispatcher {
             extracted_names,
             dynamic_recursion_bypass,
         } = data;
+
+        trace_event!(task, "process_result", file &sha256, service &service_name, "Processing result {}", summary.key);
 
         // check for/clear old partial results
         let mut force_redispatch = HashSet::new();
@@ -2473,6 +2536,8 @@ impl Dispatcher {
 
     async fn process_service_error(&self, task: &mut SubmissionTask, error_key: &str, error: error::Error) -> Result<()> {
         info!("[{}] Error from service {} on {}", task.submission.sid, error.response.service_name, error.sha256);
+        trace_event!(task, "process_error", file &error.sha256, service &error.response.service_name, "Service error {}", error_key);
+
         let key = (error.sha256.clone(), error.response.service_name);
         if matches!(error.response.status, error::Status::FailNonrecoverable) {
             task.service_logs.remove(&key);

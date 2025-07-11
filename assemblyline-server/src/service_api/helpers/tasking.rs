@@ -11,6 +11,7 @@ use assemblyline_models::datastore::tagging::flatten_tags;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
 use assemblyline_models::messages::task::Task;
+use assemblyline_models::types::strings::Keyword;
 use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_filestore::FileStore;
 use chrono::{TimeDelta, Utc};
@@ -853,6 +854,7 @@ impl TaskingClient {
                 }
             }
 
+
             sections.push(assemblyline_models::datastore::result::Section {
                 auto_collapse: section.auto_collapse,
                 body: section.body,
@@ -862,7 +864,7 @@ impl TaskingClient {
                 depth: section.depth,
                 heuristic,
                 tags: Box::new(formatted_tags),
-                safelisted_tags: safelisted_tags.into_inner(),
+                safelisted_tags: safelisted_tags.into_inner().into_iter().map(|(k, v)|(k, v.into_iter().map(Keyword::from).collect())).collect(),
                 title_text: section.title_text,
                 promote_to: section.promote_to,
             })

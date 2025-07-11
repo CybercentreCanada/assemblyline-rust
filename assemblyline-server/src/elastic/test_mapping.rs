@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use assemblyline_models::config::Config;
 use assemblyline_models::meta::build_mapping;
-use assemblyline_models::{ElasticMeta, Readable, Wildcard};
+use assemblyline_models::{ElasticMeta, Readable, types::Wildcard};
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 

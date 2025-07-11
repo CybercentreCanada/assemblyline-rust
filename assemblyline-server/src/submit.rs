@@ -66,6 +66,7 @@ impl SubmitManager {
             max_score: 0,
             metadata: submission_obj.metadata,
             params: submission_obj.params,
+            tracing_events: vec![],
             results: vec![],
             sid: submission_obj.sid,
             state: SubmissionState::Submitted,

@@ -289,7 +289,7 @@ impl DispatchClient {
             return Ok(None)
         }
 
-        task.metadata.insert("worker__".to_string(), json!(worker_id));
+        task.metadata.insert("worker__".to_string(), worker_id.into());
 
         let url = format!("https://{}/start", task.dispatcher_address);
         let message = ServiceStartMessage {
