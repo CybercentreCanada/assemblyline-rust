@@ -8,7 +8,8 @@ use serde_json::{json, Value};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, UpperString};
+use crate::types::Wildcard;
+use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, types::UpperString};
 
 
 /// Model of Submission
@@ -40,13 +41,13 @@ pub struct Submission {
     /// Maximum score of all the files in the scan
     pub max_score: i32,
     /// Metadata associated to the submission
-    #[metadata(store=false, mapping="flattenedobject")]
-    pub metadata: HashMap<String, serde_json::Value>,
+    #[metadata(store=false, mapping="flattenedobject", copyto="__text__")]
+    pub metadata: HashMap<String, Wildcard>,
     /// Submission parameter details
     pub params: SubmissionParams,
     /// List of result keys
     #[metadata(store=false)]
-    pub results: Vec<String>,
+    pub results: Vec<Wildcard>,
     /// Submission ID
     #[metadata(copyto="__text__")]
     pub sid: Sid,
@@ -145,8 +146,6 @@ pub struct SubmissionParams {
     pub max_supplementary: i32,
     /// Priority of the scan
     pub priority: u16,
-    /// Should the submission do extra profiling?
-    pub profile: bool,
     /// Does this submission count against quota?
     pub quota_item: bool,
     /// Service selection
@@ -157,6 +156,8 @@ pub struct SubmissionParams {
     /// User who submitted the file
     #[metadata(store=true, copyto="__text__")]
     pub submitter: String,
+    /// Collect extra logging information during dispatching
+    pub trace: bool,
     /// Time, in days, to live for this submission
     pub ttl: i32,
     /// Type of submission
@@ -195,11 +196,11 @@ impl SubmissionParams {
             max_extracted: 100,
             max_supplementary: 100,
             priority: 100,
-            profile: false,
             quota_item: false,
             services: Default::default(),
             service_spec: Default::default(),
             submitter: "USER".to_owned(),
+            trace: false,
             ttl: 30,
             submission_type: "USER".to_owned(),
             initial_data: None,
@@ -325,9 +326,6 @@ pub struct ServiceSelection {
     /// List of selected services
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub selected: Vec<String>,
-    /// List of runtime excluded services
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub runtime_excluded: Vec<String>,
 }
 
 /// Submission-Relevant Times
@@ -390,7 +388,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub name: String,
     /// Size of the file in bytes
-    #[metadata(mapping="integer")]
+    #[metadata(mapping="long")]
     pub size: Option<u64>,
     /// SHA256 hash of the file
     #[metadata(copyto="__text__")]

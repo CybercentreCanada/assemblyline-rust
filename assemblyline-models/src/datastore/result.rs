@@ -16,6 +16,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
+use crate::types::strings::Keyword;
 use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256, Text};
 
 use super::tagging::Tagging;
@@ -134,8 +135,8 @@ pub struct Section {
     pub tags: Box<Tagging>,
     /// List of safelisted tags
     #[serde(default)]
-    #[metadata(store=false)]
-    pub safelisted_tags: HashMap<String, Vec<String>>,
+    #[metadata(store=false, mapping="flattenedobject")]
+    pub safelisted_tags: HashMap<String, Vec<Keyword>>,
     /// Title of the section
     #[metadata(copyto="__text__")]
     pub title_text: Text,

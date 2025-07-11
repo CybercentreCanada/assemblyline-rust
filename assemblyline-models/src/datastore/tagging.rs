@@ -7,7 +7,7 @@ use struct_metadata::Described;
 
 use crate::messages::task::TagEntry;
 use crate::types::JA4;
-use crate::{Domain, ElasticMeta, Email, JsonMap, Mac, PhoneNumber, Platform, Processor, SSDeepHash, Sha1, Sha256, UNCPath, UpperString, Uri, UriPath, MD5};
+use crate::{Domain, ElasticMeta, Email, JsonMap, Mac, PhoneNumber, Platform, Processor, SSDeepHash, Sha1, Sha256, UNCPath, types::UpperString, Uri, UriPath, MD5};
 
 
 /// Attribution Tag Model
@@ -924,6 +924,8 @@ pub struct Technique {
     pub config: Option<Vec<String>>,
     /// Cryptography
     pub crypto: Option<Vec<String>>,
+    /// Technique
+    pub exploit: Option<Vec<String>>,
     /// Keylogger
     pub keylogger: Option<Vec<String>>,
     /// Macro

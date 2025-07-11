@@ -87,6 +87,8 @@ pub struct UpdateSourceDelta {
     /// REF_UPDATE_SOURCE
     pub default_classification: Option<ClassificationString>,
     /// REF_UPDATE_SOURCE
+    pub use_managed_identity: Option<bool>,
+    /// REF_UPDATE_SOURCE
     pub git_branch: Option<String>,
     /// REF_UPDATE_SOURCE
     pub sync: Option<bool>,
@@ -96,6 +98,8 @@ pub struct UpdateSourceDelta {
     pub override_classification: Option<bool>,
     /// REF_UPDATE_SOURCE
     pub configuration: Option<HashMap<String, serde_json::Value>>,
+    /// REF_UPDATE_SOURCE
+    pub data: Option<Text>,
     /// REF_UPDATE_SOURCE
     #[metadata(mapping="integer")]
     pub update_interval: Option<NonZeroInteger>,
@@ -146,6 +150,8 @@ pub struct UpdateConfigDelta {
     pub signature_delimiter: Option<SignatureDelimiter>,
     /// REF_UPDATE_CONFIG
     pub custom_delimiter: Option<String>,
+    /// REF_UPDATE_CONFIG
+    pub default_pattern: Option<Text>,
 }
 
 #[derive(Serialize, Deserialize, Described)]

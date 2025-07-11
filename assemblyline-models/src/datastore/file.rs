@@ -60,7 +60,7 @@ pub struct File {
     #[metadata(copyto="__text__")]
     pub sha256: Sha256,
     /// Size of the file in bytes
-    #[metadata(mapping="integer")]
+    #[metadata(mapping="long")]
     pub size: u64,
     /// SSDEEP hash of the file
     #[metadata(store=false)]

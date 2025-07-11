@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, LazyLock};
 
 use assemblyline_models::meta::{build_mapping_inner, flatten_fields, FieldMapping};
+use assemblyline_models::types::mapping_keys::FIELD_SANITIZER;
 use assemblyline_models::{ElasticMeta, JsonMap, Readable};
 use itertools::Itertools;
 use log::{debug, error, warn};
@@ -27,11 +28,9 @@ use super::error::{ElasticErrorInner, WithContext};
 pub (super) const DEFAULT_SORT: &str = "_id asc";
 pub (super) const DEFAULT_ROW_SIZE: u64 = 25;
 
-/// Regex to match valid elasticsearch/json field names. 
-/// Compile it once on first access, from then on just share a compiled regex instance.
-static FIELD_SANITIZER: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new("^[a-z][a-z0-9_\\-.]+$").unwrap()
-});
+// static FIELD_SANITIZER: LazyLock<regex::Regex> = LazyLock::new(|| {
+//     regex::Regex::new("^[a-z][a-z0-9_\\-.]+$").unwrap()
+// });
 
 
 pub trait CollectionType: Serialize + DeserializeOwned + Readable + Described<ElasticMeta> { }

@@ -3,7 +3,10 @@ mod md5;
 mod sha1;
 mod ja4;
 pub mod classification;
+pub mod mapping_keys;
+pub mod strings;
 
+pub use strings::{Wildcard, UpperString};
 pub use md5::MD5;
 use serde::{Deserialize, Serialize};
 pub use sha1::Sha1;

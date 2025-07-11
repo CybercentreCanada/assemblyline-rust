@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::Wildcard;
 use crate::{ClassificationString, Sid};
 pub use crate::datastore::submission::{File, SubmissionParams};
 
@@ -34,7 +35,7 @@ pub struct Submission {
     /// File block
     pub files: Vec<File>, 
     /// Metadata submitted with the file
-    pub metadata: HashMap<String, serde_json::Value>, 
+    pub metadata: HashMap<String, Wildcard>, 
     /// Notification queue parameters
     #[serde(default)]
     pub notification: Notification,

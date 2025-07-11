@@ -164,7 +164,7 @@ checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
 name = "assemblyline-client"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "assemblyline-markings 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "assemblyline-models",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "assemblyline-markings 0.1.10",
  "base62",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
@@ -278,7 +278,7 @@ dependencies = [
  "chrono",
  "clap",
  "digest",
- "env_logger 0.11.7",
+ "env_logger 0.10.2",
  "environment_template 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ffuzzy",
  "flexi_logger",

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 use crate::types::classification::unrestricted_classification_string;
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, UpperString, MD5};
+use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, types::UpperString, MD5};
 
 // from assemblyline import odm
 // from assemblyline.common import forge
@@ -143,7 +143,7 @@ pub struct File {
     #[metadata(store=true, copyto="__text__")]
     pub name: Vec<String>,
     /// Size of the file in bytes
-    pub size: Option<i32>,
+    pub size: Option<i64>,
     /// Type of file as identified by Assemblyline
     #[serde(rename="type")]
     pub file_type: Option<String>,

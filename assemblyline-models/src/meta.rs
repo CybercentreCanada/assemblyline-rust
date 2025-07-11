@@ -182,6 +182,7 @@ impl Mappings {
 
         // if a mapping is simple or has been explicity set, use it
         let simple_mapping = meta.mapping.or(simple_mapping(kind));
+        // println!("{full_name} | {simple_mapping:?}");
 
         if let Some(mapping) = simple_mapping {
             if mapping.eq_ignore_ascii_case("classification") {
@@ -209,7 +210,7 @@ impl Mappings {
                             ..Default::default()
                         })
                     } else {
-                        self.build_dynamic(&(full_name + ".*"), &child_type.kind, meta, true, index)?;
+                        self.build_dynamic(&(full_name + ".*"), &child_type.kind, meta, false, index, true)?;
                     }
                 } else {
                     return Err(MappingError::UnsupportedType(full_name, format!("{kind:?}")))
@@ -292,7 +293,7 @@ impl Mappings {
                         ..Default::default()
                     });
                 } else {
-                    self.build_dynamic(&(full_name + ".*"), &value.kind, &value.metadata, false, index)?;
+                    self.build_dynamic(&(full_name + ".*"), &value.kind, &value.metadata, false, index, false)?;
                 }
             },
             Kind::Any | Kind::JSON => {
@@ -316,8 +317,9 @@ impl Mappings {
 
     // // nested_template = false
     // // index = true
-    fn build_dynamic(&mut self, name: &str, kind: &Kind<ElasticMeta>, meta: &ElasticMeta, nested_template: bool, index: bool) -> Result<(), MappingError> {
-        // if isinstance(field, (Keyword, Boolean, Integer, Float, Text, Json)):
+    fn build_dynamic(&mut self, name: &str, kind: &Kind<ElasticMeta>, meta: &ElasticMeta, nested_template: bool, index: bool, flatten: bool) -> Result<(), MappingError> {
+        // println!("build_dynamic -> {name} | {kind:?} | {nested_template}");
+
         match kind {
             Kind::JSON | Kind::String | Kind::Enum { .. } |
             Kind::U64 | Kind::I64 | Kind::U32 | Kind::I32 | Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 |
@@ -332,69 +334,77 @@ impl Mappings {
                         },
                         ..Default::default()
                     });
-                } else if let Some(mapping) = simple_mapping(kind) {
-                    self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
-                        path_match: Some(name.to_owned()),
-                        mapping: FieldMapping{
-                            type_: mapping.to_owned().into(),
-                            index: meta.index,
-                            // copy_to: meta.copyto.map(ToOwned::to_owned),
-                            copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
+                } else if let Some(mapping) = meta.mapping.or_else(|| simple_mapping(kind)) {
+                    if flatten {
+
+                        self.insert_dynamic(format!("{name}_object_tpl"), DynamicTemplate {
+                            path_match: Some(name.to_owned()),
+                            match_mapping_type: Some("object".to_owned()),
+                            mapping: FieldMapping{
+                                type_: Some("object".to_owned()),
+                                ..Default::default()
+                            },
                             ..Default::default()
-                        },
-                        ..Default::default()
-                    })
+                        });
+
+                        self.insert_dynamic(format!("{name}_wildcard_tpl"), DynamicTemplate {
+                            path_match: Some(name.to_owned()),
+                            mapping: FieldMapping{
+                                type_: mapping.to_owned().into(),
+                                index: if meta.index == Some(false) { Some(false) } else { None },
+                                store: if meta.store == Some(true) { Some(true) } else { None },
+                                copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+
+                    } else {
+                        self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
+                            path_match: Some(name.to_owned()),
+                            mapping: FieldMapping{
+                                type_: mapping.to_owned().into(),
+                                index: if meta.index == Some(false) { Some(false) } else { None },
+                                store: if meta.store == Some(true) { Some(true) } else { None },
+                                copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                    }
                 } else {
                     return Err(MappingError::UnsupportedType(name.to_owned(), format!("{kind:?}")))
                 }
                 return Ok(())
             },
-            
-            Kind::Aliased {name: name_, kind: _ } if *name_ == "Wildcard" => {
-                self.insert_dynamic(format!("{name}_tpl"), DynamicTemplate {
-                    path_match: Some(name.to_owned()),
-                    mapping: FieldMapping{
-                        type_: Some("wildcard".to_owned()),
-                        // copy_to: meta.copyto.map(ToOwned::to_owned),
-                        copy_to: meta.copyto.map(|item| vec![item.to_owned()]).unwrap_or_default(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
-                return Ok(())
+
+            // have aliased types apply as the underlying type
+            Kind::Aliased {name: _, kind: k } => {
+                return self.build_dynamic(name, &k.kind, &k.metadata, nested_template, index, flatten);
             }
 
-            // elif isinstance(field, (Mapping, List)):
-            Kind::Mapping(_, child) | Kind::Sequence(child) => {
-                // let temp_name = if field {
-                //     format!("{name}.{}", field.name)
-                // } else {
-                //     name.to_owned()
-                // };
-                return self.build_dynamic(name, &child.kind, &child.metadata, true, true)
-            }
+            Kind::Mapping(_, child) => {
+                return self.build_dynamic(name, &child.kind, &child.metadata, true, index, flatten)
+            },
 
+            Kind::Sequence(child) => {
+                return self.build_dynamic(name, &child.kind, &child.metadata, nested_template, index, flatten)
+            },
 
-            // elif isinstance(field, Compound):
             Kind::Struct { children, .. } => {
-                // let temp_name =  name
-                // if field.name:
-                //     temp_name = f"{name}.{field.name}"
 
-                // out = []
                 for child in children {
                     let sub_name = format!("{name}.{}", child.label);
-                    self.build_dynamic(&sub_name, &child.type_info.kind, &child.metadata, false, true)?;
-                    // out.extend(build_templates(sub_name, sub_field))
+                    let index = child.metadata.index.or(meta.index).unwrap_or(index);
+                    self.build_dynamic(&sub_name, &child.type_info.kind, &child.metadata, nested_template, index, flatten)?;
                 }
-// 
-                // return out
+
                 return Ok(())
             }
 
             // elif isinstance(field, Optional):
             Kind::Option(kind) => { 
-                return self.build_dynamic(name, &kind.kind, meta, nested_template, true);
+                return self.build_dynamic(name, &kind.kind, meta, nested_template, index, flatten);
                 // return build_templates(name, field.child_type, nested_template=nested_template)
             }
 

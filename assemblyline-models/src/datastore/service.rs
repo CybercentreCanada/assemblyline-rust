@@ -167,6 +167,9 @@ pub struct UpdateSource {
     /// Default classification used in absence of one defined in files from source
     #[serde(default="unrestricted_classification_string")]
     pub default_classification: ClassificationString,
+    /// Use managed identity for authentication with Azure DevOps
+    #[serde(default)]
+    pub use_managed_identity: bool,
     /// Branch to checkout from Git repository.
     #[serde(default)]
     pub git_branch: Option<String>,
@@ -182,6 +185,9 @@ pub struct UpdateSource {
     /// Processing configuration for source
     #[serde(default)]
     pub configuration: HashMap<String, serde_json::Value>,
+    /// Data that's sent in a POST request (`fetch_method="POST"`)
+    #[serde(default)]
+    pub data: Option<Text>,
     /// Update check interval, in seconds, for this source
     #[serde(default)]
     #[metadata(mapping="integer")]
@@ -215,9 +221,13 @@ pub struct UpdateConfig {
     pub signature_delimiter: SignatureDelimiter,
     /// Custom delimiter definition
     pub custom_delimiter: Option<String>,
+    /// Default pattern used for matching files
+    #[serde(default="default_default_pattern")]
+    pub default_pattern: Text,
 }
 
 fn default_signature_delimiter() -> SignatureDelimiter { SignatureDelimiter::DoubleNewLine }
+fn default_default_pattern() -> Text { ".*".into() }
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
 #[metadata_type(ElasticMeta)]

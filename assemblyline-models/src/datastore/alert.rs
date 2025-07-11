@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
+use crate::types::Wildcard;
 use crate::{Domain, ElasticMeta, ExpandingClassification, Sha1, Sha256, Uri, Uuid, MD5};
 use super::workflow::{Statuses, Priorities};
 
@@ -186,7 +187,7 @@ pub struct File {
     pub sha256: Sha256,
     /// Size of the file in bytes
     #[metadata(store=false)]
-    pub size: i32,
+    pub size: i64,
     /// Type of file as identified by Assemblyline
     #[serde(rename = "type")]
     #[metadata(copyto="__text__")]
@@ -322,8 +323,8 @@ pub struct Alert {
     pub label: Vec<String>,
     /// Metadata submitted with the file
     #[serde(default)]
-    #[metadata(store=false, mapping="flattenedobject")]
-    pub metadata: HashMap<String, String>,
+    #[metadata(store=false, mapping="flattenedobject", copyto="__text__")]
+    pub metadata: HashMap<String, Wildcard>,
     /// Owner of the alert
     pub owner: Option<String>,
     /// Priority applied to the alert
