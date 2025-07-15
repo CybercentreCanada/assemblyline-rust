@@ -201,18 +201,12 @@ impl<T: CollectionType> Collection<T> {
 
         let request = Request::get_index(&self.database.host, &self.name)?;
         let data: responses::DescribeIndex = self.database.make_request(&mut 0, &request).await?.json().await?;
-        
+
         let Some((_idx_name, spec)) = data.indices.into_iter().next() else {
             return Err(ElasticError::fatal("No indices returned when asking for fields."));
         };
 
         let properties = flatten_fields(spec.mappings.properties);
-
-        // let model_fields = flat_fields(T::metadata())?;
-        // // if self.model_class:
-        // //     model_fields = self.model_class.flat_fields()
-        // // else:
-        // //     model_fields = {}
 
         let mut collection_data = HashMap::new();
 
@@ -223,6 +217,7 @@ impl<T: CollectionType> Collection<T> {
             if !FIELD_SANITIZER.is_match(&p_name) {
                 continue
             }
+            
 
             let mapping = p_val.type_.unwrap_or_default();
             collection_data.insert(p_name, FieldInformation {

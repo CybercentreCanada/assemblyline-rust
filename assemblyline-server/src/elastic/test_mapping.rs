@@ -296,9 +296,12 @@ async fn add_field() {
 
     // Create with new mapping configuration
     let collection =  Collection::<TestModel2>::new(connection.clone(), "add_field".to_string(), None, "".to_string(), true).await.unwrap();
+    let mapping = assemblyline_models::meta::build_mapping::<TestModel2>().unwrap();
+    println!("mapping {mapping:?}");
 
     // Check if those fields are the type and config we want
     let mut fields = collection.fields().await.unwrap();
+    println!("fields: {fields:?}");
     assert_eq!(fields.remove("id").unwrap(), FieldInformation { default: false, indexed: false, stored: true, mapping: "keyword".to_string() });
     assert_eq!(fields.remove("number").unwrap(), FieldInformation { default: false, indexed: false, stored: true, mapping: "integer".to_string() });
     assert_eq!(fields.remove("big_number").unwrap(), FieldInformation { default: false, indexed: false, stored: true, mapping: "long".to_string() });

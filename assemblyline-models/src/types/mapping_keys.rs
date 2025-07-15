@@ -25,7 +25,7 @@ impl std::ops::Deref for FieldName {
 /// Regex to match valid elasticsearch/json field names. 
 /// Compile it once on first access, from then on just share a compiled regex instance.
 pub static FIELD_SANITIZER: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new("^[a-z][a-z0-9_]*$").expect("Field Regex could not compile")
+    regex::Regex::new("^[a-z][a-z0-9_.]*$").expect("Field Regex could not compile")
 });
 
 impl std::str::FromStr for FieldName {
