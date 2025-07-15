@@ -337,14 +337,14 @@ async fn test_hook() {
 
     {
         let mut sub: Submission = rand::rng().random();
-        sub.metadata.insert("ok".to_string(), serde_json::Value::String("bad".to_string()));
+        sub.metadata.insert("ok".to_string(), "bad".into());
         worker.process(&sub, Default::default(), false).await.unwrap(); 
     }
 
     {
         let mut sub: Submission = rand::rng().random();
-        sub.metadata.insert("ok".to_string(), serde_json::Value::String("good".to_string()));
-        sub.metadata.insert("do_hello".to_string(), serde_json::Value::String("yes".to_string()));
+        sub.metadata.insert("ok".to_string(), "good".into());
+        sub.metadata.insert("do_hello".to_string(), "yes".into());
         worker.process(&sub, Default::default(), false).await.unwrap(); 
     }
 
