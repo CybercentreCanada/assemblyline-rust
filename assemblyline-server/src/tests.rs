@@ -298,7 +298,38 @@ struct TestContext {
     ingest_queue: redis_objects::Queue<MessageSubmission>,
     components: tokio::task::JoinSet<()>,
     signal: Arc<Notify>,
-    services: HashMap<String, Arc<MockService>>,
+    services: Vec<Arc<MockService>>,
+}
+
+impl TestContext {
+    pub fn hits(&self, service_name: &str, hash: &str) -> u64 {
+        let mut hits = 0;
+        for service in &self.services {
+            if service.service_name == service_name {
+                hits += service.hits.lock().get(hash).copied().unwrap_or_default()
+            }
+        }
+        hits
+    }
+
+    pub fn get_a_service(&self, service_name: &str) -> Option<Arc<MockService>> {
+        for service in &self.services {
+            if service.service_name == service_name {
+                return Some(service.clone())
+            }
+        }
+        None
+    }
+
+    pub fn get_service(&self, service_name: &str) -> Vec<Arc<MockService>> {
+        let mut out = vec![];
+        for service in &self.services {
+            if service.service_name == service_name {
+                out.push(service.clone());
+            }
+        }
+        out
+    }
 }
 
 /// MARK: setup
@@ -313,7 +344,7 @@ async fn setup() -> TestContext {
     let mut components = tokio::task::JoinSet::new();
 
     // Register services
-    let mut services = HashMap::new();
+    let mut services = vec![];
     let stages = core.services.get_service_stage_hash();
     for (name, service) in test_services() {
         let count = if name == "core-a" { 2 } else { 1 };
@@ -329,7 +360,7 @@ async fn setup() -> TestContext {
         for _ in 0..count {
             let service_agent = MockService::new(&name, signal.clone(), &core).await;
             components.spawn(service_agent.clone().run());
-            services.insert(name.clone(), service_agent);
+            services.push(service_agent);
         }
     }
 
@@ -761,8 +792,8 @@ async fn test_service_crash_recovery() {
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
     assert_eq!(sub.errors.len(), 0);  // No error raised if the service succeeds on retry
     assert_eq!(sub.results.len(), 4);
-    assert_eq!(*context.services.get("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 1);
-    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 2);
+    assert_eq!(*context.get_a_service("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 1);
+    assert_eq!(context.hits("pre", &sha), 2);
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
@@ -806,8 +837,8 @@ async fn test_service_retry_limit() {
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
     assert_eq!(sub.errors.len(), 1);
     assert_eq!(sub.results.len(), 3);
-    assert_eq!(*context.services.get("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 3);
-    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 3);
+    assert_eq!(*context.get_a_service("pre").unwrap().drops.lock().get(&sha.to_string()).unwrap(), 3);
+    assert_eq!(context.hits("pre", &sha), 3);
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
@@ -1161,8 +1192,8 @@ async fn test_caching() {
 async fn test_plumber_clearing() {
     let context = setup().await;
     // terminate the core-b worker
-    context.services.get("core-b").unwrap().local_running.set(false);
-    context.services.get("core-b").unwrap().stopped.wait_for(true).await;
+    context.get_a_service("core-b").unwrap().local_running.set(false);
+    context.get_a_service("core-b").unwrap().stopped.wait_for(true).await;
 
     let (sha, size) = ready_body(&context.core, json!({})).await;
 
@@ -1386,7 +1417,7 @@ async fn test_partial() {
     assert_eq!(sub.files.len(), 1);
     assert_eq!(sub.errors.len(), 0);
     assert_eq!(sub.results.len(), 4);
-    assert_eq!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap(), 1);
+    assert_eq!(context.hits("pre", &sha), 1);
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
@@ -1446,7 +1477,7 @@ async fn test_temp_data_monitoring() {
     assert_eq!(sub.files.len(), 1);
     assert_eq!(sub.errors.len(), 0);
     assert_eq!(sub.results.len(), 4);
-    assert!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap() >= 2, "{:?}", context.services.get("pre").unwrap().hits.lock());
+    assert!(context.hits("pre", &sha) >= 2);
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
@@ -1485,8 +1516,11 @@ async fn test_final_partial() {
         "core-b": {"local_lock": 10, "partial": {"passwords": "test_temp_data_monitoring"}},
     })).await;
 
-    let core_a = context.services.get("core-a").unwrap();
-    let core_b = context.services.get("core-b").unwrap();
+    let core_a = context.get_service("core-a");
+    let core_b = context.get_service("core-b");
+
+    assert_eq!(core_b.len(), 1);
+    let core_b = core_b[0].clone();
 
     context.ingest_queue.push(&MessageSubmission {
         sid: rand::rng().random(),
@@ -1511,7 +1545,8 @@ async fn test_final_partial() {
 
     // Wait until both of the services have started (so service b doesn't get the temp data a produces on its first run)
     let start = std::time::Instant::now();
-    while core_a.hits.lock().get(&*sha).copied().unwrap_or_default() + core_b.hits.lock().get(&*sha).copied().unwrap_or_default() != 2 {
+    while context.hits("core-a", &sha) + context.hits("core-b", &sha) != 2 {
+        println!("hits: {} + {}", context.hits("core-a", &sha), context.hits("core-b", &sha));
         if start.elapsed() > RESPONSE_TIMEOUT {
             panic!();
         }
@@ -1519,10 +1554,11 @@ async fn test_final_partial() {
     }
 
     // Release a
-    core_a.local_signal.notify_one();
+    info!("Release core_a");
+    for ser in &core_a { ser.local_signal.notify_one(); }
 
     // Let a finish so that the temporary data is added in the dispatcher
-    while core_a.finish.lock().get(&*sha).copied().unwrap_or_default() < 1 {
+    while core_a.iter().map(|s|s.finish.lock().get(&*sha).copied().unwrap_or_default()).fold(0, |a, b|a + b) < 1 {
         if start.elapsed() > RESPONSE_TIMEOUT {
             panic!()
         }
@@ -1638,8 +1674,8 @@ async fn test_complex_extracted() {
 
     assert!(sub.errors.is_empty());
     assert_eq!(sub.results.len(), 8, "results");
-    assert!(*context.services.get("pre").unwrap().hits.lock().get(&sha.to_string()).unwrap() == 1, "{:?}", context.services.get("pre").unwrap().hits.lock());
-    assert!(*context.services.get("pre").unwrap().hits.lock().get(&child_sha.to_string()).unwrap() >= 1, "{:?}", context.services.get("pre").unwrap().hits.lock());
+    assert!(context.hits("pre", &sha) == 1);
+    assert!(context.hits("pre", &child_sha) >= 1);
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;

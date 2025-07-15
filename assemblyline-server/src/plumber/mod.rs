@@ -110,7 +110,6 @@ impl Plumber {
         let service_stage_hash = self.core.services.get_service_stage_hash().clone();
 
         while self.core.running.read() {
-            info!("Plumber service queue sweep");
             // Reset the status of the service queues
             for row in service_queues.values_mut() {
                 *row = None;
