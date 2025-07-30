@@ -1,0 +1,6 @@
+{
+    "recommendations": [
+        "rust-lang.rust-analyzer",
+        "ms-azuretools.vscode-containers"
+    ]
+}

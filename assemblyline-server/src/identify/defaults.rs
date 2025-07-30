@@ -6,7 +6,7 @@ use uuid::uuid;
 
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
-pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
+pub const MAGIC_PATTERNS: [(&str, &str); 99] = [
     ("network/tnef", "Transport Neutral Encapsulation Format"),
     ("archive/chm", "MS Windows HtmlHelp Data"),
     ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
@@ -64,7 +64,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_rar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L179
     ("archive/rar", "^rar archive data"),
-    ("archive/squashfs", "^Squashfs filesystem")
+    ("archive/squashfs", "^Squashfs filesystem"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_tar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L177
     ("archive/tar", "^(GNU|POSIX) tar archive"),
@@ -143,7 +143,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
     ("pgp/privkey", "^PGP private key block"),
     ("pgp/encrypted", "^PGP RSA encrypted session key"),
     ("pgp/message", "^PGP message Public-Key Encrypted Session Key"),
-    ("pgp/symmetric", "^PGP message Symmetric-Key Encrypted Session Key")
+    ("pgp/symmetric", "^PGP message Symmetric-Key Encrypted Session Key"),
     ("gpg/symmetric", "^GPG symmetrically encrypted data"),
     ("video/asf", "^Microsoft ASF"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L201
@@ -152,7 +152,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
 
 
 /// LibMagic mimetypes that we blindly trust to assign an Assemblyline type
-pub const TRUSTED_MIMES: [(&str, &str); 148] = [
+pub const TRUSTED_MIMES: [(&str, &str); 146] = [
     // Mpeg Audio
     ("audio/mp2", "audio/mp2"),
     ("audio/x-mp2", "audio/mp2"),
@@ -337,7 +337,7 @@ pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     ("application/vnd.ms-cab-compressed", "archive/cabinet"),
     ("application/zstd", "archive/zstd"),
     ("application/x-zstd", "archive/zstd"),
-    ("application/x-bzip2": "archive/bzip2"),
+    ("application/x-bzip2", "archive/bzip2"),
     ("application/java-archive", "java/jar"),
     // JAVA Class
     ("application/x-java-applet", "java/class"),
