@@ -20,12 +20,23 @@ pub struct Queue<T: Serialize + DeserializeOwned> {
     _data: PhantomData<T>
 }
 
+impl<T: Serialize + DeserializeOwned> Clone for Queue<T> {
+    fn clone(&self) -> Self {
+        Self { raw: self.raw.clone(), _data: self._data }
+    }
+}
+
 impl<T: Serialize + DeserializeOwned> Queue<T> {
     pub (crate) fn new(name: String, store: Arc<RedisObjects>, ttl: Option<Duration>) -> Self {
         Self {
             raw: RawQueue::new(name, store, ttl),
             _data: PhantomData,
         }
+    }
+
+    /// Get a reference to the server/object collection holding this queue
+    pub fn host(&self) -> Arc<RedisObjects> {
+        self.raw.store.clone()
     }
 
     /// enqueue a single item

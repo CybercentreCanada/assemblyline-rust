@@ -43,9 +43,10 @@ mod tests;
 const _DUP_PREFIX: &str = "w-m-";
 const _MIN_PRIORITY: u16 = 1;
 const _MAX_RETRIES: u32 = 10;
-const _RETRY_DELAY: chrono::Duration = chrono::Duration::minutes(4); // Wait 4 minutes to retry
-const _MAX_TIME: chrono::Duration = chrono::Duration::days(2); // Wait 2 days for responses.
+const DEFAULT_RETRY_DELAY: chrono::Duration = chrono::Duration::minutes(4); // Wait 4 minutes to retry
+const DEFAULT_MAX_TIME: chrono::Duration = chrono::Duration::days(2); // Wait 2 days for responses.
 const HOUR_IN_SECONDS: i64 = 60 * 60;
+pub const SCANNING_TABLE_NAME: &str = "m-scanning-table";
 
 fn read_env_size(name: &str, default: usize) -> Result<usize> {
     match std::env::var(name) {
@@ -128,9 +129,11 @@ pub struct Ingester {
 
     // Internal, delay queue for retrying
     retry_queue: PriorityQueue<IngestTask>,
+    retry_delay: chrono::Duration,
 
     // Internal, timeout watch queue
     timeout_queue: PriorityQueue<String>,
+    timeout_delay: chrono::Duration,
 
     // Internal, queue for processing duplicates
     //   When a duplicate file is detected (same cache key => same file, and same
@@ -171,7 +174,7 @@ pub struct Ingester {
 
     // Utility object to handle post-processing actions
     postprocess_worker: Arc<ActionWorker>,
-    submit_manager: SubmitManager,
+    pub submit_manager: SubmitManager,
 
     // Async Submission quota tracker
     async_submission_tracker: UserQuotaTracker,
@@ -219,8 +222,10 @@ impl Ingester {
     pub async fn new(core: Core) -> Result<Self> {
         Ok(Ingester {
             unique_queue: core.redis_persistant.priority_queue("m-unique".to_owned()),
-            retry_queue: core.redis_persistant.priority_queue("m-retry".to_owned()),    
+            retry_queue: core.redis_persistant.priority_queue("m-retry".to_owned()),
+            retry_delay: DEFAULT_RETRY_DELAY,
             timeout_queue: core.redis_volatile.priority_queue("m-timeout".to_owned()),
+            timeout_delay: DEFAULT_MAX_TIME,
             complete_queue: core.redis_volatile.queue(COMPLETE_QUEUE_NAME.to_owned(), None),
             ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
             counter: core.redis_metrics.auto_exporting_metrics(METRICS_CHANNEL.to_owned(), "ingester".to_owned())
@@ -229,7 +234,7 @@ impl Ingester {
                 .start(),
             traffic_queue: core.redis_volatile.publisher("submissions".to_owned()),
             duplicate_queue: core.redis_persistant.multiqueue(_DUP_PREFIX.to_owned()),
-            scanning: core.redis_persistant.hashmap("m-scanning-table".to_owned(), None),
+            scanning: core.redis_persistant.hashmap(SCANNING_TABLE_NAME.to_owned(), None),
             cache: Mutex::new(Default::default()),
             user_groups: tokio::sync::Mutex::new(GroupCache{reset: current_hour(), cache: Default::default()}),
             queue_bypass: Mutex::new(Default::default()),
@@ -279,6 +284,14 @@ impl Ingester {
         // Daemon to report CPU usage
         components.spawn(retry!("Metrics Reporter".to_string(), self, handle_metrics));
         Ok(())
+    }
+
+    pub fn set_retry_delay(&mut self, delay: chrono::Duration) {
+        self.retry_delay = delay;
+    }
+
+    pub fn set_timeout_delay(&mut self, delay: chrono::Duration) {
+        self.timeout_delay = delay;
     }
 
     pub fn clear_local_cache(&self) {
@@ -1059,7 +1072,7 @@ impl Ingester {
             Some(COMPLETE_QUEUE_NAME.to_owned()),
         ).await?;
 
-        self.timeout_queue.push((Utc::now() + _MAX_TIME).timestamp() as f64, &scan_key).await?;
+        self.timeout_queue.push((Utc::now() + self.timeout_delay).timestamp() as f64, &scan_key).await?;
         info!("[{} :: {}] Submitted to dispatcher for analysis", task.ingest_id, sha);
         Ok(())
     }
@@ -1078,7 +1091,7 @@ impl Ingester {
         } else {
             info!("[{} :: {}] Requeuing ({err})", task.ingest_id, task.sha256());
             task.retries = retries;
-            self.retry_queue.push((current_time + _RETRY_DELAY).timestamp() as f64, task).await?;
+            self.retry_queue.push((current_time + self.retry_delay).timestamp() as f64, task).await?;
         }
         Ok(())
     }

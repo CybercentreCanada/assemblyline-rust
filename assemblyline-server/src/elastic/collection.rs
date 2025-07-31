@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use assemblyline_models::meta::{build_mapping_inner, flatten_fields, FieldMapping};
 use assemblyline_models::types::mapping_keys::FIELD_SANITIZER;
@@ -696,9 +696,9 @@ impl<T: CollectionType> Collection<T> {
         for index in index_list {
             // build the url for the operation type
             let mut url = if operation == "index" {
-                self.database.host.join(&format!("{}/_doc/{key}", index))?
+                self.database.host.join(&format!("{index}/_doc/{key}"))?
             } else {
-                self.database.host.join(&format!("{}/_create/{key}", index))?
+                self.database.host.join(&format!("{index}/_create/{key}"))?
             };
 
             url.query_pairs_mut()

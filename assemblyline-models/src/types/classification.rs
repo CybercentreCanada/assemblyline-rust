@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use serde::{Serialize, Deserialize};
@@ -276,6 +277,14 @@ pub struct ClassificationString(pub (crate) String);
 impl From<ClassificationString> for String {
     fn from(value: ClassificationString) -> Self {
         value.0
+    }
+}
+
+impl Deref for ClassificationString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

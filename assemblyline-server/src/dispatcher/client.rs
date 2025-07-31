@@ -59,7 +59,6 @@ use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceRe
 use assemblyline_models::{JsonMap, Sid};
 use log::{debug, error, info};
 use reqwest::StatusCode;
-use serde_json::json;
 use tokio::sync::Mutex;
 
 use crate::constants::{make_watcher_list_name, service_queue_name, SUBMISSION_QUEUE};

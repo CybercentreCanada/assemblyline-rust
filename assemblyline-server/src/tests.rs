@@ -28,7 +28,7 @@ use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
 use crate::dispatcher::client::DispatchClient;
 use crate::dispatcher::Dispatcher;
 
-use crate::ingester::Ingester;
+use crate::ingester::{IngestTask, Ingester, SCANNING_TABLE_NAME};
 use crate::plumber::Plumber;
 use crate::postprocessing::SubmissionFilter;
 use crate::services::test::{dummy_service, setup_services};
@@ -332,8 +332,12 @@ impl TestContext {
     }
 }
 
-/// MARK: setup
+// MARK: setup
 async fn setup() -> TestContext {
+    setup_custom(|i| i).await
+}
+
+async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
     std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
     let mut service_configurations = test_services();
     service_configurations.get_mut("core-a").unwrap().timeout = 100;
@@ -370,7 +374,7 @@ async fn setup() -> TestContext {
     core.datastore.user.commit(None).await.unwrap();
 
     // launch the ingester
-    let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
+    let ingester = Arc::new(ingest_op(Ingester::new(core.clone()).await.unwrap()));
     ingester.start(&mut components).await.unwrap();
 
     // launch the dispatcher
@@ -635,125 +639,145 @@ async fn test_deduplication() {
 /// MARK: ingest retry
 #[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_retry() {
-    // return;
+
+    // let attempts = Arc::new(Mutex::new(vec![]));
+    // let failures = Arc::new(Mutex::new(vec![]));
+
+    // // install a worker task between the ingester and the dispatcher that drops the first message it sees
+    // let context = setup_custom({
+    //     let attempts = attempts.clone();
+    //     let failures = failures.clone();
+    //     |mut ingester| {
+    //         ingester.set_retry_delay(chrono::Duration::seconds(1));
+
+    //         let redis = ingester.submit_manager.dispatch_submission_queue.host();
+    //         let queue = redis.queue("replacement-dispatch-queue-".to_string() + &rand::rng().random::<u64>().to_string(), None);
+    //         let mut original_queue = queue.clone();
+    //         std::mem::swap(&mut original_queue, &mut ingester.submit_manager.dispatch_submission_queue);
+
+    //         tokio::spawn(async move {
+    //             loop {
+    //                 let item = queue.pop_timeout(Duration::from_secs(60)).await.unwrap();
+    //                 if let Some(item) = item {
+    //                     println!("dispatcher proxy saw item {} + 1", attempts.lock().len());
+    //                     attempts.lock().push(item.clone());
+    //                     if attempts.lock().len() > 1 {
+    //                         original_queue.push(&item).await.unwrap();
+    //                     } else {
+    //                         println!("dispatcher proxy dropped message");
+    //                         failures.lock().push(item);
+    //                     }
+    //                 } else {
+    //                     println!("dispatcher proxy empty message?");
+    //                 }
+    //             }
+    //         });
+
+    //         ingester
+    //     }
+    // }).await;
+    // let (sha, size) = ready_body(&context.core, json!({})).await;
+
+    // context.ingest_queue.push(&MessageSubmission {
+    //     sid: rand::rng().random(),
+    //     metadata: Default::default(),
+    //     params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    //         .set_description("file abc123")
+    //         .set_services_selected(&[])
+    //         .set_submitter("user")
+    //         .set_groups(&["user"]),
+    //     notification: Notification {
+    //         queue: Some("ingest-retry".to_string()),
+    //         threshold: None,
+    //     },
+    //     files: vec![File {
+    //         sha256: sha.clone(),
+    //         size: Some(size as u64),
+    //         name: "abc123".to_string()
+    //     }],
+    //     time: chrono::Utc::now(),
+    //     scan_key: None,
+    // }).await.unwrap();
+
+    // let notification_queue = context.core.notification_queue("ingest-retry");
+    // let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+
+    // // One of the submission will get processed fully
+    // let first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    // assert_eq!(attempts.lock().len(), 2);
+    // assert_eq!(failures.lock().len(), 1);
+    // assert_eq!(first_submission.state, SubmissionState::Completed);
+    // assert_eq!(first_submission.files.len(), 1);
+    // assert_eq!(first_submission.errors.len(), 0);
+    // assert_eq!(first_submission.results.len(), 4);
+
+    // // metrics.expect('ingester', 'duplicates', 0)
+    // context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1), ("retries", 1)]).await;
+    // context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
     todo!()
-//     let context = setup().await;
-//     let (sha, size) = ready_body(&context.core, json!({})).await;
-
-//     // original_retry_delay = assemblyline_core.ingester.ingester._retry_delay
-//     // assemblyline_core.ingester.ingester._retry_delay = 1
-
-//     let attempts = vec![];
-//     let failures = vec![];
-//     original_submit = core.ingest.submit
-
-//     def fail_once(task):
-//         attempts.append(task)
-//         if len(attempts) > 1:
-//             original_submit(task)
-//         else:
-//             failures.append(task)
-//             raise ValueError()
-//     core.ingest.submit = fail_once
-
-//     context.ingest_queue.push(&MessageSubmission {
-//         sid: rand::rng().random(),
-//         metadata: Default::default(),
-//         params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-//             .set_description("file abc123")
-//             .set_services_selected(&[])
-//             .set_submitter("user")
-//             .set_groups(&["user"])
-//         notification: Notification {
-//             queue: Some("output-queue-one".to_string()),
-//             threshold: None,
-//         },
-//         files: vec![File {
-//             sha256: sha.clone(),
-//             size: Some(size as u64),
-//             name: "abc123".to_string()
-//         }],
-//         time: chrono::Utc::now(),
-//         scan_key: None,
-//     }).await.unwrap();
-
-//     let notification_queue = context.core.notification_queue("output-queue-one");
-//     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
-
-//     // One of the submission will get processed fully
-//     let first_submission: Submission = context.core.datastore.submission.get(first_task.submission.sid, None).await.unwrap().unwrap();
-//     assert len(attempts) == 2
-//     assert len(failures) == 1
-//     assert first_submission.state == 'completed'
-//     assert len(first_submission.files) == 1
-//     assert len(first_submission.errors) == 0
-//     assert len(first_submission.results) == 4
-
-//     // metrics.expect('ingester', 'duplicates', 0)
-//     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
-//     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
-
-//     todo!()
 }
 
 /// MARK: ingest timeout
 #[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_timeout() {
-    // return;
-    todo!()
-//     # -------------------------------------------------------------------------------
-//     #
-//     sha, size = ready_body(core)
-//     original_max_time = assemblyline_core.ingester.ingester._max_time
-//     assemblyline_core.ingester.ingester._max_time = 1
+    // install a worker task between the ingester and the dispatcher that drops the first message it sees
+    let context = setup_custom({
+        |mut ingester| {
+            ingester.set_timeout_delay(chrono::Duration::seconds(1));
+            ingester
+        }
+    }).await;
 
-//     attempts = []
-//     original_submit = core.ingest.submit_client.submit
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {
+            "hold": 60 
+        } 
+    })).await;
 
-//     def _fail(**args):
-//         attempts.append(args)
-//     core.ingest.submit_client.submit = _fail
+    let mut message = MessageSubmission {
+        sid: rand::rng().random(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("ingest-timeout".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    };
 
-//     try:
-//         si = SubmissionInput(dict(
-//             metadata={},
-//             params=dict(
-//                 description="file abc123",
-//                 services=dict(selected=''),
-//                 submitter='user',
-//                 groups=['user'],
-//             ),
-//             notification=dict(
-//                 queue='ingest-timeout',
-//                 threshold=0
-//             ),
-//             files=[dict(
-//                 sha256=sha,
-//                 size=size,
-//                 name='abc123'
-//             )]
-//         ))
-//         core.ingest_queue.push(si.as_primitives())
+    // this extra normalization is applied when the message is loaded, which changes the scan key
+    // normally this doesn't matter because it would always be consistant _after_ message loading
+    // but since we want the key before sending the message we apply it early
+    message.params.classification = ClassificationString::new(message.params.classification.to_string(), &context.core.classification_parser).unwrap();
 
-//         sha256 = si.files[0].sha256
-//         scan_key = si.params.create_filescore_key(sha256)
+    let scan_key = message.params.create_filescore_key(&sha, None);
 
-//         # Make sure the scanning table has been cleared
-//         time.sleep(0.5)
-//         for _ in range(60):
-//             if not core.ingest.scanning.exists(scan_key):
-//                 break
-//             time.sleep(0.1)
-//         assert not core.ingest.scanning.exists(scan_key)
-//         assert len(attempts) == 1
+    context.ingest_queue.push(&message).await.unwrap();
 
-//         # Wait until we get feedback from the metrics channel
-//         metrics.expect('ingester', 'submissions_ingested', 1)
-//         metrics.expect('ingester', 'timed_out', 1)
+    // Make sure the scanning table has been cleared
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let scanning = context.core.redis_persistant.hashmap::<IngestTask>(SCANNING_TABLE_NAME.to_owned(), None);
+    for _ in 0..60 {
+        if !scanning.exists(&scan_key).await.unwrap() {
+            break
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(scanning.length().await.unwrap(), 0);
 
-//     finally:
-//         core.ingest.submit_client.submit = original_submit
-//         assemblyline_core.ingester.ingester._max_time = original_max_time
+    // Wait until we get feedback from the metrics channel
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 0), ("timed_out", 1)]).await;
 }
 
 // MARK: service crash
