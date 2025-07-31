@@ -3,7 +3,7 @@
 {
 	"name": "Rust",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/rust:1-1",
+	"image": "cccs/assemblyline",
 	"runArgs": [
 		"--network=host"
 	],
@@ -20,7 +20,7 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y libclang-dev libmagic-dev libpython3-dev",
+	"postCreateCommand": "apt-get update && apt-get install -y curl build-essential pkg-config libssl-dev libclang-dev libmagic-dev && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH=$PATH:${HOME}/.cargo/bin",
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
@@ -28,7 +28,7 @@
 				"rust-lang.rust-analyzer"
 			]
 		}
-	}
+	},
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+	"remoteUser": "root"
 }
