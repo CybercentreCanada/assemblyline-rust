@@ -1582,7 +1582,7 @@ async fn test_final_partial() {
     for ser in &core_a { ser.local_signal.notify_one(); }
 
     // Let a finish so that the temporary data is added in the dispatcher
-    while core_a.iter().map(|s|s.finish.lock().get(&*sha).copied().unwrap_or_default()).fold(0, |a, b|a + b) < 1 {
+    while core_a.iter().map(|s|s.finish.lock().get(&*sha).copied().unwrap_or_default()).sum::<u64>() < 1 {
         if start.elapsed() > RESPONSE_TIMEOUT {
             panic!()
         }

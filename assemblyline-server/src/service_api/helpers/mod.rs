@@ -53,7 +53,7 @@ pub fn make_api_response<B: Serialize + Send>(body: B) -> poem::Response {
 }
 
 
-pub async fn copy_to_file(mut data: impl AsyncRead + Send) -> Result<NamedTempFile> {
+pub async fn copy_to_file(data: impl AsyncRead + Send) -> Result<NamedTempFile> {
     // start the writer in a blocking thread
     let (send, mut recv) = tokio::sync::mpsc::channel::<Vec<u8>>(8);
     let writer = tokio::task::spawn_blocking(move || {

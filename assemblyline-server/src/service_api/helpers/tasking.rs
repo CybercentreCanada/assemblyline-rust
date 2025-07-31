@@ -848,7 +848,7 @@ impl TaskingClient {
             // Set section score to zero and lower total score if service is set to zeroize score
             // and all tags were safelisted
             if let Some(heuristic) = &mut heuristic {
-                if section.zeroize_on_tag_safe && tags.len() == 0 && safelisted_tags.len() != 0 {
+                if section.zeroize_on_tag_safe && tags.is_empty() && !safelisted_tags.is_empty() {
                     result.result.score -= heuristic.score;
                     heuristic.score = 0;
                 }

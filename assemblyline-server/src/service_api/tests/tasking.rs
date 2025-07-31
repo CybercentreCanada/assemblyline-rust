@@ -135,6 +135,7 @@ async fn mock_dispatcher() -> (mpsc::Receiver<MockItem>, String) {
 //     task.status_table = ExpiringHash(SERVICE_STATE_HASH, ttl=60 * 30, host=redis)
 //     yield client
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 enum TaskResp {

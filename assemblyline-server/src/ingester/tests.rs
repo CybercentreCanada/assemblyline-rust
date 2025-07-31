@@ -118,7 +118,7 @@ pub (crate) async fn assert_metrics(metrics: &mut mpsc::Receiver<Option<redis_ob
     let mut values: HashMap<&str, isize> = HashMap::from_iter(values.iter().cloned());
     while !values.is_empty() {
         if start.elapsed() > std::time::Duration::from_secs(30) {
-            panic!("Metrics failed {:?}", values);
+            panic!("Metrics failed {values:?}");
         }
 
         let message = match tokio::time::timeout(std::time::Duration::from_secs(1), metrics.recv()).await {
@@ -418,7 +418,7 @@ async fn test_ingest_always_create_submission() {
     for attr in ["archived", "archive_ts", "to_be_deleted", "from_archive"] {
         let value = new_sub.get(attr).unwrap_or(&serde_json::Value::Null);
         // either null or boolean as false
-        assert!(value.is_null() || !value.as_bool().unwrap(), "{} => {:?}", attr, value);
+        assert!(value.is_null() || !value.as_bool().unwrap(), "{attr} => {value:?}");
     }
 }
         

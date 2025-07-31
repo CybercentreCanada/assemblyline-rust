@@ -171,7 +171,7 @@ impl Request {
     }
 
     pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str) -> Result<Self> {
-        let mut url = host.join(&format!("{}/_pit", index))?;
+        let mut url = host.join(&format!("{index}/_pit"))?;
         url.query_pairs_mut().append_pair("keep_alive", keep_alive);
         Ok(Self::new(Method::POST, url, Some(index.to_owned())))
     }
