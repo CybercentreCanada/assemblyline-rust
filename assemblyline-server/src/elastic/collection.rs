@@ -786,7 +786,11 @@ impl<T: CollectionType> Collection<T> {
         //     None => list(self.stored_fields.keys())
         // };
 
-        ScrollCursor::<T, RT>::new(self, index, query_expression, sort, source, None, Some(item_buffer_size), None).await
+        ScrollCursorBuilder::<T, RT>::new(self, index, query_expression)
+            .sort(sort)
+            .source(source)
+            .batch_size(item_buffer_size)
+            .build().await
     }
 
 
@@ -1277,6 +1281,67 @@ fn try_cast<Type: serde::de::DeserializeOwned>(name: &'static str, expected: &'s
     }
 }
 
+
+pub struct ScrollCursorBuilder<'a, T: CollectionType, RT> {
+    collection: &'a Collection<T>,
+    index: String,
+    batch_size: i64,
+    keep_alive: String,
+    sort: Vec<(String, SortDirection)>,
+    query: serde_json::Value,
+    timeout: Option<std::time::Duration>,
+    source: String,
+    _return_type: PhantomData<RT>,
+}
+
+impl<'a, T: CollectionType, RT: Debug + Readable> ScrollCursorBuilder<'a, T, RT> {
+    fn new(collection: &'a Collection<T>, index: String, query: serde_json::Value) -> Self {
+        Self {
+            collection,
+            index,
+            batch_size: 1000,
+            keep_alive: KEEP_ALIVE.to_string(),
+            sort: Default::default(),
+            query,
+            timeout: None,
+            source: "*".to_string(),
+            _return_type: Default::default(),
+        }
+    }
+
+    fn sort(mut self, sort: Vec<(String, SortDirection)>) -> Self {
+        self.sort = sort; self
+    }
+
+    fn source(mut self, source: String) -> Self {
+        self.source = source; self
+    }
+    
+    fn batch_size(mut self, batch_size: i64) -> Self {
+        self.batch_size = batch_size; self
+    }
+
+    async fn build(mut self) -> Result<ScrollCursor<'a, T, RT>> {
+        // Add tie_breaker sort using _shard_doc ID
+        self.sort.push(("_shard_doc".to_string(), SortDirection::Descending));
+
+        Ok(ScrollCursor {
+            pit: PitGuard::open(self.collection.database.clone(), &self.index).await?,
+            collection: self.collection,
+            batch_size: self.batch_size,
+            keep_alive: self.keep_alive,
+            batch: Default::default(),
+            sort: self.sort,
+            offset: None,
+            query: self.query,
+            search_after: None,
+            timeout: self.timeout,
+            source: self.source,
+            finished: false,
+        })
+    }
+}
+
 pub struct ScrollCursor<'a, T: CollectionType, RT> {
     collection: &'a Collection<T>,
     pit: PitGuard,
@@ -1292,39 +1357,7 @@ pub struct ScrollCursor<'a, T: CollectionType, RT> {
     finished: bool,
 }
 
-impl<'a, T: CollectionType, RT: Debug + Readable> ScrollCursor<'a, T, RT> {
-
-    async fn new(
-        collection: &'a Collection<T>,
-        index: String,
-        query: serde_json::Value,
-        mut sort: Vec<(String, SortDirection)>,
-        source: String,
-        keep_alive: Option<String>,
-        size: Option<i64>,
-        timeout: Option<std::time::Duration>,
-    ) -> Result<Self> {
-        let keep_alive = keep_alive.unwrap_or(KEEP_ALIVE.to_owned());
-        let batch_size = size.unwrap_or(1000);
-
-        // Add tie_breaker sort using _shard_doc ID
-        sort.push(("_shard_doc".to_string(), SortDirection::Descending));
-
-        Ok(ScrollCursor {
-            pit: PitGuard::open(collection.database.clone(), &index).await?,
-            collection,
-            batch_size,
-            keep_alive,
-            batch: Default::default(),
-            sort,
-            offset: None,
-            query,
-            search_after: None,
-            timeout,
-            source,
-            finished: false,
-        })
-    }
+impl<T: CollectionType, RT: Debug + Readable> ScrollCursor<'_, T, RT> {
 
     pub async fn next(&mut self) -> Result<Option<RT>> {
         if self.finished {
