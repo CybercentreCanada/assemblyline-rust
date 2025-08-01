@@ -2,10 +2,8 @@
     "rust-analyzer.testExplorer": true,
     "rust-analyzer.debug.engine": "vadimcn.vscode-lldb",
     "rust-analyzer.runnables.extraEnv": {
-        "RUST_BACKTRACE": "1",
-        "RUST_LOG": "debug",
-        "ASSEMBLYLINE_URL": "https://localhost",
+        "ASSEMBLYLINE_URL": "https://localhost/",
         "ASSEMBLYLINE_USER": "admin",
-        "ASSEMBLYLINE_PASS": "admin",
+        "ASSEMBLYLINE_KEY": "devkey:admin",
     }
 }

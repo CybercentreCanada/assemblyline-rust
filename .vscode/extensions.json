@@ -1,6 +1,7 @@
 {
     "recommendations": [
         "rust-lang.rust-analyzer",
-        "ms-azuretools.vscode-containers"
+        "ms-azuretools.vscode-containers",
+        "vadimcn.vscode-lldb",
     ]
 }
