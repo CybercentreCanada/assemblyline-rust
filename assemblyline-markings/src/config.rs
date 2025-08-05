@@ -301,7 +301,11 @@ pub struct ClassificationMarking {
     /// This is a token that is required but will display in the groups part
     /// of the classification string. (optional)
     #[serde(default)]
-    pub is_required_group: bool
+    pub is_required_group: bool,
+
+    /// Should the marking be skipped building UI options
+    #[serde(default)]
+    pub is_hidden: bool,
 }
 
 impl ClassificationMarking {
@@ -314,6 +318,7 @@ impl ClassificationMarking {
             short_name: short_name.parse().unwrap(),
             require_lvl: None,
             is_required_group: false,
+            is_hidden: false,
         }
     }
 
@@ -361,6 +366,10 @@ pub struct ClassificationGroup {
     /// of this group and only this group) (optional)
     #[serde(default)]
     pub solitary_display_name: Option<NameString>,
+
+    /// Should the marking be skipped building UI options
+    #[serde(default)]
+    pub is_hidden: bool,
 }
 
 impl ClassificationGroup {
@@ -372,7 +381,8 @@ impl ClassificationGroup {
             aliases: vec![],
             auto_select: false,
             description: default_description(),
-            solitary_display_name: None
+            solitary_display_name: None,
+            is_hidden: false,
         }
     }
 
@@ -424,6 +434,10 @@ pub struct ClassificationSubGroup {
     /// corresponding group is selected when this subgroup is selected (optional)
     #[serde(default)]
     pub limited_to_group: Option<NameString>,
+
+    /// Should the marking be skipped building UI options
+    #[serde(default)]
+    pub is_hidden: bool,
 }
 
 
@@ -438,6 +452,7 @@ impl ClassificationSubGroup {
             description: default_description(),
             require_group: None,
             limited_to_group: None,
+            is_hidden: false,
         }
     }
 
