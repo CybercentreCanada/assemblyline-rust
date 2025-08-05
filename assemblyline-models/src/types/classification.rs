@@ -293,6 +293,10 @@ impl ClassificationString {
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
     }
 
+    pub fn new_unchecked(classification: String) -> Self {
+        Self(classification)
+    }
+
     pub fn try_unrestricted() -> Option<Self> {
         if let ClassificationMode::Configured(parser) = &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             Some(Self::unrestricted(parser))

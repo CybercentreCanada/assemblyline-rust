@@ -15,7 +15,7 @@ pub mod types;
 pub use meta::ElasticMeta;
 pub use types::MD5;
 pub use types::Sha1;
-pub use types::classification::{ClassificationString, ExpandingClassification};
+pub use types::classification::{ClassificationString, ExpandingClassification, disable_global_classification};
 
 pub const HEXCHARS: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
