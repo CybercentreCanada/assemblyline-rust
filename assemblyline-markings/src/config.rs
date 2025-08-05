@@ -234,6 +234,10 @@ pub struct ClassificationLevel {
 
     /// Short name of the classification item
     pub short_name: NameString,
+    
+    /// Should the classification be skipped building UI options
+    #[serde(default)]
+    pub is_hidden: bool,
 
     // #[serde(flatten)]
     // currently planning to static define other fields as optional, making other_fields unneeded
@@ -249,7 +253,8 @@ impl ClassificationLevel {
             description: default_description(),
             lvl,
             name: name.parse().unwrap(),
-            short_name: short_name.parse().unwrap()
+            short_name: short_name.parse().unwrap(),
+            is_hidden: false,
         }
     }
 
