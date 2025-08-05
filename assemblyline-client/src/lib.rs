@@ -115,8 +115,8 @@ mod tests {
         init();
         let url = std::env::var("ASSEMBLYLINE_URL").unwrap();
         let username = std::env::var("ASSEMBLYLINE_USER").unwrap();
-        let password = std::env::var("ASSEMBLYLINE_PASS").unwrap();
-        Client::connect(url, Authentication::Password { username, password }).await.unwrap()
+        let key = std::env::var("ASSEMBLYLINE_KEY").unwrap();
+        Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
     }
 
     fn random_body() -> Vec<u8> {
