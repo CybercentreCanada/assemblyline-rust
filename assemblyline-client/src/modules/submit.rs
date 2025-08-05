@@ -114,8 +114,8 @@ impl SubmitBuilder {
     pub async fn url(self, url: String) -> Result<Submission, Error> {
         let parsed = Url::parse(&url)?;
 
-        if let Some(path_parts) = parsed.path_segments() {
-            if let Some(name) = path_parts.last() {
+        if let Some(mut path_parts) = parsed.path_segments() {
+            if let Some(name) = path_parts.next_back() {
                 if !name.is_empty() {
                     return self.fname(name.to_owned()).url(url).await
                 }

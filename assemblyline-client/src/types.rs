@@ -45,7 +45,7 @@ pub enum Error {
         api_response: Option<String>
     },
     /// An error that occured during a failed communication with the server
-    TransportError(String),
+    Transport(String),
     /// An invalid HTTP header name or value was provided
     InvalidHeader,
     /// The server's response was truncated, corrupted, or malformed
@@ -77,7 +77,7 @@ impl Display for Error {
         match self {
             Error::Client { message, status, .. } =>
                 f.write_fmt(format_args!("Client error [{status}]: {message}")),
-            Error::TransportError(message) =>
+            Error::Transport(message) =>
                 f.write_fmt(format_args!("Error communicating with server: {message}")),
             Error::InvalidHeader =>
                 f.write_str("An invalid HTTP header name or value was encountered"),
@@ -106,7 +106,7 @@ impl From<reqwest::Error> for Error {
         if let Some(code) = value.status() {
             Error::client_error(value.to_string(), code.as_u16() as u32)
         } else {
-            Error::TransportError(value.to_string())
+            Error::Transport(value.to_string())
         }
     }
 }

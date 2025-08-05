@@ -89,7 +89,7 @@ impl<Type> ListingBuilder<Type> {
         self.track_total_hits = Some(value); self
     }
 
-    ///
+    /// Send the query to the server
     pub async fn fetch(self) -> Result<SearchResult<ErrorModel>> {
 
         let mut params: Vec<(String, String)> = [
