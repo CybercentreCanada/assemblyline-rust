@@ -77,7 +77,7 @@ impl TaskingClient {
         
         let mut event_listener = core.redis_volatile.pubsub_json_listener::<JsonMap>()
             .subscribe("changes.heuristics".to_owned())
-            .listen();
+            .listen().await;
 
         // get the initial hearustic data
         let new_heuristics = core.datastore.list_all_heuristics().await?;

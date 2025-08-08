@@ -186,7 +186,7 @@ impl Identify {
         if obj.cache.is_some() {
             if let Some(redis_volatile) = redis_volatile {
                 info!("Using cache with identify");
-                let messages = redis_volatile.subscribe("system.identify".to_owned());
+                let messages = redis_volatile.subscribe("system.identify".to_owned()).await;
                 let obj = obj.clone();
                 tokio::spawn(async move {
                     obj.watch_reloads(messages).await

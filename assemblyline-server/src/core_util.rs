@@ -64,7 +64,7 @@ impl Core {
         info!("Listening for status events on: system.{component}.active");
         let mut change_stream = self.redis_volatile.pubsub_json_listener::<bool>()
             .subscribe(format!("system.{component}.active"))
-            .listen();
+            .listen().await;
 
         // setup local copies of some values
         let enabled = self.enabled.clone();

@@ -390,7 +390,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     plumber.start(&mut components).await.unwrap();
 
     TestContext {
-        metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned())),
+        metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await),
         ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
         core,
         guard,

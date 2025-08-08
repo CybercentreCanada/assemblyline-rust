@@ -46,7 +46,7 @@ impl ServiceHelper {
         // register for change to services
         let changes: ChangeChannel = redis_volatile.pubsub_json_listener()
             .psubscribe("changes.services.*".to_owned())
-            .listen();
+            .listen().await;
 
         // Initialize the services
         let services = datastore.list_all_services().await.context("list_all_services")?;

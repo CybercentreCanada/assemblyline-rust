@@ -157,7 +157,7 @@ async fn test_ingest_simple() {
     // setup the test environment
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // setup the test data
     let mut user: User = Default::default();
@@ -208,7 +208,7 @@ async fn test_ingest_simple() {
 async fn test_ingest_stale_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
  
     // Add a stale file score for this file
     let sha256: Sha256 = rand::rng().random();
@@ -244,7 +244,7 @@ async fn test_ingest_stale_score_exists() {
 async fn test_ingest_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
  
     // Add a valid file score for all files
     let sha256: Sha256 = rand::rng().random();
@@ -276,7 +276,7 @@ async fn test_ingest_score_exists() {
 async fn test_ingest_groups_custom() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    // let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    // let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // setup the test data
     let mut user: User = Default::default();
@@ -301,7 +301,7 @@ async fn test_ingest_groups_custom() {
 async fn test_ingest_size_error() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // Send a rather big file
     let submission = MakeMessage::new(core.classification_parser.clone())
@@ -344,7 +344,7 @@ async fn test_ingest_always_create_submission() {
         config.core.ingester.always_create_submission = true;
     }).await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     let sid_0: Sid = "000".parse().unwrap();
     let sid_1: Sid = "001".parse().unwrap();
@@ -445,7 +445,7 @@ fn create_ingest_task(ce: &Arc<ClassificationParser>) -> IngestTask {
 async fn test_submit_simple() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    // let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    // let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // Push a normal ingest task
     let task = create_ingest_task(&core.classification_parser);
@@ -461,7 +461,7 @@ async fn test_submit_simple() {
 async fn test_submit_duplicate() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // a normal ingest task
     let mut task = create_ingest_task(&core.classification_parser);
@@ -488,7 +488,7 @@ async fn test_submit_duplicate() {
 async fn test_existing_score() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
-    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned());
+    let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // Set everything to have an existing filestore
     let sha256: Sha256 = rand::rng().random();
