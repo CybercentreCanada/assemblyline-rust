@@ -288,7 +288,7 @@ async fn auto_exporting_counter() {
     }
 
     // Subscribe on the pubsub being used
-    let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned());
+    let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned()).await;
 
     {   
         info!("Fast export");

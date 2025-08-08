@@ -1,6 +1,6 @@
 [package]
 name = "redis-objects"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -25,8 +25,8 @@ rand = "0.9"
 # Redis libraries
 # The versions of these two packages are tied togeather, don't change one without 
 # making sure the pool is using the same redis version
-redis = { version = "0.26", features = ["tokio-native-tls-comp", "connection-manager", "keep-alive", "tls"] }
-deadpool-redis = { version = "0.16.0", features = ["serde"] }
+redis = { version = "0.32", features = ["tokio-native-tls-comp", "connection-manager", "keep-alive", "tls"] }
+deadpool-redis = { version = "0.22.0", features = ["serde"] }
 
 [dev-dependencies]
 env_logger = "0.11"
