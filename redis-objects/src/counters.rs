@@ -213,7 +213,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
 
     /// Get a writeable guard holding the message that will next be exported 
     /// Rather than using this directly the increment macro can be used
-    pub fn lock(&self) -> parking_lot::MutexGuard<Message> {
+    pub fn lock(&'_ self) -> parking_lot::MutexGuard<'_, Message> {
         self.current.lock()
     }
 

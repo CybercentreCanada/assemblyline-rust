@@ -494,7 +494,7 @@ pub mod test {
                 
         'outer: for step in 0..1000 {
             tokio::time::sleep(Duration::from_millis(step)).await;
-            for (name, _service) in &services {
+            for name in services.keys() {
                 let _ = match core.services.get(name) {
                     Some(value) => value,
                     None => continue 'outer

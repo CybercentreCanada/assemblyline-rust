@@ -737,14 +737,14 @@ impl<T: CollectionType> Collection<T> {
     /// :param as_obj: Return objects instead of dictionaries
     /// :param index_type: Type of indices to target
     /// :return: a generator of dictionary of field list results
-    pub async fn stream_search<RT: Debug + DeserializeOwned + Debug + Readable>(&self,
+    pub async fn stream_search<RT: Debug + DeserializeOwned + Debug + Readable>(&'_ self,
         query: &str,
         fl: String,
         mut filters: Vec<String>,
         access_control: Option<String>,
         item_buffer_size: Option<i64>,
         index_type: Option<Index>,
-    ) -> Result<ScrollCursor<T, RT>> {
+    ) -> Result<ScrollCursor<'_, T, RT>> {
         let item_buffer_size = item_buffer_size.unwrap_or(200);
         let index_type = index_type.unwrap_or(Index::Hot);
 
