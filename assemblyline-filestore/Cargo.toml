@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-filestore"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -41,7 +41,7 @@ aws-smithy-http-client = { version = "1.0", features = [ "rustls-ring", "hyper-0
 
 # Http client used internally to AWS, version must match one used by above crates
 legacy-hyper-rustls = { package = "hyper-rustls", version = "0.24", features = ["http2", "rustls-native-certs"] }
-legacy-rustls = { package = "rustls", version = "0.21.8" }
+legacy-rustls = { package = "rustls", version = "0.21.8", features = ["dangerous_configuration"] }
 
 [dev-dependencies]
 tempfile = "3.15"
