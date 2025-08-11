@@ -1,1 +1,1 @@
-docker build . -f assemblyline-server/Dockerfile -t localhost:32000/cccs/assemblyline-rust:latest # --progress=plain
+docker build . -f assemblyline-server/Dockerfile -t localhost:32000/cccs/assemblyline-rust:latest -t cccs/assemblyline-rust:latest # --progress=plain
