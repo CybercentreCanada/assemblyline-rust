@@ -178,6 +178,9 @@ pub struct Ingester {
 
     // Async Submission quota tracker
     async_submission_tracker: UserQuotaTracker,
+
+    #[cfg(test)]
+    pub test_hook_fail_submit: Mutex<usize>,
 }
 
 
@@ -243,6 +246,8 @@ impl Ingester {
             async_submission_tracker: core.redis_persistant.user_quota_tracker("async_submissions".to_owned())
                 .set_timeout(chrono::Duration::days(1).to_std().unwrap()),
             core,
+            #[cfg(test)]
+            test_hook_fail_submit: Mutex::new(0),
         })
     }
 
@@ -484,6 +489,7 @@ impl Ingester {
             let task_count = tasks.len();
 
             for task in tasks {
+                increment!(self.counter, retries);
                 self.spawn_ingest(Box::new(task));
             }
     
@@ -1067,6 +1073,13 @@ impl Ingester {
 
     async fn submit(&self, scan_key: String, task: Box<IngestTask>) -> Result<()> {
         let sha = task.submission.files[0].sha256.clone();
+        
+        #[cfg(test)]
+        if *self.test_hook_fail_submit.lock() > 0 {
+            *self.test_hook_fail_submit.lock() -= 1;
+            anyhow::bail!("Forced submit failure")
+        }
+
         self.submit_manager.submit_prepared(
             task.submission,
             Some(COMPLETE_QUEUE_NAME.to_owned()),

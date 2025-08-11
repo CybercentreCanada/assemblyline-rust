@@ -643,79 +643,81 @@ async fn test_ingest_retry() {
     // let attempts = Arc::new(Mutex::new(vec![]));
     // let failures = Arc::new(Mutex::new(vec![]));
 
-    // // install a worker task between the ingester and the dispatcher that drops the first message it sees
-    // let context = setup_custom({
-    //     let attempts = attempts.clone();
-    //     let failures = failures.clone();
-    //     |mut ingester| {
-    //         ingester.set_retry_delay(chrono::Duration::seconds(1));
+    // install a worker task between the ingester and the dispatcher that drops the first message it sees
+    let context = setup_custom({
+        // let attempts = attempts.clone();
+        // let failures = failures.clone();
+        |mut ingester| {
+            ingester.set_retry_delay(chrono::Duration::seconds(1));
 
-    //         let redis = ingester.submit_manager.dispatch_submission_queue.host();
-    //         let queue = redis.queue("replacement-dispatch-queue-".to_string() + &rand::rng().random::<u64>().to_string(), None);
-    //         let mut original_queue = queue.clone();
-    //         std::mem::swap(&mut original_queue, &mut ingester.submit_manager.dispatch_submission_queue);
+            *ingester.test_hook_fail_submit.lock() = 1;
 
-    //         tokio::spawn(async move {
-    //             loop {
-    //                 let item = queue.pop_timeout(Duration::from_secs(60)).await.unwrap();
-    //                 if let Some(item) = item {
-    //                     println!("dispatcher proxy saw item {} + 1", attempts.lock().len());
-    //                     attempts.lock().push(item.clone());
-    //                     if attempts.lock().len() > 1 {
-    //                         original_queue.push(&item).await.unwrap();
-    //                     } else {
-    //                         println!("dispatcher proxy dropped message");
-    //                         failures.lock().push(item);
-    //                     }
-    //                 } else {
-    //                     println!("dispatcher proxy empty message?");
-    //                 }
-    //             }
-    //         });
+            // let redis = ingester.submit_manager.dispatch_submission_queue.host();
+            // let queue = redis.queue("replacement-dispatch-queue-".to_string() + &rand::rng().random::<u64>().to_string(), None);
+            // let mut original_queue = queue.clone();
+            // std::mem::swap(&mut original_queue, &mut ingester.submit_manager.dispatch_submission_queue);
 
-    //         ingester
-    //     }
-    // }).await;
-    // let (sha, size) = ready_body(&context.core, json!({})).await;
+            // tokio::spawn(async move {
+            //     loop {
+            //         let item = queue.pop_timeout(Duration::from_secs(60)).await.unwrap();
+            //         if let Some(item) = item {
+            //             println!("dispatcher proxy saw item {} + 1", attempts.lock().len());
+            //             attempts.lock().push(item.clone());
+            //             if attempts.lock().len() > 1 {
+            //                 original_queue.push(&item).await.unwrap();
+            //             } else {
+            //                 println!("dispatcher proxy dropped message");
+            //                 failures.lock().push(item);
+            //             }
+            //         } else {
+            //             println!("dispatcher proxy empty message?");
+            //         }
+            //     }
+            // });
 
-    // context.ingest_queue.push(&MessageSubmission {
-    //     sid: rand::rng().random(),
-    //     metadata: Default::default(),
-    //     params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-    //         .set_description("file abc123")
-    //         .set_services_selected(&[])
-    //         .set_submitter("user")
-    //         .set_groups(&["user"]),
-    //     notification: Notification {
-    //         queue: Some("ingest-retry".to_string()),
-    //         threshold: None,
-    //     },
-    //     files: vec![File {
-    //         sha256: sha.clone(),
-    //         size: Some(size as u64),
-    //         name: "abc123".to_string()
-    //     }],
-    //     time: chrono::Utc::now(),
-    //     scan_key: None,
-    // }).await.unwrap();
+            ingester
+        }
+    }).await;
+    let (sha, size) = ready_body(&context.core, json!({})).await;
 
-    // let notification_queue = context.core.notification_queue("ingest-retry");
-    // let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    context.ingest_queue.push(&MessageSubmission {
+        sid: rand::rng().random(),
+        metadata: Default::default(),
+        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]),
+        notification: Notification {
+            queue: Some("ingest-retry".to_string()),
+            threshold: None,
+        },
+        files: vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+        }],
+        time: chrono::Utc::now(),
+        scan_key: None,
+    }).await.unwrap();
 
-    // // One of the submission will get processed fully
-    // let first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    let notification_queue = context.core.notification_queue("ingest-retry");
+    let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+
+    // One of the submission will get processed fully
+    let first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
     // assert_eq!(attempts.lock().len(), 2);
     // assert_eq!(failures.lock().len(), 1);
-    // assert_eq!(first_submission.state, SubmissionState::Completed);
-    // assert_eq!(first_submission.files.len(), 1);
-    // assert_eq!(first_submission.errors.len(), 0);
-    // assert_eq!(first_submission.results.len(), 4);
+    assert_eq!(*context.ingester.test_hook_fail_submit.lock(), 0);
+    assert_eq!(first_submission.state, SubmissionState::Completed);
+    assert_eq!(first_submission.files.len(), 1);
+    assert_eq!(first_submission.errors.len(), 0);
+    assert_eq!(first_submission.results.len(), 4);
 
-    // // metrics.expect('ingester', 'duplicates', 0)
-    // context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1), ("retries", 1)]).await;
-    // context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+    // metrics.expect('ingester', 'duplicates', 0)
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1), ("retries", 1)]).await;
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 
-    todo!()
 }
 
 /// MARK: ingest timeout
