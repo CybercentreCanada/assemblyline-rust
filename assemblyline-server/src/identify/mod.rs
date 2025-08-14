@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
 use magic_sys as _;
-
+use csv_scout;
 use crate::cachestore::CacheStore;
 use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence};
 use crate::IBool;
@@ -705,7 +705,13 @@ impl Identify {
                 let mime = data.mime.clone().unwrap_or_default();
                 // We do not trust magic/mimetype's CSV identification, so we test it first
                 if data.magic == "CSV text" || ["text/csv", "application/csv"].contains(&mime.as_str()) {
-                    error!("csv testing not implemented");
+                    // Determine if the file is truly a CSV file by sniffing for the dialect
+                    let is_csv = csv_scout::Sniffer::new().sniff_path(&path);
+                    if is_csv.is_ok() {
+                        data.file_type = "text/csv".to_string();
+                        return Ok(data);
+                    }
+
                     // with open(path, newline='') as csvfile:
                     //     try:
                     //         # Try to read the file as a normal csv without special sniffed dialect

@@ -70,7 +70,7 @@ rule code_javascript {
         and (
                 (
                     (
-                        mime startswith "text" or mime == "application/javascript"
+                        mime startswith "text" or mime startswith "application/javascript"
                     )
                     and (
                         2 of ($strong_js*)
@@ -94,7 +94,7 @@ rule code_javascript {
                     )
                 )
                 or (
-                    mime == "application/octet-stream"
+                    mime startswith "application/octet-stream"
                     and 4 of ($strong_js*)
                 )
             )
@@ -1058,7 +1058,7 @@ rule code_batch {
             )
         )
         or (
-            mime == "application/octet-stream"
+            mime startswith "application/octet-stream"
             and
             (
                 for 1 of ($cmd*) :( # > 20 )
