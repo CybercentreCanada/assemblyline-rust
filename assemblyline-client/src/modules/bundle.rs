@@ -59,7 +59,7 @@ impl Bundle {
         rescan_services: Option<Vec<String>>, 
         exist_ok: impl IBool, 
         allow_incomplete: impl IBool, 
-        complete_queue: Option<String>
+        _complete_queue: Option<String>
     ) -> Result<JsonMap, Error> {
         let path = api_path!(BUNDLE_PATH);
 

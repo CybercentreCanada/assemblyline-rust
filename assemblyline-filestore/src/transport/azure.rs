@@ -301,7 +301,7 @@ impl Transport for TransportAzure {
                 let chunk = match chunk {
                     Ok(chunk) => chunk,
                     Err(err) => {
-                        _ = send.send(Err(std::io::Error::new(std::io::ErrorKind::Other, err))).await;
+                        _ = send.send(Err(std::io::Error::other(err))).await;
                         return;
                     },
                 };
@@ -311,7 +311,7 @@ impl Transport for TransportAzure {
                     let data = match data {
                         Ok(data) => data,
                         Err(err) => {
-                            _ = send.send(Err(std::io::Error::new(std::io::ErrorKind::Other, err))).await;
+                            _ = send.send(Err(std::io::Error::other(err))).await;
                             return;
                         },
                     };

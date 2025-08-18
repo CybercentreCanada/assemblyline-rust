@@ -51,6 +51,8 @@ pub struct Metrics {
     pub timed_out: u32,
     /// Number of safelisted submissions
     pub whitelisted: u32,
+    /// Number of retried submissions
+    pub retries: u32,
 
     /// Counter to track used cpu time
     #[serde(flatten)]

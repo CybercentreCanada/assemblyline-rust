@@ -164,8 +164,7 @@ impl Connection {
         debug!("Get version");
         let versions = con.get("api/", convert_api_output_list).await?;
         let found = versions.into_iter()
-            .map(|version| match version.as_str() {None => false, Some(version) => version == "v4"})
-            .any(|b|b);
+            .any(|version| match version.as_str() {None => false, Some(version) => version == "v4"});
         if !found {
             return Err(Error::client_error("Supported APIS (v4) are not available".to_owned(), 400))
         }
@@ -280,7 +279,7 @@ impl Connection {
         };
 
         let mut retries = 0;
-        while self.max_retries.map_or(true, |max| retries <= max) {
+        while self.max_retries.is_none_or(|max| retries <= max) {
             if retries > 0 {
                 let seconds = 2.0_f64.min(2.0_f64.powf(retries as f64 - 7.0));
                 tokio::time::sleep(tokio::time::Duration::from_secs_f64(seconds)).await;

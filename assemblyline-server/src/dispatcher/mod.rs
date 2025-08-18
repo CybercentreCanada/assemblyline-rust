@@ -99,7 +99,7 @@ macro_rules! retry {
 
 enum DispatchAction {
     Start(ServiceStartMessage, Option<oneshot::Sender<Result<()>>>),
-    Result(ServiceResponse),
+    Result(Box<ServiceResponse>),
     Check(Sid),
     BadSid(Sid),
     DescribeStatus(Sid, redis_objects::Queue<WatchQueueMessage>),
@@ -999,7 +999,7 @@ impl Dispatcher {
 
             // If we have any messages, schedule them to be processed by the right worker thread
             for message in messages {
-                self.send_dispatch_action(DispatchAction::Result(message)).await;
+                self.send_dispatch_action(DispatchAction::Result(Box::new(message))).await;
             }
         }
         Ok(())
@@ -1589,7 +1589,7 @@ impl Dispatcher {
                     timeouts.remove(&key);
                     task.running_services.remove(&key);
 
-                    match message {
+                    match *message {
                         ServiceResponse::Result(data) => self.process_service_result(task, data).await?,
                         ServiceResponse::Error(data) => self.process_service_error(task, &data.error_key, data.error).await?,
                     };

@@ -46,7 +46,7 @@ impl ServiceHelper {
         // register for change to services
         let changes: ChangeChannel = redis_volatile.pubsub_json_listener()
             .psubscribe("changes.services.*".to_owned())
-            .listen();
+            .listen().await;
 
         // Initialize the services
         let services = datastore.list_all_services().await.context("list_all_services")?;
@@ -484,17 +484,23 @@ pub mod test {
         core.datastore.service.commit(None).await.unwrap();
         core.datastore.service_delta.commit(None).await.unwrap();
 
-        for (name, _) in services {
-            core.redis_volatile.publish(&("changes.services.".to_owned() + &name), &serde_json::to_vec(&ServiceChange {
+        for name in services.keys() {
+            core.redis_volatile.publish(&("changes.services.".to_owned() + name), &serde_json::to_vec(&ServiceChange {
                 operation: assemblyline_models::messages::changes::Operation::Added,
-                name,
+                name: name.clone(),
             }).unwrap()).await.unwrap();
         }
         println!("Services added");
                 
-        for step in 0..1000 {
+        'outer: for step in 0..1000 {
+            tokio::time::sleep(Duration::from_millis(step)).await;
+            for name in services.keys() {
+                let _ = match core.services.get(name) {
+                    Some(value) => value,
+                    None => continue 'outer
+                };
+            }
             if core.services.list_enabled().len() == service_count { break }
-            tokio::time::sleep(Duration::from_micros(step)).await;
         }
         println!("Services confirmed");
         (core, redis)

@@ -82,7 +82,6 @@ impl Client {
 
     /// Connect to an assemblyline system
     pub async fn from_connection(connection: Arc<Connection>) -> Result<Self, types::Error> {
-        // let connection = Arc::new(Connection::connect(server, auth, None, true, Default::default(), Some(cert), None).await?);
         Ok(Self {
             alert: Alert::new(connection.clone()),
             bundle: Bundle::new(connection.clone()),
@@ -101,11 +100,13 @@ impl Client {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
     use assemblyline_models::ClassificationString;
     use rand::Rng;
 
-    use crate::{Authentication, Client};
+    use crate::{Authentication, Client, Connection};
 
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -116,7 +117,17 @@ mod tests {
         let url = std::env::var("ASSEMBLYLINE_URL").unwrap();
         let username = std::env::var("ASSEMBLYLINE_USER").unwrap();
         let key = std::env::var("ASSEMBLYLINE_KEY").unwrap();
-        Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
+
+        let connection = Connection::connect(
+            url, 
+            Authentication::ApiKey { username, key }, 
+            Some(2), 
+            crate::TLSSettings::Native, 
+            Default::default(), 
+            Some(30.0)
+        ).await.unwrap();
+        Client::from_connection(Arc::new(connection)).await.unwrap()
+        // Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
     }
 
     fn random_body() -> Vec<u8> {
@@ -132,10 +143,11 @@ mod tests {
     #[tokio::test]
     async fn submit_content() {
         let client = prepare_client().await;
+        assemblyline_models::disable_global_classification();
 
         let result = client.submit.single()
             .metadata_item("testbatch".to_owned(), "0".to_owned())
-            .params(SubmissionParams{ ttl: 1, ..SubmissionParams::new(ClassificationString::try_unrestricted().unwrap())})
+            .params(SubmissionParams{ ttl: 1, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_string()))})
             .fname("test-file".to_owned())
             .content(random_body()).await.unwrap();
 
@@ -146,13 +158,14 @@ mod tests {
     #[tokio::test]
     async fn search_single_page() {
         let client = prepare_client().await;
+        assemblyline_models::disable_global_classification();
         let batch: u64 = rand::rng().random();
         let batch: String = batch.to_string();
 
         let _result = client.ingest.single()
             .metadata_item("testbatch".to_owned(), batch.clone())
             .notification_queue(batch.clone())
-            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".to_owned()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::try_unrestricted().unwrap())})
+            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".to_owned()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))})
             .fname("test-file".to_owned())
             .content(random_body()).await.unwrap();
 

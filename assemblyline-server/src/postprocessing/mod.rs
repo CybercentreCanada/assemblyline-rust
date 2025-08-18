@@ -109,7 +109,7 @@ impl ActionWorker {
         });
 
         // Make sure we load any changed actions
-        let reload_watcher = core.redis_volatile.subscribe("system.postprocess".to_owned());
+        let reload_watcher = core.redis_volatile.subscribe("system.postprocess".to_owned()).await;
         tokio::spawn(Self::watch_actions_pubsub(reload_watcher, Arc::downgrade(&worker)));
 
         // Load the current actions

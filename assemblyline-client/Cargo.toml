@@ -15,14 +15,14 @@ rustls-pemfile = "1.0"
 serde = { version = "1.0", features = ["derive", "std"] }
 serde_with = "3.3"
 serde_json = "1.0"
-strum = { version = "0.25", features = ["derive"] }
+strum = { version = "0.27", features = ["derive"] }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 futures = "0.3"
 async-recursion = { version = "1" }
 
-base64 = "0.21"
+base64 = "0.22"
 url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
@@ -30,12 +30,21 @@ chrono = { version = "0.4", features = ["serde"] }
 assemblyline-models = { version="0.5", path = "../assemblyline-models" }
 
 # Libraryies used for the ingest binary
-clap = { version = "4.5", features = ["derive"] }
-configparser = "3"
-expanduser = "1.2"
-rand = "0.9"
-sha2 = "0.10"
-env_logger = "0.10"
+clap = { version = "4.5", features = ["derive"], optional = true }
+configparser = { version = "3", optional = true }
+expanduser = { version = "1.2", optional = true }
+rand = { version = "0.9", optional = true }
+sha2 = { version = "0.10", optional = true }
+env_logger = { version = "0.11", optional = true }
+
+[features]
+ingest-binary = ["clap"]
+
+[[bin]]
+name = "ingest"
+required-features = ["ingest-binary"]
 
 [dev-dependencies]
-assemblyline-markings = { version="0.1.10" }
+assemblyline-markings = { version="0.1.12" }
+rand = "0.9"
+env_logger = "0.11"

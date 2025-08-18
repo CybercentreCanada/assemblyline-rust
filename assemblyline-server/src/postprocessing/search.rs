@@ -361,7 +361,7 @@ pub struct StringQuery {
     pub value: String,
 }
 
-fn make_string(data: &serde_json::Value) -> Cow<str> {
+fn make_string(data: &'_ serde_json::Value) -> Cow<'_, str> {
     match data.as_str() {
         Some(data) => data.trim().into(),
         None => data.to_string().into()

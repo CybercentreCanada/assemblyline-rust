@@ -96,7 +96,7 @@ impl TransportS3 {
         let endpoint_url = format!("{scheme}://{host}:{port}");
 
         // Ok(S3BlobStore { client: bucket })
-        let mut loader = aws_config::defaults(BehaviorVersion::v2024_03_28());
+        let mut loader = aws_config::defaults(BehaviorVersion::v2025_01_17());
 
         // Override the region
         if let Some(region) = parameters.aws_region.clone() {
@@ -118,6 +118,8 @@ impl TransportS3 {
 
         // Configure the use of ssl
         loader = loader.http_client({
+            use legacy_hyper_rustls as hyper_rustls;
+            use legacy_rustls as rustls;
 
             let https_connector = if parameters.verify {
                 hyper_rustls::HttpsConnectorBuilder::new()
@@ -135,7 +137,7 @@ impl TransportS3 {
                                     
                 tls_config
                     .dangerous()
-                    .set_certificate_verifier(Arc::new(NoCertificateVerification{}));
+                    .set_certificate_verifier(Arc::new(verifier::NoCertificateVerification::new()));
 
                 hyper_rustls::HttpsConnectorBuilder::new()
                     .with_tls_config(tls_config)
@@ -145,15 +147,17 @@ impl TransportS3 {
                     .build()
             };
 
-            // this is for a later version of rustls if the aws library actually updates
+            // this is for a later version of rustls, the current non-legacy code in aws
+            // doesn't support custimizing the tls configurations
             // let https_connector = if !parameters.verify {
             //     let root_store = rustls::RootCertStore::empty();
             //     let mut tls_config = rustls::ClientConfig::builder()    
             //         .with_root_certificates(root_store.clone())
             //         .with_no_client_auth();
+            //     let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store)).build()?;
             //     tls_config
             //         .dangerous()
-            //         .set_certificate_verifier(Arc::new(NoCertificateVerification::new(Arc::new(root_store))?));
+            //         .set_certificate_verifier(Arc::new(verifier::NoCertificateVerification::new(verifier)));
 
             //     hyper_rustls::HttpsConnectorBuilder::new()
             //         .with_tls_config(tls_config)
@@ -170,8 +174,7 @@ impl TransportS3 {
             //         .build()
             // };
 
-            // aws_smithy_runtime_api::client::http::SharedHttpClient::new
-            aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder::new()
+            aws_smithy_http_client::hyper_014::HyperClientBuilder::new()
                 .build(https_connector)
         });
 
@@ -354,7 +357,7 @@ impl Transport for TransportS3 {
             while let Some(buffer) = request.body.next().await {
                 _ = match buffer {
                     Ok(data) => send.send(Ok(data)).await,
-                    Err(err) => send.send(Err(std::io::Error::new(std::io::ErrorKind::Other, err))).await,
+                    Err(err) => send.send(Err(std::io::Error::other(err))).await,
                 };
             }
         });
@@ -389,24 +392,155 @@ impl Transport for TransportS3 {
 //                 yield chunk['Key']
 
 
-/// A dummy certificate verifier that just accepts anything
-#[derive(Debug)]
-pub struct NoCertificateVerification {}
+mod verifier {
+    use legacy_rustls::client::{ServerCertVerified, ServerCertVerifier};
 
-impl rustls::client::ServerCertVerifier for NoCertificateVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
-    ) -> std::prelude::v1::Result<rustls::client::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::ServerCertVerified::assertion())    
+    /// A dummy certificate verifier that just accepts anything
+    #[derive(Debug)]
+    pub struct NoCertificateVerification { }
+
+    impl NoCertificateVerification {
+        pub fn new() -> Self {
+            Self { }
+        }
     }
-}
 
+    impl ServerCertVerifier for NoCertificateVerification {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &legacy_rustls::Certificate,
+            _intermediates: &[legacy_rustls::Certificate],
+            _server_name: &legacy_rustls::ServerName,
+            _scts: &mut dyn Iterator<Item = &[u8]>,
+            _ocsp_response: &[u8],
+            _now: std::time::SystemTime,
+        ) -> Result<legacy_rustls::client::ServerCertVerified, legacy_rustls::Error> {
+            Ok(ServerCertVerified::assertion())
+        }
+    }
+
+    // Dummy verifiier implementations for newer rustls versions
+
+    // use legacy_rustls as rustls;
+    // use legacy_rustls::{
+    //     client::{
+    //         danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    //         WebPkiServerVerifier,
+    //     },
+    //     pki_types::{CertificateDer, ServerName, UnixTime},
+    //     DigitallySignedStruct,
+    // };
+    // use std::sync::Arc;
+
+    // /// A dummy certificate verifier that just accepts anything
+    // #[derive(Debug)]
+    // pub struct NoCertificateVerification {
+    //     inner: Arc<WebPkiServerVerifier>,
+    // }
+
+    // impl NoCertificateVerification {
+    //     pub fn new(inner: Arc<WebPkiServerVerifier>) -> Self {
+    //         Self { inner }
+    //     }
+    // }
+
+    // impl ServerCertVerifier for NoCertificateVerification {
+
+    //     fn verify_server_cert(
+    //         &self,
+    //         _end_entity: &CertificateDer<'_>,
+    //         _intermediates: &[CertificateDer<'_>],
+    //         _server_name: &ServerName<'_>,
+    //         _ocsp: &[u8],
+    //         _now: UnixTime,
+    //     ) -> Result<ServerCertVerified, rustls::Error> {
+    //         Ok(ServerCertVerified::assertion())
+    //     }
+
+    //     fn verify_tls12_signature(
+    //         &self,
+    //         message: &[u8],
+    //         cert: &CertificateDer<'_>,
+    //         dss: &DigitallySignedStruct,
+    //     ) -> Result<HandshakeSignatureValid, rustls::Error> {
+    //         self.inner.verify_tls12_signature(message, cert, dss)
+    //     }
+
+    //     fn verify_tls13_signature(
+    //         &self,
+    //         message: &[u8],
+    //         cert: &CertificateDer<'_>,
+    //         dss: &DigitallySignedStruct,
+    //     ) -> Result<HandshakeSignatureValid, rustls::Error> {
+    //         self.inner.verify_tls13_signature(message, cert, dss)
+    //     }
+
+    //     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+    //         self.inner.supported_verify_schemes()
+    //     }
+    // }
+
+    // /// A weak certificate verifier that performs certificate verification but doesn't require hostnames to match
+    // #[derive(Debug)]
+    // pub struct NoServerNameVerification {
+    //     inner: Arc<WebPkiServerVerifier>,
+    // }
+
+    // impl NoServerNameVerification {
+    //     pub fn new(inner: Arc<WebPkiServerVerifier>) -> Self {
+    //         Self { inner }
+    //     }
+    // }
+
+    // impl ServerCertVerifier for NoServerNameVerification {
+    //     fn verify_server_cert(
+    //         &self,
+    //         _end_entity: &CertificateDer<'_>,
+    //         _intermediates: &[CertificateDer<'_>],
+    //         _server_name: &ServerName<'_>,
+    //         _ocsp: &[u8],
+    //         _now: UnixTime,
+    //     ) -> Result<ServerCertVerified, rustls::Error> {
+    //         match self
+    //             .inner
+    //             .verify_server_cert(_end_entity, _intermediates, _server_name, _ocsp, _now)
+    //         {
+    //             Ok(scv) => Ok(scv),
+    //             Err(rustls::Error::InvalidCertificate(cert_error)) => {
+    //                 if let rustls::CertificateError::NotValidForName = cert_error {
+    //                     Ok(ServerCertVerified::assertion())
+    //                 } else {
+    //                     Err(rustls::Error::InvalidCertificate(cert_error))
+    //                 }
+    //             }
+    //             Err(e) => Err(e),
+    //         }
+    //     }
+
+    //     fn verify_tls12_signature(
+    //         &self,
+    //         message: &[u8],
+    //         cert: &CertificateDer<'_>,
+    //         dss: &DigitallySignedStruct,
+    //     ) -> Result<HandshakeSignatureValid, rustls::Error> {
+    //         self.inner.verify_tls12_signature(message, cert, dss)
+    //     }
+
+    //     fn verify_tls13_signature(
+    //         &self,
+    //         message: &[u8],
+    //         cert: &CertificateDer<'_>,
+    //         dss: &DigitallySignedStruct,
+    //     ) -> Result<HandshakeSignatureValid, rustls::Error> {
+    //         self.inner.verify_tls13_signature(message, cert, dss)
+    //     }
+
+    //     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+    //         self.inner.supported_verify_schemes()
+    //     }
+    // }
+
+}
 
 
 //     def with_retries(self, func, *args, **kwargs):

@@ -123,7 +123,7 @@ async fn test_badlist_exist() {
     let resp = client.get(url).send().await.unwrap();
     let status = resp.status();
     let body = resp.bytes().await.unwrap();
-    assert!(status.is_success(), "{:?} {:?}", status, body);
+    assert!(status.is_success(), "{status:?} {body:?}");
     assert_eq!(serde_json::from_slice::<APIResponse<Badlist>>(&body).unwrap().api_response, valid_resp);
 }
 
@@ -166,7 +166,7 @@ async fn test_badlist_exists_tags() {
     assert_eq!(body.api_response.len(), 2);
 
     for item in body.api_response {
-        assert!(items.contains(&item), "{:?}", item);
+        assert!(items.contains(&item), "{item:?}");
     }
 }
 

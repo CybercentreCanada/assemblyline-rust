@@ -35,9 +35,11 @@ impl ListenerBuilder {
     }
 
     /// Launch the task reading from the pubsub
-    pub fn listen(self) -> mpsc::Receiver<Option<Msg>> {
+    pub async fn listen(self) -> mpsc::Receiver<Option<Msg>> {
 
         let (message_sender, message_receiver) = mpsc::channel(64);
+        let started = Arc::new(tokio::sync::Notify::new());
+        let notify_started = started.clone();
 
         tokio::spawn(async move {
             const STARTING_EXPONENT: f64 = -8.0;
@@ -69,6 +71,7 @@ impl ListenerBuilder {
                         continue 'reconnect;
                     }
                 }
+                notify_started.notify_waiters();
 
                 let mut stream = pubsub.on_message();
                 while let Some(message) = stream.next().await {
@@ -85,6 +88,7 @@ impl ListenerBuilder {
             }
         });
 
+        started.notified().await;
         message_receiver
     }
 }
@@ -117,7 +121,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
     }
 
     /// Launch the task reading from the pubsub
-    pub fn listen(self) -> mpsc::Receiver<Option<Message>> {
+    pub async fn listen(self) -> mpsc::Receiver<Option<Message>> {
 
         let (parsed_sender, parsed_receiver) = mpsc::channel(2);
 
@@ -125,7 +129,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
             store: self.store,
             channels: self.channels,
             patterns: self.patterns
-        }.listen();
+        }.listen().await;
 
         tokio::spawn(async move {
             while let Some(message) = message_reciever.recv().await {

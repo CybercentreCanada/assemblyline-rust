@@ -6,7 +6,7 @@ use crate::{Sha256, Sid};
 
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SubmissionDispatchMessage {
     pub submission: crate::datastore::Submission,
     #[serde(default)]
@@ -34,7 +34,7 @@ impl SubmissionDispatchMessage {
     }
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct FileTreeData {
     pub name: Vec<String>,

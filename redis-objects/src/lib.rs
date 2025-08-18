@@ -127,10 +127,10 @@ impl RedisObjects {
     }
 
     /// Build a json listener that produces a stream of events using the default configuration
-    pub fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<T>> {
+    pub async fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<T>> {
         self.pubsub_json_listener()
             .subscribe(channel)
-            .listen()
+            .listen().await
     }
 
     /// Start building a raw data listener that produces a stream of events
@@ -139,10 +139,10 @@ impl RedisObjects {
     }
 
     /// Build a raw data listener that produces a stream of events using the default configuration
-    pub fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<Msg>> {
+    pub async fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<Msg>> {
         self.pubsub_listener()
             .subscribe(channel)
-            .listen()
+            .listen().await
     }
 
     /// Open an interface for tracking user quotas on redis

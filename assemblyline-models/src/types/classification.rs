@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 use serde::{Serialize, Deserialize};
@@ -279,9 +280,21 @@ impl From<ClassificationString> for String {
     }
 }
 
+impl Deref for ClassificationString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl ClassificationString {
     pub fn new(classification: String, parser: &Arc<ClassificationParser>) -> Result<Self, ModelError> {
         Ok(Self(parser.normalize_classification_options(&classification, NormalizeOptions::short())?))
+    }
+
+    pub fn new_unchecked(classification: String) -> Self {
+        Self(classification)
     }
 
     pub fn try_unrestricted() -> Option<Self> {

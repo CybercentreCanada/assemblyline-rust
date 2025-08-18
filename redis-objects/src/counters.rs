@@ -213,7 +213,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
 
     /// Get a writeable guard holding the message that will next be exported 
     /// Rather than using this directly the increment macro can be used
-    pub fn lock(&self) -> parking_lot::MutexGuard<Message> {
+    pub fn lock(&'_ self) -> parking_lot::MutexGuard<'_, Message> {
         self.current.lock()
     }
 
@@ -288,7 +288,7 @@ async fn auto_exporting_counter() {
     }
 
     // Subscribe on the pubsub being used
-    let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned());
+    let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned()).await;
 
     {   
         info!("Fast export");

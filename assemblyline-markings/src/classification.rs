@@ -118,7 +118,8 @@ impl ClassificationParser {
             description: INVALID_CLASSIFICATION.to_owned(),
             lvl: INVALID_LVL,
             name: INVALID_CLASSIFICATION.parse()?,
-            short_name: INVALID_SHORT_CLASSIFICATION.parse()?
+            short_name: INVALID_SHORT_CLASSIFICATION.parse()?,
+            is_hidden: false,
         }, true)?;
 
         // Add null classification
@@ -128,7 +129,8 @@ impl ClassificationParser {
             description: NULL_CLASSIFICATION.to_owned(),
             lvl: NULL_LVL,
             name: NULL_CLASSIFICATION.parse()?,
-            short_name: NULL_CLASSIFICATION.parse()?
+            short_name: NULL_CLASSIFICATION.parse()?,
+            is_hidden: false,
         }, true)?;
 
         // Convert the levels
