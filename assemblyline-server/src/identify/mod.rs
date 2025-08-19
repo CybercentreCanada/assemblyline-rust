@@ -732,32 +732,26 @@ impl Identify {
                 }
     
                 if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN { 
-                    let mut magika_mime: Option<&'static str> = None;
                     let mut untrusted_magicka_type = None;
                     if data.size >= 200 {
-                        magika_mime = Some(this.magika.lock().identify_file_sync(&path).unwrap().info().mime_type);
+                        let magika_mime = this.magika.lock().identify_file_sync(&path).unwrap().info().mime_type;
                         let trusted_mimes = this.trusted_mimes.lock().clone();
 
-                        untrusted_magicka_type = untrusted_mimes(magika_mime.unwrap());                        
+                        untrusted_magicka_type = untrusted_mimes(magika_mime);                        
 
-                        if trusted_mimes.contains_key(magika_mime.unwrap()) && untrusted_magicka_type.is_none(){
-                            data.file_type = trusted_mimes.get(magika_mime.unwrap()).unwrap().to_string();                    
+                        if trusted_mimes.contains_key(magika_mime) && untrusted_magicka_type.is_none(){
+                            data.file_type = trusted_mimes.get(magika_mime).unwrap().to_string();                    
                             return Ok(data);
                         }
                     }
 
+                    // Rely on untrusted mimes as a last resort for unknowns
                     let untrusted_type = untrusted_mimes(data.mime.clone().unwrap().as_str());
                     if untrusted_type.is_some() {
                         data.file_type = untrusted_type.unwrap().to_string();
 
                     } else if untrusted_magicka_type.is_some() {
                         data.file_type = untrusted_magicka_type.unwrap().to_string();
-                    }
-                        
-
-                    if let Some(new_type) = untrusted_mimes(&mime) {
-                        // Rely on untrusted mimes
-                        data.file_type = new_type.to_string();
                     }
                 }
             }

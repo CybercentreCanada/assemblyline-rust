@@ -664,7 +664,7 @@ rule code_ps1 {
             )
         )
         or (
-            mime == "application/octet-stream"
+            mime startswith "application/octet-stream"
             and 3 of ($strong_pwsh*)
         )
 }
