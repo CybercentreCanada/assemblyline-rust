@@ -747,11 +747,10 @@ impl Identify {
 
                     // Rely on untrusted mimes as a last resort for unknowns
                     let untrusted_type = untrusted_mimes(data.mime.clone().unwrap().as_str());
-                    if untrusted_type.is_some() {
-                        data.file_type = untrusted_type.unwrap().to_string();
-
-                    } else if untrusted_magicka_type.is_some() {
-                        data.file_type = untrusted_magicka_type.unwrap().to_string();
+                    if let Some(untrusted_type) = untrusted_type {
+                        data.file_type = untrusted_type.to_string();
+                    } else if let Some(untrusted_magicka_type) = untrusted_magicka_type {
+                        data.file_type = untrusted_magicka_type.to_string();
                     }
                 }
             }
