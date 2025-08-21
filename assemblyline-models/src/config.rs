@@ -750,6 +750,7 @@ impl Default for Metrics {
 
 #[derive(Serialize, Deserialize, Default)]
 /// Malware Archive Configuration
+#[serde(default)]
 pub struct Archiver {
     /// List of minimum required service before archiving takes place
     pub minimum_required_services: Vec<String>,
@@ -757,6 +758,7 @@ pub struct Archiver {
 
 /// Redis Configuration
 #[derive(Serialize, Deserialize)]
+#[serde(default)]
 pub struct Redis {
     /// A volatile Redis instance
     pub nonpersistent: RedisServer,
