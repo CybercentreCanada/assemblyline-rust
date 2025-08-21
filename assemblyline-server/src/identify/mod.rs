@@ -24,7 +24,8 @@ use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
 use magic_sys as _;
-
+use csv_scout;
+use magika;
 use crate::cachestore::CacheStore;
 use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence};
 use crate::IBool;
@@ -149,6 +150,7 @@ pub struct Identify {
     compiled_magic_patterns: Mutex<Arc<Vec<(String, regex::Regex)>>>,
     trusted_mimes: Mutex<Arc<HashMap<String, String>>>,
     cache: Option<CacheStore>,
+    magika: Mutex<magika::Session>,
     // custom: regex::Regex,
     pdf_encrypted: regex::bytes::Regex,
     pdf_portfolio: regex::bytes::Regex,
@@ -165,7 +167,7 @@ impl Identify {
 
     async fn new(cache: Option<CacheStore>, redis_volatile: Option<Arc<RedisObjects>>) -> Result<Arc<Self>> {
         // Load all data for the first time
-        let (file_type, mime_type) = Self::_load_magic_file(&cache).await.context("_load_bagic_file")?;
+        let (file_type, mime_type) = Self::_load_magic_file(&cache).await.context("_load_magic_file")?;
         let yara_rules = Self::_load_yara_file(&cache).await.context("_load_yara_file")?;
         let compiled_magic_patterns = Self::_load_magic_patterns(&cache).await.context("_load_magic_patterns")?;
         let trusted_mimes = Self::_load_trusted_mimes(&cache).await.context("_load_trusted_mimes")?;
@@ -179,6 +181,7 @@ impl Identify {
             // custom: regex::RegexBuilder::new("^custom: ").ignore_whitespace(true).build()?,
             pdf_encrypted: regex::bytes::Regex::new("/Encrypt")?,
             pdf_portfolio: regex::bytes::Regex::new("/Type/Catalog/Collection")?,
+            magika: Mutex::new(magika::Session::new()?),
             cache
         });
 
@@ -705,29 +708,12 @@ impl Identify {
                 let mime = data.mime.clone().unwrap_or_default();
                 // We do not trust magic/mimetype's CSV identification, so we test it first
                 if data.magic == "CSV text" || ["text/csv", "application/csv"].contains(&mime.as_str()) {
-                    error!("csv testing not implemented");
-                    // with open(path, newline='') as csvfile:
-                    //     try:
-                    //         # Try to read the file as a normal csv without special sniffed dialect
-                    //         complete_data = [x for x in islice(csv.reader(csvfile), 100)]
-                    //         if len(complete_data) > 2 and len(set([len(x) for x in complete_data])) == 1:
-                    //             data["type"] = "text/csv"
-                    //             # Final type identified, shortcut further processing
-                    //             return data
-                    //     except Exception:
-                    //         pass
-                    //     csvfile.seek(0)
-                    //     try:
-                    //         # Normal CSV didn't work, try sniffing the csv to see how we could parse it
-                    //         dialect = csv.Sniffer().sniff(csvfile.read(1024))
-                    //         csvfile.seek(0)
-                    //         complete_data = [x for x in islice(csv.reader(csvfile, dialect), 100)]
-                    //         if len(complete_data) > 2 and len(set([len(x) for x in complete_data])) == 1:
-                    //             data["type"] = "text/csv"
-                    //             # Final type identified, shortcut further processing
-                    //             return data
-                    //     except Exception:
-                    //         pass
+                    // Determine if the file is truly a CSV file by sniffing for the dialect
+                    let is_csv = csv_scout::Sniffer::new().sniff_path(&path);
+                    if is_csv.is_ok() {
+                        data.file_type = "text/csv".to_string();
+                        return Ok(data);
+                    }
                 }
     
                 if data.file_type == TEXT_PLAIN {
@@ -745,10 +731,27 @@ impl Identify {
                     data.file_type = new_type;
                 }
     
-                if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN {
-                    if let Some(new_type) = untrusted_mimes(&mime) {
-                        // Rely on untrusted mimes
-                        data.file_type = new_type.to_string();
+                if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN { 
+                    let mut untrusted_magicka_type = None;
+                    if data.size >= 200 {
+                        let magika_mime = this.magika.lock().identify_file_sync(&path).unwrap().info().mime_type;
+                        let trusted_mimes = this.trusted_mimes.lock().clone();
+
+                        untrusted_magicka_type = untrusted_mimes(magika_mime);                        
+
+                        if trusted_mimes.contains_key(magika_mime) && untrusted_magicka_type.is_none(){
+                            data.file_type = trusted_mimes.get(magika_mime).unwrap().to_string();                    
+                            return Ok(data);
+                        }
+                    }
+
+                    // Rely on untrusted mimes as a last resort for unknowns
+                    let untrusted_type = untrusted_mimes(data.mime.clone().unwrap().as_str());
+                    if untrusted_type.is_some() {
+                        data.file_type = untrusted_type.unwrap().to_string();
+
+                    } else if untrusted_magicka_type.is_some() {
+                        data.file_type = untrusted_magicka_type.unwrap().to_string();
                     }
                 }
             }

@@ -729,8 +729,7 @@ rule code_c {
         $ = /(^|\n)#include[ \t]*([<"])[\w.\/]+([>"])/
         $ = /(^|\n)#(if !defined|ifndef|define|endif|pragma)[ \t]+/
         $ = /(^|\n)public[ \t]*:/
-        $ = /ULONG|HRESULT|STDMETHOD/
-        $ = "THIS"
+        $ = /ULONG|STDMETHOD/
         $ = /(^|\n)(const[ \t]+char[ \t]+\w+;|extern[ \t]+|uint(8|16|32)_t[ \t]+)/
 
     condition:
@@ -808,6 +807,7 @@ rule code_python {
 
     meta:
         type = "code/python"
+        score = 3
 
     strings:
         $strong_py1 = /(^|\n)[ \t]*if[ \t]+__name__[ \t]*==[ \t]*['"]__main__['"][ \t]*:/
@@ -874,6 +874,26 @@ rule code_python {
                 and 1 of ($strong_py*)
             )
         )
+}
+
+
+rule code_python_os_system {
+
+    meta:
+        type = "code/python"
+        score = -2
+
+    strings:
+        $import_os_system1 = "__import__('os').system("
+        $import_os_system2 = "__import__(\"os\").system("
+
+    condition:
+        mime startswith "text"
+        and (
+            $import_os_system1 at 0 or $import_os_system2 at 0
+            or #import_os_system1 + #import_os_system2 >= 2
+        )
+
 }
 
 /*
@@ -1393,7 +1413,7 @@ rule text_rdp {
         score = -2
 
     strings:
-        // Documentation: https://learn.microsoft.com/en-us/azure/virtual-desktop/rdp-properties
+        // https://learn.microsoft.com/en-us/azure/virtual-desktop/rdp-properties
         // Connections
         $optional1  = "alternate full address:s:" ascii wide
         $optional2  = "alternate shell:s:" ascii wide
