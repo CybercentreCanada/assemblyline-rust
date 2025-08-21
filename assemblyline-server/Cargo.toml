@@ -36,6 +36,9 @@ cart_container = "1.0"
 
 yara = { version = "0.30", features = ["serde", "vendored"] }
 magic = "0.16.2"
+csv-scout = "0.0.9"
+magika = { version = "0.2.1", features = ["serde"] }
+ort = {version = "=2.0.0-rc.10", features = ["download-binaries"]}
 
 # Core framework
 tokio = { version = "1", features = ["full"] }

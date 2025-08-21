@@ -6,7 +6,7 @@ use uuid::uuid;
 
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
-pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
+pub const MAGIC_PATTERNS: [(&str, &str); 99] = [
     ("network/tnef", "Transport Neutral Encapsulation Format"),
     ("archive/chm", "MS Windows HtmlHelp Data"),
     ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
@@ -64,6 +64,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_rar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L179
     ("archive/rar", "^rar archive data"),
+    ("archive/squashfs", "^Squashfs filesystem"),
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_tar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L177
     ("archive/tar", "^(GNU|POSIX) tar archive"),
@@ -132,7 +133,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
     ("shortcut/windows", "^MS Windows shortcut"),
     ("document/email", "Mime entity text"),
     ("document/email", "MIME entity, ASCII text"),
-    ("metadata/sysmon/evt", "MS Windows Vista Event Log"),
+    ("metadata/sysmon/evt", "MS Windows Vista(-8\\.1)? Event Log"),
     ("metadata/sysmon/evt", "MS Windows 10-11 Event Log"),
     ("metadata/minidump", "Mini DuMP crash report"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L165
@@ -142,6 +143,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
     ("pgp/privkey", "^PGP private key block"),
     ("pgp/encrypted", "^PGP RSA encrypted session key"),
     ("pgp/message", "^PGP message Public-Key Encrypted Session Key"),
+    ("pgp/symmetric", "^PGP message Symmetric-Key Encrypted Session Key"),
     ("gpg/symmetric", "^GPG symmetrically encrypted data"),
     ("video/asf", "^Microsoft ASF"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L201
@@ -150,7 +152,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 97] = [
 
 
 /// LibMagic mimetypes that we blindly trust to assign an Assemblyline type
-pub const TRUSTED_MIMES: [(&str, &str); 148] = [
+pub const TRUSTED_MIMES: [(&str, &str); 146] = [
     // Mpeg Audio
     ("audio/mp2", "audio/mp2"),
     ("audio/x-mp2", "audio/mp2"),
@@ -224,7 +226,7 @@ pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     // Registry file
     ("text/x-ms-regedit", "text/windows/registry"),
     // Sysmon EVTX file
-    ("metadata/sysmon/evt", "application/x-ms-evtx"),
+    ("application/x-ms-evtx", "metadata/sysmon/evt"),
     // JSON file
     ("application/json", "text/json"),
     // Autorun files
@@ -335,8 +337,6 @@ pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     ("application/vnd.ms-cab-compressed", "archive/cabinet"),
     ("application/zstd", "archive/zstd"),
     ("application/x-zstd", "archive/zstd"),
-    // Inspired by https://github.com/CAPESandbox/sflock/blob/1fe3cf32d01d66c4ad38696c609b13d4f4bc9ea3/sflock/ident.py#L116
-    ("application/x-7z-compressed", "archive/7-zip"),
     ("application/x-bzip2", "archive/bzip2"),
     ("application/java-archive", "java/jar"),
     // JAVA Class
@@ -348,7 +348,6 @@ pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     ("message/rfc822", "document/email"),
     ("text/calendar", "text/calendar"),
     ("application/x-mach-binary", "executable/mach-o"),
-    ("application/x-iso9660-image", "archive/iso"),
     ("application/x-gettext-translation", "resource/mo"),
     ("application/x-hwp", "document/office/hwp"),
     ("application/vnd.iccprofile", "metadata/iccprofile"),
@@ -466,6 +465,7 @@ pub fn ole_clsid_guids() -> &'static HashMap<Uuid, String> {
 pub fn untrusted_mimes(mime: &str) -> Option<&'static str> {
     match mime {
         "application/javascript" => Some("code/javascript"),
+        "application/x-powershell" => Some("code/ps1"),
         "text/x-java" => Some("code/java"),
         "text/html" => Some("code/html"),
         "text/x-c++" => Some("code/c++"),
