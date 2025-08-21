@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use tempfile::NamedTempFile;
 
-fn get_samples_location() -> Option<String> {
-    std::env::var("SAMPLES_LOCATION").ok()
+fn get_samples_location() -> String {
+    std::env::var("SAMPLES_LOCATION").expect("Define environment variable 'SAMPLES_LOCATION' to the path to the samples directory.")
 }
 
 
@@ -67,7 +67,7 @@ async fn sample_identification() {
     let _ = env_logger::builder().filter_level(log::LevelFilter::Debug).is_test(true).try_init();
     let identify = super::Identify::new_without_cache().await.unwrap();
 
-    let mut directories = vec![(String::new(), PathBuf::from(get_samples_location().unwrap()))];
+    let mut directories = vec![(String::new(), PathBuf::from(get_samples_location()))];
     let mut failures  = vec![];
     let mut counter = 0;
 
