@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-models"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"

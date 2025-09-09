@@ -37,6 +37,7 @@ pub struct Submission {
     #[serde(default)]
     pub archive_ts: Option<DateTime<Utc>>,
     /// Document is present in the malware archive
+    #[serde(default)]
     pub archived: bool,
     /// Classification of the submission
     #[serde(flatten)]
@@ -51,6 +52,7 @@ pub struct Submission {
     #[metadata(store=false)]
     pub errors: Vec<String>,
     /// Expiry timestamp
+    #[serde(default)]
     #[metadata(store=false)]
     pub expiry_ts: Option<DateTime<Utc>>,
     /// Total number of files in the submission
@@ -61,6 +63,7 @@ pub struct Submission {
     /// Maximum score of all the files in the scan
     pub max_score: i32,
     /// Metadata associated to the submission
+    #[serde(default)]
     #[metadata(store=false, mapping="flattenedobject", copyto="__text__")]
     pub metadata: HashMap<String, Wildcard>,
     /// Submission parameter details
@@ -74,17 +77,22 @@ pub struct Submission {
     /// Status of the submission
     pub state: SubmissionState,
     /// This document is going to be deleted as soon as it finishes
+    #[serde(default)]
     pub to_be_deleted: bool,
     /// Submission-specific times
+    #[serde(default)]
     pub times: Times,
     /// Malicious verdict details
+    #[serde(default)]
     pub verdict: Verdict,
     /// Was loaded from the archive
+    #[serde(default)]
     #[metadata(index=false)]
     pub from_archive: bool,
 
     /// the filescore key, used in deduplication. This is a non-unique key, that is
     /// shared by submissions that may be processed as duplicates.
+    #[serde(default)]
     #[metadata(index=false, store=false)]
     pub scan_key: Option<String>,
 }
@@ -138,67 +146,91 @@ pub struct SubmissionParams {
     /// classification of the submission
     pub classification: ClassificationString,
     /// Should a deep scan be performed?
+    #[serde(default)]
     pub deep_scan: bool,
     /// Description of the submission
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[metadata(store=true, copyto="__text__")]
     pub description: Option<Text>,
     /// Should this submission generate an alert?
+    #[serde(default)]
     pub generate_alert: bool,
     /// List of groups related to this scan
     // #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
     pub groups: Vec<UpperString>,
     /// Ignore the cached service results?
+    #[serde(default)]
     pub ignore_cache: bool,
     /// Should we ignore dynamic recursion prevention?
+    #[serde(default)]
     pub ignore_recursion_prevention: bool,
     /// Should we ignore filtering services?
+    #[serde(default)]
     pub ignore_filtering: bool,
     /// Ignore the file size limits?
+    #[serde(default)]
     pub ignore_size: bool,
     /// Exempt from being dropped by ingester?
+    #[serde(default)]
     pub never_drop: bool,
     /// Is the file submitted already known to be malicious?
+    #[serde(default)]
     pub malicious: bool,
     /// Max number of extracted files
+    #[serde(default="default_max_extracted")]
     pub max_extracted: i32,
     /// Max number of supplementary files
+    #[serde(default="default_max_supplementary")]
     pub max_supplementary: i32,
     /// Priority of the scan
+    #[serde(default="default_priority")]
     pub priority: u16,
     /// Does this submission count against quota?
+    #[serde(default)]
     pub quota_item: bool,
     /// Service selection
+    #[serde(default)]
     pub services: ServiceSelection,
     /// Service-specific parameters
+    #[serde(default)]
     #[metadata(index=false, store=false)]
     pub service_spec: HashMap<String, JsonMap>,
     /// User who submitted the file
     #[metadata(store=true, copyto="__text__")]
     pub submitter: String,
     /// Collect extra logging information during dispatching
+    #[serde(default)]
     pub trace: bool,
     /// Time, in days, to live for this submission
+    #[serde(default)]
     pub ttl: i32,
     /// Type of submission
+    #[serde(default="default_type")]
     #[serde(rename="type")]
     pub submission_type: String,
     /// Initialization for temporary submission data
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[metadata(index=false)]
     pub initial_data: Option<Text>,
     /// Does the submission automatically goes into the archive when completed?
+    #[serde(default)]
     pub auto_archive: bool,
     /// When the submission is archived, should we delete it from hot storage right away?
+    #[serde(default)]
     pub delete_after_archive: bool,
     /// Parent submission ID
+    #[serde(default)]
     pub psid: Option<Sid>,
     /// Should we use the alternate dtl while archiving?
     #[serde(default)]
     pub use_archive_alternate_dtl: bool,
 }
 
+fn default_max_extracted() -> i32 { 100 }
+fn default_max_supplementary() -> i32 { 100 }
+fn default_priority() -> u16 { 1000 }
+fn default_type() -> String { "USER".to_owned() }
 
 impl SubmissionParams {
     pub fn new(classification: ClassificationString) -> Self {
@@ -214,16 +246,16 @@ impl SubmissionParams {
             ignore_size: false,
             never_drop: false,
             malicious: false,
-            max_extracted: 100,
-            max_supplementary: 100,
-            priority: 100,
+            max_extracted: default_max_extracted(),
+            max_supplementary: default_max_supplementary(),
+            priority: default_priority(),
             quota_item: false,
             services: Default::default(),
             service_spec: Default::default(),
             submitter: "USER".to_owned(),
             trace: false,
             ttl: 30,
-            submission_type: "USER".to_owned(),
+            submission_type: default_type(),
             initial_data: None,
             auto_archive: false,
             delete_after_archive: false,
