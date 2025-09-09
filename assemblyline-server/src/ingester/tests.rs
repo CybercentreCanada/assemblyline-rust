@@ -160,7 +160,7 @@ async fn test_ingest_simple() {
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // setup the test data
-    let mut user: User = Default::default();
+    let mut user: User = User::create_test_user();
     let custom_user_groups = ["users", "the_user"];
     user.groups.extend(custom_user_groups.iter().map(|i|i.parse().unwrap()));
     core.datastore.user.save("user", &user, None, None).await.unwrap();
@@ -279,7 +279,7 @@ async fn test_ingest_groups_custom() {
     // let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
 
     // setup the test data
-    let mut user: User = Default::default();
+    let mut user: User = User::create_test_user();
     let custom_user_groups = ["users", "the_user"];
     user.uname = "test_ingest_groups_custom".to_string();
     user.groups.extend(custom_user_groups.iter().map(|i|i.parse().unwrap()));

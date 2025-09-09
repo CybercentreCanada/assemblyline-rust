@@ -325,6 +325,7 @@ pub struct Apps {
 pub struct User {
     /// Date the user agree with terms of service
     #[metadata(index=false, store=false)]
+    #[serde(default)]
     pub agrees_with_tos: Option<DateTime<Utc>>,
     /// Maximum number of concurrent API requests (0: No Quota)
     #[metadata(store=false, mapping="integer")]
@@ -413,8 +414,8 @@ impl Readable for User {
     fn set_from_archive(&mut self, _from_archive: bool) {}
 }
 
-impl Default for User {
-    fn default() -> Self {
+impl User {
+    pub fn create_test_user() -> Self {
         User {
             agrees_with_tos: None,
             api_quota: None,
@@ -441,7 +442,6 @@ impl Default for User {
         }
     }
 }
-
 
 // #[test]
 // fn sample_admin_user() {

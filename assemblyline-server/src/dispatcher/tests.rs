@@ -136,7 +136,7 @@ async fn test_simple() {
     debug!("File created");
 
     // create a user who will submit the file
-    let user: User = Default::default();
+    let user: User = User::create_test_user();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     debug!("User created");
 
@@ -256,7 +256,7 @@ async fn test_dispatch_extracted() {
     debug!("File created");
 
     // create a user who will submit the file
-    let user: User = Default::default();
+    let user: User = User::create_test_user();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     debug!("User created");
 
@@ -346,7 +346,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     debug!("File created");
 
     // create a user who will submit the file
-    let user: User = Default::default();
+    let user: User = User::create_test_user();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     debug!("User created");
 
@@ -437,7 +437,7 @@ async fn test_timeout() {
     debug!("File created");
 
     // create a user who will submit the file
-    let user: User = Default::default();
+    let user: User = User::create_test_user();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     debug!("User created");
 

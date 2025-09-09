@@ -369,7 +369,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     }
 
     // setup test user
-    let user: User = Default::default();
+    let user: User = User::create_test_user();
     core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
     core.datastore.user.commit(None).await.unwrap();
 
