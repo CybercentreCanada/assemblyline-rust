@@ -633,10 +633,14 @@ impl<T: CollectionType> Collection<T> {
             let request = Request::get_doc(&self.database.host, &index, key)?;
             let mut response: responses::Get<RT, ()> = match self.make_request(&request).await {
                 Ok(response) => {
-                    response.json().await?
-                    // let body: serde_json::Value = response.json().await?;
-                    // debug!("{body:?}");
-                    // serde_json::from_value(body)?
+                    let body = response.bytes().await?;
+                    match serde_json::from_slice(&body) {
+                        Ok(response) => response,
+                        Err(err) => {
+                            error!("Could not decode response from elastic get document: {err}\nOriginal response: {}", hex::encode(body));
+                            return Err(err.into())
+                        }
+                    }
                 },
                 Err(err) if err.is_document_not_found() => continue,
                 Err(err) => return Err(err)
