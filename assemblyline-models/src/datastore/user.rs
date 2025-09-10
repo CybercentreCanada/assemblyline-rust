@@ -109,12 +109,14 @@ pub enum UserRole {
     /// Manage (add/delete) badlist items
     BadlistManage = 32,
     /// Comment on archived files
-    ArchiveComment = 35, // is 33 in python, collides with FilePurge
+    ArchiveComment = 35,
     /// Use the Assemblyline Assistant
     AssistantUse = 34,
+    /// Create a submission without a profile using custom settings
+    SubmissionCustomize = 36,
 }
 
-const USER_ROLES_BASIC: [UserRole; 30] = [
+const USER_ROLES_BASIC: [UserRole; 31] = [
     UserRole::AlertManage,
     UserRole::AlertView,
     UserRole::ArchiveTrigger,
@@ -145,6 +147,7 @@ const USER_ROLES_BASIC: [UserRole; 30] = [
     UserRole::RetrohuntRun,
     UserRole::BadlistView,
     UserRole::BadlistManage,
+    UserRole::SubmissionCustomize,
 ];
 
 // USER_ROLES = USER_ROLES_BASIC.union({
@@ -239,6 +242,7 @@ impl AclCatagory {
                 UserRole::SubmissionDelete,
                 UserRole::SubmissionManage,
                 UserRole::RetrohuntRun,
+                UserRole::SubmissionCustomize,
             ],
             AclCatagory::E => &[
                 UserRole::Administration,
