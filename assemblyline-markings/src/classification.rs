@@ -451,16 +451,15 @@ impl ClassificationParser {
         }
 
         let (mut g1_set, mut g2_set) = if long_format {
-            let g1: Result<Vec<String>> = g1_set.into_iter()
-                .map(|r| self.groups.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
-                .map_ok(|r|r.name.to_string())
+            let g1: Vec<String> = g1_set.into_iter()
+                .map(|r| match self.groups.get(r) {Some(r) => r.name.to_string(), None => r.to_string()})
                 .collect();
             let g2: Result<Vec<String>> = g2_set.into_iter()
                 .map(|r| self.subgroups.get(r).ok_or(Errors::InvalidClassification("".to_owned())))
                 .map_ok(|r|r.name.to_string())
                 .collect();
 
-            (g1?, g2?)
+            (g1, g2?)
         } else {
             (g1_set.into_iter().map(|r|r.to_owned()).collect_vec(), g2_set.into_iter().map(|r| r.to_owned()).collect_vec())
         };
