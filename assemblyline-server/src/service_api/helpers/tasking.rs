@@ -21,6 +21,7 @@ use redis_objects::{increment, Hashmap, RedisObjects};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+use crate::service_api::v1::task::models::Result as ApiResult;
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
 use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
@@ -634,11 +635,21 @@ impl TaskingClient {
                 return Ok(json!({"success": true}))    
             },
             FinishedBody::Other { content } => {
-                error!("Malformed task result: {content:?}");
+                error!("Malformed task result: {}", serde_json::to_string(&content)?);
                 if let Some(Value::Object(task_data)) = content.get("task") {
                     finish_parsing_task(task_data.clone())?;
                 }
-                anyhow::bail!("malformed task result");
+                let cause = match content.get("result") {
+                    Some(result_value) => if let Err(err) = serde_json::from_value::<ApiResult>(result_value.clone()) {
+                        err.to_string()
+                    } else {
+                        "unknown".to_string()
+                    },
+                    None => {
+                        "missing result".to_string()
+                    },
+                };
+                anyhow::bail!("malformed task result: {cause}");
             }
         }
     }
@@ -646,7 +657,7 @@ impl TaskingClient {
     async fn _handle_task_result(&self, 
         exec_time: u64, 
         task: Task, 
-        mut result: crate::service_api::v1::task::models::Result,
+        mut result: ApiResult,
         client_id: &str, 
         service_name: &str,
         freshen: bool
@@ -753,7 +764,7 @@ impl TaskingClient {
             section.tags = Default::default();
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
-                heuristic.heur_id = heur_id.clone();
+                heuristic.heur_id = crate::service_api::v1::task::models::HeuristicId::Name(heur_id.clone());
 
                 match self.heuristic_handler.service_heuristic_to_result_heuristic(heuristic, self.heuristics.clone()) {
                      Ok((heuristic, new_tags)) => {

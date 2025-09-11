@@ -251,7 +251,7 @@ pub mod models {
 
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Heuristic {
-        pub heur_id: String,
+        pub heur_id: HeuristicId,
         #[serde(default)]
         pub attack_ids: Vec<String>,
         #[serde(default)]
@@ -260,6 +260,22 @@ pub mod models {
         pub frequency: i32,
         #[serde(default)]
         pub score_map: HashMap<String, i32>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone)]
+    #[serde(untagged)]
+    pub enum HeuristicId {
+        Name(String),
+        Code(u64)
+    }
+
+    impl std::fmt::Display for HeuristicId {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                HeuristicId::Name(str) => f.write_str(str),
+                HeuristicId::Code(num) => f.write_fmt(format_args!("{num}")),
+            }
+        }
     }
 
     fn default_frequency() -> i32 { 1 }

@@ -197,7 +197,7 @@ impl Heuristic {
         heuristics: Arc<Mutex<HashMap<String, DatastoreHeuristic>>>,
     ) -> Result<Self> {
         // Validate heuristic
-        let heur_id = srv.heur_id;
+        let heur_id = srv.heur_id.to_string();
         let definition = match heuristics.lock().get(&heur_id) {
             Some(def) => def.clone(),
             None => {
