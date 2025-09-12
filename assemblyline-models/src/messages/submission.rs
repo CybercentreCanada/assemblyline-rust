@@ -3,13 +3,16 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{Sid, Wildcard};
+
+use crate::messages::dispatching::FileTreeData;
+use crate::{meta, ClassificationString, Sha256, Sid};
 pub use crate::datastore::submission::{File, SubmissionParams};
 
 #[derive(Serialize, Deserialize)]
 pub enum MessageType {
-    SubmissionIngested, 
-    SubmissionReceived, 
-    SubmissionStarted, 
+    SubmissionIngested,
+    SubmissionReceived,
+    SubmissionStarted,
     SubmissionCompleted
 }
 
@@ -32,9 +35,9 @@ pub struct Submission {
     #[serde(default="chrono::Utc::now")]
     pub time: chrono::DateTime<chrono::Utc>,
     /// File block
-    pub files: Vec<File>, 
+    pub files: Vec<File>,
     /// Metadata submitted with the file
-    pub metadata: HashMap<String, Wildcard>, 
+    pub metadata: HashMap<String, Wildcard>,
     /// Notification queue parameters
     #[serde(default)]
     pub notification: Notification,
@@ -42,20 +45,74 @@ pub struct Submission {
     pub params: SubmissionParams,
     /// Key used to track groups of submissions ingester will see as duplicates
     pub scan_key: Option<String>,
+    ///List of error keys
+    #[serde(default)]
+    pub errors: Vec<String>,
+    /// Result key value mapping
+    #[serde(default)]
+    pub results: HashMap<String, crate::datastore::result::Result>,
+    /// File sha256 map to File tree of the submission
+    #[serde(default)]
+    pub file_tree: HashMap<Sha256, FileTreeData>,
+    /// File sha256 map to file info
+    #[serde(default)]
+    pub file_infos: HashMap<Sha256, super::task::FileInfo>,
+
 }
 
 impl Submission {
-    // pub fn new(classification: ClassificationString) -> Self {
-    //     Self { 
-    //         sid: Sid(0), 
-    //         time: chrono::Utc::now(), 
-    //         files: Default::default(), 
-    //         metadata: Default::default(), 
-    //         notification: Default::default(), 
-    //         params: SubmissionParams::new(classification), 
-    //         scan_key: Default::default() 
-    //     }
-    // }
+
+    pub fn new(sid: Sid,time: chrono::DateTime<chrono::Utc>, params: SubmissionParams) -> Self {
+        Self {
+            sid: sid,
+            time: time,
+            params: params,
+
+            files: Default::default(),
+            metadata: Default::default(),
+            notification: Default::default(),
+            scan_key: Default::default(),
+            errors: Default::default(),
+            results: Default::default(),
+            file_infos: Default::default(),
+            file_tree: Default::default()
+        }
+    }
+
+    pub fn set_notification(mut self, notification: Notification) -> Self {
+        self.notification = notification;
+        self
+    }
+
+    pub fn set_files(mut self, files: Vec<File>) -> Self {
+        self.files = files;
+        self
+    }
+
+    pub fn set_errors(mut self, errors: Vec<String>) -> Self {
+        self.errors = errors;
+        self
+    }
+
+    pub fn set_metadata(mut self, metadata: HashMap<String, Wildcard>) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    pub fn set_scan_key(mut self, scan_key: Option<String>) -> Self {
+        self.scan_key = scan_key;
+        self
+    }
+
+    pub fn set_results(mut self, results: HashMap<String, crate::datastore::result::Result>) -> Self {
+        self.results = results;
+        self
+    }
+
+    pub fn set_file_infos(mut self, file_infos: HashMap<Sha256, super::task::FileInfo>) -> Self {
+        self.file_infos = file_infos;
+        self
+    }
 }
 
 impl From<&crate::datastore::submission::Submission> for Submission {
@@ -68,6 +125,10 @@ impl From<&crate::datastore::submission::Submission> for Submission {
             scan_key: value.scan_key.clone(),
             time: chrono::Utc::now(),
             notification: Default::default(),
+            errors: Default::default(),
+            results: Default::default(),
+            file_infos: Default::default(),
+            file_tree: Default::default()
         }
     }
 }

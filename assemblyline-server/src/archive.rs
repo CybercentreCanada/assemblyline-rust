@@ -29,7 +29,7 @@ impl ArchiveManager {
             config: core.config.clone(),
             datastore: core.datastore.clone(),
             submit: SubmitManager::new(core),
-            services: core.services.clone(), 
+            services: core.services.clone(),
             archive_queue: core.redis_persistant.queue(ARCHIVE_QUEUE_NAME.to_owned(), None),
             submission_traffic: core.redis_volatile.publisher("submissions".to_owned())
         }
@@ -66,6 +66,10 @@ impl ArchiveManager {
                 time: Default::default(),
                 notification: Default::default(),
                 scan_key: Default::default(),
+                errors: Default::default(),
+                file_infos: Default::default(),
+                file_tree: Default::default(),
+                results: Default::default(),
             };
             let sid = submission_obj.sid;
 
@@ -84,4 +88,3 @@ impl ArchiveManager {
         }
     }
 }
-

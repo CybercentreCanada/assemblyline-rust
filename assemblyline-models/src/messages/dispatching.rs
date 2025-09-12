@@ -32,9 +32,32 @@ impl SubmissionDispatchMessage {
             results: Default::default(),
         }
     }
+
+    pub fn set_file_infos(mut self, file_infos: HashMap<Sha256, super::task::FileInfo>) -> Self {
+        self.file_infos = file_infos.clone();
+        self
+    }
+
+    pub fn set_file_tree(mut self, file_tree: HashMap<Sha256, FileTreeData>) -> Self {
+        self.file_tree = file_tree.clone();
+        self
+    }
+
+
+    pub fn set_results(mut self, results: HashMap<String, crate::datastore::result::Result>) -> Self {
+        self.results = results.clone();
+        self
+    }
+
+    pub fn set_errors(mut self, errors:  Vec<String>) -> Self {
+        self.errors = errors.clone();
+        self
+    }
+
+
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct FileTreeData {
     pub name: Vec<String>,
@@ -44,9 +67,9 @@ pub struct FileTreeData {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all="UPPERCASE")]
 pub enum WatchQueueStatus {
-    Fail, 
-    Ok, 
-    Start, 
+    Fail,
+    Ok,
+    Start,
     Stop
 }
 
@@ -152,5 +175,3 @@ pub enum DispatcherCommand {
     /// let the dispatcher know that the bad sid list has changed
     UpdateBadSid(String),
 }
-
-

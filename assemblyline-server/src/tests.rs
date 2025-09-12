@@ -189,7 +189,7 @@ impl MockService {
             }
 
             let mut partial = false;
-            let temp_data: JsonMap = 
+            let temp_data: JsonMap =
                 task.temporary_submission_data.iter()
                 .map(|item|(item.name.clone(), item.value.clone()))
                 .collect();
@@ -258,7 +258,7 @@ impl MockService {
             //     .map(|x|x.to_string())
             //     .unwrap_or_else(|| rand::rng().random::<u64>().to_string());
             // if !instructions.contains_key("result_key") && result.is_empty() {
-            //     result_key = result_key + 
+            //     result_key = result_key +
             // }
 
             let temporary_data = match instructions.get("temporary_data") {
@@ -551,26 +551,23 @@ async fn test_deduplication() {
     })).await;
 
     for _ in 0..2 {
-        context.ingest_queue.push(&MessageSubmission {
-            sid: rand::rng().random(),
-            metadata: Default::default(),
-            params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-                .set_description("file abc123")
-                .set_services_selected(&[])
-                .set_submitter("user")
-                .set_groups(&["user"]),
-            notification: Notification {
-                queue: Some("output-queue-one".to_string()),
-                threshold: None,
-            },
-            files: vec![File {
-                sha256: sha.clone(),
-                size: Some(size as u64),
-                name: "abc123".to_string()
-            }],
-            time: chrono::Utc::now(),
-            scan_key: None,
-        }).await.unwrap();
+
+        let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
+            queue: Some("output-queue-one".to_string()),
+            threshold: None,
+        });
+
+        context.ingest_queue.push(&sub_message).await.unwrap();
     }
 
     context.metrics.assert_metrics("ingester", &[("duplicates", 1)]).await;
@@ -594,27 +591,24 @@ async fn test_deduplication() {
 
     // -------------------------------------------------------------------------------
     // Submit the same body, but change a parameter so the cache key misses,
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
             .set_groups(&["user"])
-            .set_max_extracted(10000),
-        notification: Notification {
+            .set_max_extracted(10000))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
             queue: Some("2".to_string()),
             threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     context.signal.notify_one();
 
@@ -678,26 +672,22 @@ async fn test_ingest_retry() {
     }).await;
     let (sha, size) = ready_body(&context.core, json!({})).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
+            .set_groups(&["user"]))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
             queue: Some("ingest-retry".to_string()),
             threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("ingest-retry");
     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -731,30 +721,24 @@ async fn test_ingest_timeout() {
 
     let (sha, size) = ready_body(&context.core, json!({
         "pre": {
-            "hold": 60 
-        } 
+            "hold": 60
+        }
     })).await;
 
-    let mut message = MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("ingest-timeout".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    };
+    let mut message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"]))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("ingest-timeout".to_string()),
+        threshold: None,
+    });
 
     // this extra normalization is applied when the message is loaded, which changes the scan key
     // normally this doesn't matter because it would always be consistant _after_ message loading
@@ -789,26 +773,23 @@ async fn test_service_crash_recovery() {
         "pre": {"drop": 1}
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("watcher-recover".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"])
+        .set_max_extracted(10000))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("watcher-recover".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("watcher-recover");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -834,26 +815,22 @@ async fn test_service_retry_limit() {
         "pre": {"drop": 3}
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("watcher-recover".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"]))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("watcher-recover".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("watcher-recover");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -879,26 +856,22 @@ async fn test_dropping_early() {
         "pre": {"result": {"drop_file": true}}
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("drop".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"]))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("drop".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("drop");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -933,26 +906,22 @@ async fn test_service_error() {
         }
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("error".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"]))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("error".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("error");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -972,26 +941,22 @@ async fn test_extracted_file() {
     let context = setup().await;
     let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("text-extracted-file".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"]))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("text-extracted-file".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("text-extracted-file");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1015,28 +980,24 @@ async fn test_depth_limit() {
         (sha, size) = ready_extract(&context.core, &[sha]).await;
     }
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"])
-            // Make sure we can extract enough files that we will definitely hit the depth limit first
-            .set_max_extracted(context.core.config.submission.max_extraction_depth as i32 + 10),
-        notification: Notification {
-            queue: Some("test-depth-limit".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"])
+        // Make sure we can extract enough files that we will definitely hit the depth limit first
+        .set_max_extracted(context.core.config.submission.max_extraction_depth as i32 + 10))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("test-depth-limit".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("test-depth-limit");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1067,27 +1028,23 @@ async fn test_max_extracted_in_one() {
     let (sha, size) = ready_extract(&context.core, &children).await;
     let max_extracted = 3;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"])
-            .set_max_extracted(max_extracted),
-        notification: Notification {
-            queue: Some("test-extracted-in-one".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"])
+        .set_max_extracted(max_extracted))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("test-extracted-in-one".to_string()),
+        threshold: None,
+    });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("test-extracted-in-one");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1118,27 +1075,23 @@ async fn test_max_extracted_in_several() {
         ]).await.0
     ]).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-            .set_description("file abc123")
-            .set_services_selected(&[])
-            .set_submitter("user")
-            .set_groups(&["user"])
-            .set_max_extracted(3),
-        notification: Notification {
-            queue: Some("test-extracted-in-several".to_string()),
-            threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+        .set_description("file abc123")
+        .set_services_selected(&[])
+        .set_submitter("user")
+        .set_groups(&["user"])
+        .set_max_extracted(3))
+    .set_files(vec![File {
+    sha256: sha.clone(),
+    size: Some(size as u64),
+    name: "abc123".to_string()
+    }])
+    .set_notification(Notification {
+        queue: Some("test-extracted-in-several".to_string()),
+        threshold: None,
+    });
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("test-extracted-in-several");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1160,26 +1113,25 @@ async fn test_caching() {
     let (sha, size) = ready_body(&context.core, json!({})).await;
 
     async fn run_once(context: &TestContext, sha: &Sha256, size: usize) -> Sid {
-        context.ingest_queue.push(&MessageSubmission {
-            sid: rand::rng().random(),
-            metadata: Default::default(),
-            params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+
+        let sub_message = MessageSubmission::new(rand::rng().random(),
+        chrono::Utc::now(),
+        SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
                 .set_description("file abc123")
                 .set_services_selected(&[])
                 .set_submitter("user")
-                .set_groups(&["user"]),
-            notification: Notification {
+                .set_groups(&["user"]))
+            .set_files(vec![File {
+            sha256: sha.clone(),
+            size: Some(size as u64),
+            name: "abc123".to_string()
+            }])
+            .set_notification(Notification {
                 queue: Some("caching".to_string()),
                 threshold: None,
-            },
-            files: vec![File {
-                sha256: sha.clone(),
-                size: Some(size as u64),
-                name: "abc123".to_string()
-            }],
-            time: chrono::Utc::now(),
-            scan_key: None,
-        }).await.unwrap();
+            });
+
+        context.ingest_queue.push(&sub_message).await.unwrap();
 
         let notification_queue = context.core.notification_queue("caching");
         let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1221,26 +1173,26 @@ async fn test_plumber_clearing() {
 
     let (sha, size) = ready_body(&context.core, json!({})).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(
+        rand::rng().random(),
+        chrono::Utc::now(),
+        SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
+            .set_groups(&["user"])
+        )
+        .set_notification(Notification {
             queue: Some("test_plumber_clearing".to_string()),
             threshold: None,
-        },
-        files: vec![File {
+        })
+        .set_files(vec![File {
             sha256: sha.clone(),
             size: Some(size as u64),
             name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        }]);
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1)]).await;
     let service_queue = context.core.get_service_queue("core-b");
@@ -1288,7 +1240,7 @@ async fn test_filter() {
     {
         let mut actions: HashMap<String, (_, _)> = Default::default();
         actions.insert("test_process".to_string(), (
-            SubmissionFilter::new(filter_string).unwrap(), 
+            SubmissionFilter::new(filter_string).unwrap(),
             PostprocessAction::new(filter_string.to_string()).enable().alert().on_completed()
         ));
 
@@ -1297,27 +1249,23 @@ async fn test_filter() {
 
     let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
             .set_groups(&["user"])
-            .set_generate_alert(true),
-        notification: Notification {
+            .set_generate_alert(true))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
             queue: Some("text-filter".to_string()),
             threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("text-filter");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1343,7 +1291,7 @@ async fn test_tag_filter() {
     {
         let mut actions: HashMap<String, (_, _)> = Default::default();
         actions.insert("test_process".to_string(), (
-            SubmissionFilter::new(filter_string).unwrap(), 
+            SubmissionFilter::new(filter_string).unwrap(),
             PostprocessAction::new(filter_string.to_string()).enable().alert().on_completed()
         ));
 
@@ -1365,27 +1313,23 @@ async fn test_tag_filter() {
         }]}}}
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
             .set_groups(&["user"])
-            .set_generate_alert(true),
-        notification: Notification {
+            .set_generate_alert(true))
+        .set_notification(Notification {
             queue: Some("tag-filter".to_string()),
             threshold: None,
-        },
-        files: vec![File {
+        })
+        .set_files(vec![File {
             sha256: sha.clone(),
             size: Some(size as u64),
             name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        }]);
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("tag-filter");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1412,26 +1356,26 @@ async fn test_partial() {
         "pre": {"partial": {"passwords": "test_temp_data_monitoring"}}
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(
+        rand::rng().random(),
+        chrono::Utc::now(),
+        SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
+            .set_groups(&["user"])
+        )
+        .set_notification(Notification {
             queue: Some("temp-data-monitor".to_string()),
             threshold: None,
-        },
-        files: vec![File {
+        })
+        .set_files(vec![File {
             sha256: sha.clone(),
             size: Some(size as u64),
             name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        }]);
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("temp-data-monitor");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1450,7 +1394,7 @@ async fn test_partial() {
     let mut partial_results = 0;
     for res in sub.results {
         info!("loading result: {res}");
-        let result = context.core.datastore.get_single_result(&res, 
+        let result = context.core.datastore.get_single_result(&res,
             context.core.config.submission.emptyresult_dtl.into(),
             &context.core.classification_parser).await.unwrap().unwrap();
         if result.partial {
@@ -1462,7 +1406,7 @@ async fn test_partial() {
 
 // MARK: monitoring
 #[tokio::test(flavor = "multi_thread")]
-async fn test_temp_data_monitoring() {    
+async fn test_temp_data_monitoring() {
     let context = setup().await;
 
     // Have pre produce a partial result, then have core-a update a monitored key
@@ -1472,26 +1416,26 @@ async fn test_temp_data_monitoring() {
         "final": {"temporary_data": {"passwords": ["some other password"]}},
     })).await;
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(
+        rand::rng().random(),
+        chrono::Utc::now(),
+        SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
+            .set_groups(&["user"])
+        )
+        .set_notification(Notification {
             queue: Some("temp-data-monitor".to_string()),
             threshold: None,
-        },
-        files: vec![File {
+        })
+        .set_files(vec![File {
             sha256: sha.clone(),
             size: Some(size as u64),
             name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        }]);
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     let notification_queue = context.core.notification_queue("temp-data-monitor");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1510,7 +1454,7 @@ async fn test_temp_data_monitoring() {
     let mut partial_results = 0;
     for res in sub.results {
         info!("loading result: {res}");
-        let result = context.core.datastore.get_single_result(&res, 
+        let result = context.core.datastore.get_single_result(&res,
             context.core.config.submission.emptyresult_dtl.into(),
             &context.core.classification_parser).await.unwrap().unwrap();
         if result.partial {
@@ -1546,26 +1490,26 @@ async fn test_final_partial() {
     assert_eq!(core_b.len(), 1);
     let core_b = core_b[0].clone();
 
-    context.ingest_queue.push(&MessageSubmission {
-        sid: rand::rng().random(),
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(
+        rand::rng().random(),
+        chrono::Utc::now(),
+        SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&["core-a", "core-b"])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
-            queue: Some("temp-final-partial".to_string()),
+            .set_groups(&["user"])
+        )
+        .set_notification(Notification {
+            queue:  Some("temp-final-partial".to_string()),
             threshold: None,
-        },
-        files: vec![File {
+        })
+        .set_files(vec![File {
             sha256: sha.clone(),
             size: Some(size as u64),
             name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        }]);
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     // Wait until both of the services have started (so service b doesn't get the temp data a produces on its first run)
     let start = std::time::Instant::now();
@@ -1618,7 +1562,7 @@ async fn test_final_partial() {
     let mut partial_results = 0;
     for res in sub.results {
         info!("loading result: {res}");
-        let result = context.core.datastore.get_single_result(&res, 
+        let result = context.core.datastore.get_single_result(&res,
             context.core.config.submission.emptyresult_dtl.into(),
             &context.core.classification_parser).await.unwrap().unwrap();
         if result.partial {
@@ -1657,35 +1601,31 @@ async fn test_complex_extracted() {
         "finish": {"temporary_data": {"passwords": ["test_temp_data_monitoring"]}},
     })).await;
 
-    let sid = rand::rng().random();
-    context.ingest_queue.push(&MessageSubmission {
-        sid,
-        metadata: Default::default(),
-        params: SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_groups(&["user"]),
-        notification: Notification {
+            .set_groups(&["user"]))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
             queue: Some("complex-extracted-file".to_string()),
             threshold: None,
-        },
-        files: vec![File {
-            sha256: sha.clone(),
-            size: Some(size as u64),
-            name: "abc123".to_string()
-        }],
-        time: chrono::Utc::now(),
-        scan_key: None,
-    }).await.unwrap();
+        });
+
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
 
     // Wait for the extract file to finish
     context.metrics.assert_metrics("dispatcher", &[("files_completed", 1)]).await;
     // check that there is a pending result in the dispatcher
     // task = next(iter(core.dispatcher.tasks.values()))
     // assert 1 == sum(int(summary.partial) for summary in task.service_results.values())
-    log::warn!("load test report for {sid}");
-    let report = context.dispatcher.get_test_report(sid).await.unwrap();
+    log::warn!("load test report for {0}", sub_message.sid);
+    let report = context.dispatcher.get_test_report(sub_message.sid).await.unwrap();
     let partial_count: u32 = report.service_results.values().map(|row| if row.partial {1} else {0}).sum();
     assert_eq!(partial_count, 1);
 
@@ -1708,7 +1648,7 @@ async fn test_complex_extracted() {
     let mut partial_results = 0;
     for res in sub.results {
         info!("loading result: {res}");
-        let result = context.core.datastore.get_single_result(&res, 
+        let result = context.core.datastore.get_single_result(&res,
             context.core.config.submission.emptyresult_dtl.into(),
             &context.core.classification_parser).await.unwrap().unwrap();
         if result.partial {

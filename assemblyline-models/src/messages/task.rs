@@ -26,13 +26,17 @@ pub struct FileInfo {
     /// Size of the file in bytes
     pub size: u64,
     /// SSDEEP hash of the file"
+    #[serde(default)]
     pub ssdeep: Option<SSDeepHash>,
     /// TLSH hash of the file"
+    #[serde(default)]
     pub tlsh: Option<String>,
     /// Type of file as identified by Assemblyline
     #[serde(rename="type")]
+    #[serde(default)]
     pub file_type: String,
     /// URI structure to speed up specialty file searching
+    #[serde(default)]
     pub uri_info: Option<URIInfo>,
 }
 
@@ -94,7 +98,7 @@ pub struct Task {
     pub deep_scan: bool,
 
     /// Whether the service cache should be ignored during the processing of this task
-    pub ignore_cache: bool, 
+    pub ignore_cache: bool,
 
     /// Whether the service should ignore the dynamic recursion prevention or not
     pub ignore_recursion_prevention: bool,
@@ -120,17 +124,17 @@ impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
             sid: rng.random(),
             metadata: Default::default(),
             min_classification: Default::default(),
-            fileinfo: FileInfo { 
-                magic: "".to_string(), 
-                md5: rng.random(), 
-                mime: None, 
-                sha1: rng.random(), 
-                sha256: rng.random(), 
-                size: rng.random(), 
+            fileinfo: FileInfo {
+                magic: "".to_string(),
+                md5: rng.random(),
+                mime: None,
+                sha1: rng.random(),
+                sha256: rng.random(),
+                size: rng.random(),
                 ssdeep: Some(rng.random()),
-                tlsh: None, 
-                file_type: "unknown".to_owned(), 
-                uri_info: None 
+                tlsh: None,
+                file_type: "unknown".to_owned(),
+                uri_info: None
             },
             filename: random_word(rng),
             service_name: random_word(rng),
@@ -167,13 +171,13 @@ impl Task {
     }
 
     pub fn signature(&self) -> TaskSignature {
-        TaskSignature { 
-            task_id: self.task_id, 
-            sid: self.sid, 
-            service: self.service_name.clone(), 
-            hash: self.fileinfo.sha256.clone() 
+        TaskSignature {
+            task_id: self.task_id,
+            sid: self.sid,
+            service: self.service_name.clone(),
+            hash: self.fileinfo.sha256.clone()
         }
-    } 
+    }
 }
 
 pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>, partial: Option<bool>) -> Result<String, serde_json::Error> {
@@ -204,10 +208,10 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
         let mut hasher = md5::Md5::new();
         hasher.update(total_str);
         let hash = hasher.finalize();
-        
+
         // truncate it to 8 bytes and interpret it as a number
         let number = u64::from_be_bytes(hash.as_slice()[0..8].try_into().unwrap());
-        
+
         // encode it as a string
         Ok(base62::encode(number))
     } else {
@@ -234,7 +238,7 @@ pub struct TaskToken {
 }
 
 // ============================================================================
-//MARK: Responses 
+//MARK: Responses
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ResultSummary {
@@ -276,7 +280,7 @@ impl ServiceResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TagEntry {
-    pub score: i32,    
+    pub score: i32,
     #[serde(rename="type")]
     pub tag_type: String,
     pub value: TagValue,
