@@ -133,7 +133,7 @@ impl DispatchAction {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ServiceStartMessage {
     sid: Sid,
     sha: Sha256,
@@ -294,7 +294,7 @@ impl SubmissionTask {
                     }
                 }
             }
-        
+
             // Replay the process of receiving results for dispatcher internal state
             for (k, result) in args.results {
                 if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
@@ -316,15 +316,15 @@ impl SubmissionTask {
                             }
                         }
                     }
-                    
+
                     let service = service.to_owned();
                     if !rescan.contains(&service) {
                         let extracted = result.response.extracted;
                         out.register_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
                         let children_detail: Vec<(Sha256, String)> = extracted.into_iter().map(|file| (file.sha256, file.parent_relation.into())).collect();
                         out.service_results.insert((sha256, service), ResultSummary {
-                            key: k, 
-                            drop: result.drop_file, 
+                            key: k,
+                            drop: result.drop_file,
                             score: result.result.score,
                             children: children_detail,
                             partial: result.partial
@@ -506,7 +506,7 @@ impl SubmissionTask {
             if !result.partial {
                 return
             }
-        }   
+        }
         self.service_results.remove(&key);
         self.service_errors.remove(&key);
         self.service_attempts.insert(key, 1);
@@ -517,11 +517,11 @@ impl SubmissionTask {
 
     fn trace_event(&mut self, event_type: &str) {
         if self.submission.params.trace {
-            self.submission.tracing_events.push(TraceEvent { 
-                event_type: event_type.to_owned(), 
-                service: None, 
-                file: None, 
-                message: None, 
+            self.submission.tracing_events.push(TraceEvent {
+                event_type: event_type.to_owned(),
+                service: None,
+                file: None,
+                message: None,
                 timestamp: chrono::Utc::now()
             })
         }
@@ -573,7 +573,7 @@ impl TemporaryFileData {
         Self {
             config: Arc::new(config),
             shared: Arc::new(Mutex::new(Default::default())),
-            local: Default::default(),            
+            local: Default::default(),
         }
     }
 
@@ -581,7 +581,7 @@ impl TemporaryFileData {
     pub fn child(&self) -> Self {
         Self {
             config: self.config.clone(),
-            shared: self.shared.clone(), 
+            shared: self.shared.clone(),
             local: self.local.clone(),
         }
     }
@@ -611,7 +611,7 @@ impl TemporaryFileData {
     pub fn set_value(&mut self, key: &str, value: serde_json::Value) -> bool {
         match self.config.get(key) {
             Some(TemporaryKeyType::Union) => {
-                self.union_shared_value(key, value)    
+                self.union_shared_value(key, value)
             },
             Some(TemporaryKeyType::Overwrite) => {
                 let mut shared = self.shared.lock();
@@ -623,12 +623,12 @@ impl TemporaryFileData {
                 self.local.insert(key.to_owned(), value);
                 false
             }
-        }        
+        }
     }
 
     fn union_shared_value(&self, key: &str, values: serde_json::Value) -> bool {
         // Make sure the existing value is the right type
-        let mut shared = self.shared.lock();        
+        let mut shared = self.shared.lock();
         let existing = shared.entry(key.to_string()).or_insert(serde_json::Value::Array(vec![]));
         if !existing.is_array() {
             *existing = serde_json::Value::Array(vec![]);
@@ -973,12 +973,15 @@ impl Dispatcher {
             if messages.is_empty() {
                 let message = self.start_queue.pop_timeout(ONE_SECOND).await?;
                 if let Some(message) = message {
+                    println!("message: {} {} {} {}", &message.sid, &message.dispatcher_id, &message.worker_id, &message.service_name);
                     messages.push(message);
                 }
             }
 
             // process all the messages we found
             for message in messages {
+                println!("iterate through message start messages");
+                println!("{} {} {} {}", message.sid, message.dispatcher_id, message.worker_id, message.service_name);
                 self.send_dispatch_action(DispatchAction::Start(message, None)).await;
             }
         }
@@ -1784,7 +1787,7 @@ impl Dispatcher {
                     Some(service) if service.enabled => service,
                     _ => continue
                 };
-                
+
                 // Load the list of tags we will pass
                 let mut tags = vec![];
                 if service.uses_tags || service.uses_tag_scores {
@@ -2070,7 +2073,7 @@ impl Dispatcher {
                         break
                     }
 
-                    // We check if it has already been dispatched before checking if its enabled 
+                    // We check if it has already been dispatched before checking if its enabled
                     // to let us catch any trailing results coming in. But we don't count the file as pending
                     // because we aren't going to _start_ processing on enabled. Plumber will handle the corner cases.
                     match self.core.services.get(&service_name) {
@@ -2664,7 +2667,7 @@ impl UserCache {
             }
         }
 
-        if let Some((user, _)) = self.datastore.user.get_if_exists(name, None).await.context("fetching user data")? {
+        if let Some((user, _)) = self.datastore.user.get_if_exists(name, None).await.context("fetching user data...")? {
             let user = Arc::new(user);
             self.cache.lock().insert(name.to_string(), (user.clone(), std::time::Instant::now()));
             return Ok(Some(user))

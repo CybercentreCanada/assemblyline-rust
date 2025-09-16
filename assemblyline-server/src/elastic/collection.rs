@@ -85,7 +85,7 @@ impl<T: CollectionType> Collection<T> {
                     }
                     Err(err) => {
                         if err.is_resource_already_exists() {
-                            warn!("Tried to create an index template that already exists: {}", alias.to_uppercase());    
+                            warn!("Tried to create an index template that already exists: {}", alias.to_uppercase());
                         } else {
                             return Err(err).context("put index bad request")
                         }
@@ -103,7 +103,7 @@ impl<T: CollectionType> Collection<T> {
                     // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
                     self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
                         "actions": [
-                            {"add":  {"index": index, "alias": alias}}, 
+                            {"add":  {"index": index, "alias": alias}},
                             {"remove_index": {"index": alias}}
                         ]
                     })).await?;
@@ -141,7 +141,7 @@ impl<T: CollectionType> Collection<T> {
         // find all fields in the model that are missing from the elastic fields and add them
         let mut missing = HashMap::new();
         for (field, descriptor) in &model {
-            if !fields.contains_key(field) { 
+            if !fields.contains_key(field) {
                 missing.insert(field, descriptor);
             }
         }
@@ -217,7 +217,7 @@ impl<T: CollectionType> Collection<T> {
             if !FIELD_SANITIZER.is_match(&p_name) {
                 continue
             }
-            
+
 
             let mapping = p_val.type_.unwrap_or_default();
             collection_data.insert(p_name, FieldInformation {
@@ -234,7 +234,7 @@ impl<T: CollectionType> Collection<T> {
             //     indexed: p_val.get('index', p_val.get('enabled', True)),
             //     list: field_model.multivalued if field_model else False,
             //     stored: field_model.store if field_model else False,
-            //     mapping: 
+            //     mapping:
             //     type_: f_type
             // });
             // if include_description {
@@ -319,7 +319,7 @@ impl<T: CollectionType> Collection<T> {
                 // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
                 self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
                     "actions": [
-                        {"add":  {"index": new_name, "alias": name}}, 
+                        {"add":  {"index": new_name, "alias": name}},
                         {"remove": {"index": index, "alias": name}}
                     ]
                 })).await?;
@@ -327,14 +327,14 @@ impl<T: CollectionType> Collection<T> {
                 // Reindex data into target
                 let task: responses::TaskId = self.database.make_request_json(&mut 0, &Request::post_reindex(&self.database.host, false)?, &json!({
                     "source": {"index": index},
-                    "dest": {"index": new_name}, 
+                    "dest": {"index": new_name},
                 })).await?.json().await?;
                 self.database.get_task_results(&task.task).await?;
 
                 // Commit reindexed data
                 self.make_request(&Request::post_refresh_index(&self.database.host, &new_name)?).await?;
                 self.make_request(&Request::post_clear_index_cache(&self.database.host, &new_name)?).await?;
-    
+
                 // Delete old index
                 self.database.remove_index(&index).await?;
 
@@ -349,7 +349,7 @@ impl<T: CollectionType> Collection<T> {
                     // self.with_retries(self.datastore.client.indices.update_aliases, actions=actions)
                     self.database.make_request_json(&mut 0, &Request::post_aliases(&self.database.host)?, &json!({
                         "actions": [
-                            {"add":  {"index": index, "alias": name}}, 
+                            {"add":  {"index": index, "alias": name}},
                             {"remove": {"index": new_name, "alias": name}}
                         ]
                     })).await?;
@@ -374,11 +374,11 @@ impl<T: CollectionType> Collection<T> {
                 Ok(response) => break Ok(response),
                 Err(err) if err.is_index_not_found() => {
                     self.ensure_collection().await?;
-                    continue    
+                    continue
                 },
-                Err(err) => break Err(err)    
+                Err(err) => break Err(err)
             }
-        }     
+        }
     }
 
     /// Make an http request with a json body
@@ -389,11 +389,11 @@ impl<T: CollectionType> Collection<T> {
                 Ok(response) => break Ok(response),
                 Err(err) if err.is_index_not_found() => {
                     self.ensure_collection().await?;
-                    continue    
+                    continue
                 },
-                Err(err) => break Err(err)    
+                Err(err) => break Err(err)
             }
-        }     
+        }
     }
 
     /// Make an http request with a body
@@ -404,11 +404,11 @@ impl<T: CollectionType> Collection<T> {
                 Ok(response) => break Ok(response),
                 Err(err) if err.is_index_not_found() => {
                     self.ensure_collection().await?;
-                    continue    
+                    continue
                 },
-                Err(err) => break Err(err)    
+                Err(err) => break Err(err)
             }
-        }     
+        }
     }
 
     fn get_index_list(&self, index_type: Option<Index>) -> Result<Vec<String>> {
@@ -491,7 +491,7 @@ impl<T: CollectionType> Collection<T> {
         for index in index_list {
             debug!("Exist at {index}");
             match self.make_request(&Request::head_doc(&self.database.host, &index, key)?).await {
-                Ok(response) => { 
+                Ok(response) => {
                     if response.status().is_success() {
                         return Ok(true)
                     }
@@ -612,7 +612,7 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// fetch an object from elastic, no retry on missing, returning document version info
-    /// 
+    ///
     /// Versioned get-save for atomic update has three paths:
     ///   1. Document doesn't exist at all. Create token will be returned for version.
     ///      This way only the first query to try and create the document will succeed.
@@ -624,9 +624,11 @@ impl<T: CollectionType> Collection<T> {
     pub async fn get_if_exists(&self, key: &str, index_type: Option<Index>) -> Result<Option<(T, Version)>> {
         self._get_if_exists(key, index_type).await
     }
-    
+
     async fn _get_if_exists<RT: Readable>(&self, key: &str, index_type: Option<Index>) -> Result<Option<(RT, Version)>> {
         let index_list = self.get_index_list(index_type)?;
+
+        println!("THE KEY IS {key}");
 
         for index in index_list {
             // fetch all the documents
@@ -634,12 +636,12 @@ impl<T: CollectionType> Collection<T> {
             let mut response: responses::Get<RT, ()> = match self.make_request(&request).await {
                 Ok(response) => {
                     let body = response.bytes().await?;
-                    serde_json::from_slice(&body)?                    
+                    serde_json::from_slice(&body)?
                 },
                 Err(err) if err.is_document_not_found() => continue,
                 Err(err) => return Err(err)
             };
-           
+
             // If this index has an archive, check is the document was found in it.
             if self.archive_name.is_some() {
                 if let Some(source) = &mut response._source {
@@ -715,7 +717,7 @@ impl<T: CollectionType> Collection<T> {
         Ok(())
     }
 
- 
+
     /// This function should perform a search through the datastore and stream
     /// all related results as a dictionary of key value pair where each keys
     /// are one of the field specified in the field list parameter.
@@ -834,7 +836,7 @@ impl<T: CollectionType> Collection<T> {
 
     /// This function should delete the underlying document referenced by the key.
     /// It should return true if the document was in fact properly deleted.
-    /// 
+    ///
     /// :param index_type: Type of indices to target
     /// :param key: id of the document to delete
     /// :return: True is delete successful
@@ -974,10 +976,10 @@ impl OperationBatch {
                             }
                         } else {
                             return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
-                        }        
+                        }
                     } else {
                         return Err(InvalidOperationError::InvalidField{ field: doc_key.to_owned(), model: model_name })
-                    }    
+                    }
                 }
             };
 
@@ -1047,14 +1049,14 @@ impl OperationBatch {
                 },
                 UpdateOperation::Append => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}} 
+                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}}
                         ctx._source.{doc_key}.add(params.value{val_id})"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 },
                 UpdateOperation::AppendIfMissing => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}} 
-                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1) 
+                        if (ctx._source.{doc_key} == null) {{ctx._source.{doc_key} = new ArrayList()}}
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1)
                             {{ctx._source.{doc_key}.add(params.value{val_id})}}"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 },
@@ -1064,13 +1066,13 @@ impl OperationBatch {
                 },
                 UpdateOperation::PrependIfMissing => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1) 
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) == -1)
                             {{ctx._source.{doc_key}.add(0, params.value{val_id})}}"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 },
                 UpdateOperation::Remove => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) != -1) 
+                        if (ctx._source.{doc_key}.indexOf(params.value{val_id}) != -1)
                             {{ctx._source.{doc_key}.remove(ctx._source.{doc_key}.indexOf(params.value{val_id}))}}"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 },
@@ -1084,13 +1086,13 @@ impl OperationBatch {
                 },
                 UpdateOperation::Max => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) < 0) 
+                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) < 0)
                             {{ctx._source.{doc_key} = params.value{val_id}}}"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 },
                 UpdateOperation::Min => {
                     op_sources.push(format!("
-                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) > 0) 
+                        if (ctx._source.{doc_key} == null || ctx._source.{doc_key}.compareTo(params.value{val_id}) > 0)
                             {{ctx._source.{doc_key} = params.value{val_id}}}"));
                     op_params.insert(format!("value{val_id}"), value.clone());
                 }
@@ -1217,7 +1219,7 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
                 }
                 Ok(())
             })();
-            
+
             // if that failed, test if value is an instance of `child` directly and if so wrap it in an array
             #[allow(clippy::collapsible_if)]
             if result.is_err() {
@@ -1231,8 +1233,8 @@ pub fn check_type(kind: &struct_metadata::Kind<ElasticMeta>, value: &mut serde_j
         struct_metadata::Kind::Option(inner) => {
             if value.is_null() {
                 return Ok(())
-            } 
-            
+            }
+
             check_type(&inner.kind, value)
         },
         struct_metadata::Kind::Mapping(key_type, value_type) => {
@@ -1314,7 +1316,7 @@ impl<'a, T: CollectionType, RT: Debug + Readable> ScrollCursorBuilder<'a, T, RT>
     fn source(mut self, source: String) -> Self {
         self.source = source; self
     }
-    
+
     fn batch_size(mut self, batch_size: i64) -> Self {
         self.batch_size = batch_size; self
     }
@@ -1460,7 +1462,7 @@ fn test_check_type() {
         an_optional_date: Option<DateTime<Utc>>,
     }
 
-    let kind = TestObject::metadata().kind;    
+    let kind = TestObject::metadata().kind;
     assert!(check_type(&kind, &mut json!({"an_optional_date": null})).is_ok(), "{kind:?}");
 
     // let kind = flatten_fields(&TestObject::metadata());

@@ -85,7 +85,7 @@ impl DispatchClient {
         }
 
         Ok(Self {
-            datastore: core.datastore.clone(), 
+            datastore: core.datastore.clone(),
             submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
             dispatcher_table: core.dispatcher_instances_table(),
             dispatcher_data: Mutex::new(Default::default()),
@@ -217,7 +217,7 @@ impl DispatchClient {
     }
 
     async fn _request_work(&self, worker_id: &str, service_name: &str, _service_version: &str,
-                      timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
+                      timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>>
     {
         // For when we repeatedly retry on bad task dequeue-ing
         if timeout.is_zero() {
@@ -249,6 +249,8 @@ impl DispatchClient {
 
         task.metadata.insert("worker__".to_string(), worker_id.into());
 
+        println!("WE ARE SENDING MESSAGE START");
+
         let url = format!("https://{}/start", task.dispatcher_address);
         let message = ServiceStartMessage {
             sid: task.sid,
@@ -258,6 +260,8 @@ impl DispatchClient {
             dispatcher_id: task.dispatcher.clone(),
             task_id: Some(task.task_id),
         };
+
+        println!("{message:?}");
 
         loop {
             // Let the dispatcher know we want to start this task
@@ -355,7 +359,7 @@ impl DispatchClient {
                     Err(err) => {
                         return Err(err.into())
                     }
-                }    
+                }
             }
         }
 
@@ -371,7 +375,7 @@ impl DispatchClient {
         let msg = WatchQueueMessage::ok(result_key.to_owned());
         for w in self._watcher_list(task.sid).members().await? {
             self.redis_volatile.queue(w, None).push(&msg).await?;
-        }    
+        }
 
         // Save the tags and their score
         let tags = result.scored_tag_dict()?;
@@ -435,7 +439,7 @@ impl DispatchClient {
                 },
             }
         }
-    }   
+    }
 
     pub async fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> Result<()> {
         // task_key = ServiceTask.make_key(sid=sid, service_name=error.response.service_name, sha=error.sha256)
@@ -456,7 +460,7 @@ impl DispatchClient {
             let msg = WatchQueueMessage::fail(error_key.to_owned());
             for w in self._watcher_list(task.sid).members().await? {
                 self.redis_volatile.queue(w, None).push(&msg).await?;
-            }    
+            }
         }
 
         // dispatcher = task.metadata['dispatcher__']
