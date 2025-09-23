@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use assemblyline_models::Sha256;
+use assemblyline_models::types::Sha256;
 use reqwest::multipart::{Form, Part};
 use tokio::io::AsyncSeekExt;
 use tokio_util::codec::{FramedRead, BytesCodec};

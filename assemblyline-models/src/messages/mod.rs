@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Sid;
+use crate::types::Sid;
 
 pub mod dispatching;
 pub mod changes;

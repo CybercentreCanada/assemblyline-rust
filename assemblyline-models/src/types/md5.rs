@@ -24,12 +24,16 @@ impl std::ops::Deref for MD5 {
     }
 }
 
+pub fn is_md5(hex: &str) -> bool {
+    hex.len() == 32 && hex.chars().all(|c|c.is_ascii_hexdigit())
+}
+
 impl std::str::FromStr for MD5 {
     type Err = ModelError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let hex = s.trim().to_ascii_lowercase();
-        if hex.len() != 32 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
+        if !is_md5(&hex) {
             return Err(ModelError::InvalidMd5(hex))
         }
         Ok(MD5(hex))

@@ -271,14 +271,12 @@ impl MockService {
 
             debug!("result: {result_key} -> {result:?}");
             let sha = task.fileinfo.sha256.to_string();
-            self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None).await.unwrap();
+            self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None, vec![]).await.unwrap();
             *self.finish.lock().entry(sha).or_default() += 1;
         }
         self.stopped.set(true);
     }
 }
-
-
 
 fn test_services() -> HashMap<String, Service> {
     return [

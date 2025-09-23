@@ -201,7 +201,7 @@ async fn test_simple() {
     info!("==== fourth dispatch");
     let task_extract = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     let task_wrench = client.request_work("0", "wrench", "0", None, true, None).await.unwrap().unwrap();
-    client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".to_owned()), None, None).await.unwrap();
+    client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".to_owned()), None, None, vec![]).await.unwrap();
     client.service_failed(task_wrench, "wrench-error", make_error(file_hash.clone(), "wrench", false)).await.unwrap();
     
     let task = disp.get_test_report(sid).await.unwrap();
@@ -218,7 +218,7 @@ async fn test_simple() {
     let task_frankenstrings = client.request_work("0", "frankenstrings", "0", None, true, None).await.unwrap().unwrap();
     client.service_failed(task_av_a, "av-a-error", make_error(file_hash.clone(), "av-a", false)).await.unwrap();
     client.service_failed(task_av_b, "av-b-error", make_error(file_hash.clone(), "av-b", false)).await.unwrap();
-    client.service_finished(task_frankenstrings, "f-result".to_owned(), make_result(file_hash.clone(), "frankenstrings".to_owned()), None, None).await.unwrap();
+    client.service_finished(task_frankenstrings, "f-result".to_owned(), make_result(file_hash.clone(), "frankenstrings".to_owned()), None, None, vec![]).await.unwrap();
 
     let task = disp.get_test_report(sid).await.unwrap();
     assert!(task.service_results.contains_key(&(file_hash.clone(), "frankenstrings".to_owned())));
@@ -229,7 +229,7 @@ async fn test_simple() {
     // Finish the xerox service and check if the submission completion got checked
     info!("==== sixth dispatch");
     let task_xerox = client.request_work("0", "xerox", "0", None, true, None).await.unwrap().unwrap();
-    client.service_finished(task_xerox, "xerox-result-key".to_owned(), make_result(file_hash, "xerox".to_owned()), None, None).await.unwrap();
+    client.service_finished(task_xerox, "xerox-result-key".to_owned(), make_result(file_hash, "xerox".to_owned()), None, None, vec![]).await.unwrap();
     // disp.pull_service_results()
     // disp.service_worker(disp.process_queue_index(sid))
     // disp.save_submission()
@@ -299,7 +299,7 @@ async fn test_dispatch_extracted() {
         is_section_image: false,
         parent_relation: "EXTRACTED".into(),
     }];
-    client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();
+    client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job has reached 
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
@@ -308,7 +308,7 @@ async fn test_dispatch_extracted() {
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = "sandbox".to_string();
-    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
+    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // 
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -317,7 +317,7 @@ async fn test_dispatch_extracted() {
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash;
     new_result.response.service_name = "extract".to_string();
-    client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None).await.unwrap();
+    client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job doesn't reach sandbox
     assert!(client.request_work("0", "sandbox", "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
@@ -391,7 +391,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
         is_section_image: false,
         parent_relation: "EXTRACTED".into(),
     }];
-    client.service_finished(job, "extracted-done".to_string(), new_result, None, None).await.unwrap();  
+    client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap(); 
 
     // Then 'sandbox' service will analyze the same file, give result
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
@@ -400,7 +400,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = "sandbox".to_string();
-    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None).await.unwrap();
+    client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // "extract" service should have a task for the extracted file, give results to move onto next stage
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
@@ -409,7 +409,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash.clone();
     new_result.response.service_name = "extract".to_string();
-    client.service_finished(job, "extract-done".to_string(), new_result, None, None).await.unwrap();
+    client.service_finished(job, "extract-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // "sandbox" should have a task for the extracted file
     // disp.dispatch_file(disp.tasks.get(sid), second_file_hash)
@@ -539,7 +539,7 @@ async fn test_prevent_result_overwrite() {
 
     // Submit result to be saved
     // client.running_tasks.add(task.key(), task.as_primitives())
-    client.service_finished(task.clone(), result_key.clone(), result.clone(), None, None).await.unwrap();
+    client.service_finished(task.clone(), result_key.clone(), result.clone(), None, None, vec![]).await.unwrap();
 
     // Pop result from queue, we expect to get the same result key as earlier
     let message = result_queue.recv().await.unwrap();
@@ -547,7 +547,7 @@ async fn test_prevent_result_overwrite() {
 
     // Save the same result again but we expect to be saved under another key
     // client.running_tasks.add(task.key(), task.as_primitives())
-    client.service_finished(task, result_key.clone(), result, None, None).await.unwrap();
+    client.service_finished(task, result_key.clone(), result, None, None, vec![]).await.unwrap();
     let message = result_queue.recv().await.unwrap();
     assert_ne!(message.result_summary.key, result_key);
 

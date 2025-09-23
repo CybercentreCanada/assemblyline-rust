@@ -9,7 +9,7 @@ use assemblyline_models::config::LogLevel;
 use flexi_logger::{DeferredNow, LoggerHandle};
 use log::Record;
 use log::{debug, error};
-use poem::{Endpoint, Middleware, Request};
+use poem::{Endpoint, Middleware, Request, http::StatusCode};
 use serde::Serialize;
 
 /// Middleware for poem http server to add query logging
@@ -44,6 +44,10 @@ impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
             Ok(resp) => {
                 debug!("request for {uri} handled ({} ms)", start.elapsed().as_millis());
                 Ok(resp)
+            },
+            Err(err) if err.status() == StatusCode::NOT_FOUND => {
+                debug!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
+                Err(err)
             },
             Err(err) => {
                 error!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());

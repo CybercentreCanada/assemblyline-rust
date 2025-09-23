@@ -20,15 +20,19 @@ impl std::fmt::Display for JA4 {
 
 static JA4_REGEX: OnceLock<regex::Regex> = OnceLock::new();
 
+pub fn is_ja4(value: &str) -> bool {
+    let regex = JA4_REGEX.get_or_init(|| {
+        regex::Regex::new(r"(t|q)([sd]|[0-3]){2}(d|i)\d{2}\d{2}\w{2}_[a-f0-9]{12}_[a-f0-9]{12}").unwrap()
+    });
+    
+    regex.is_match(value)     
+}
+
 impl std::str::FromStr for JA4 {
     type Err = BadJA4;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let regex = JA4_REGEX.get_or_init(|| {
-            regex::Regex::new(r"(t|q)([sd]|[0-3]){2}(d|i)\d{2}\d{2}\w{2}_[a-f0-9]{12}_[a-f0-9]{12}").unwrap()
-        });
-        
-        if regex.is_match(s) {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {        
+        if is_ja4(s) {
             Ok(Self(s.to_owned()))
         } else {
             Err(BadJA4(s.to_owned()))

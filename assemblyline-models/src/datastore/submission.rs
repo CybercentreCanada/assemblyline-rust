@@ -8,9 +8,8 @@ use serde_json::{json, Value};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::types::Wildcard;
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, JsonMap, Readable, Sha256, Sid, Text, types::UpperString};
-
+use crate::types::{Wildcard, ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid, Text, UpperString};
+use crate::{ElasticMeta, Readable};
 
 
 /// A logging event describing the processing of a submission
@@ -206,8 +205,7 @@ pub struct SubmissionParams {
     #[serde(default)]
     pub ttl: i32,
     /// Type of submission
-    #[serde(default="default_type")]
-    #[serde(rename="type")]
+    #[serde(rename="type", default="default_type")]
     pub submission_type: String,
     /// Initialization for temporary submission data
     #[serde(default, skip_serializing_if = "Option::is_none")]

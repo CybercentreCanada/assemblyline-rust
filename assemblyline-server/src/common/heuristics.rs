@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assemblyline_models::datastore::heuristic::Heuristic as DatastoreHeuristic;
+use assemblyline_models::datastore::tagging::{get_tag_information, TagInformation, TagValue};
 use crate::service_api::v1::task::models::Heuristic as ServiceHeuristic;
 use assemblyline_models::datastore::result::Heuristic as ResultHeuristic;
 use assemblyline_models::{ExpandingClassification, Readable};
@@ -228,6 +229,7 @@ impl Heuristic {
                 *id = new_id.clone();
             }
         }
+
         for a_id in attack_ids {
             if attack_map.contains_key(&a_id) {
                 new.attack_ids.push(a_id);
@@ -235,7 +237,7 @@ impl Heuristic {
                 new.attack_ids.push(a_id.clone());
                 let implant_name = software_def.name.clone();
                 if !implant_name.is_empty() && software_def.type_ == "malware" {
-                    new.associated_tags.push(("attribution.implant".to_string(), implant_name.to_uppercase()))
+                    new.associated_tags.push(("attribution.implant".to_string(), implant_name.to_uppercase()));
                 }
 
                 for s_a_id in &software_def.attack_ids {
@@ -250,7 +252,7 @@ impl Heuristic {
             } else if let Some(group) = group_map.get(&a_id) {
                 new.attack_ids.push(a_id);
                 if !group.name.is_empty() {
-                    new.associated_tags.push(("attribution.actor".to_owned(), group.name.to_uppercase()));
+                    new.associated_tags.push(("attribution.actor".to_string(), group.name.to_uppercase()));
                 }
             } else {
                 warn!("Invalid attack_id '{a_id}' in heuristic '{heur_id}'. Ignoring it.");

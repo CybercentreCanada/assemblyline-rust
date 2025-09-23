@@ -16,6 +16,7 @@
 // from assemblyline_service_server.api.v1 import task
 // from assemblyline_service_server.config import AUTH_KEY
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use assemblyline_models::datastore::{EmptyResult, Error, Service};
@@ -517,4 +518,24 @@ async fn test_finish_missing_file() {
 
     // nothing should be saved in database
     assert!(!core.datastore.result.exists(&result_key, None).await.unwrap());
+}
+
+
+#[tokio::test]
+async fn malformed_result() {
+    let data = include_str!("malformed_result.json");
+    
+    let config = assemblyline_markings::classification::sample_config();
+    assemblyline_models::set_global_classification(Arc::new(assemblyline_markings::classification::ClassificationParser::new(config).unwrap()));
+
+    #[derive(Serialize, Deserialize)]
+    struct Success {
+        task: assemblyline_models::JsonMap,
+        #[serde(default)]
+        exec_time: u64,
+        freshen: bool,
+        result: crate::service_api::v1::task::models::Result,
+    }
+
+    let _output: Success = serde_json::from_str(data).unwrap();
 }

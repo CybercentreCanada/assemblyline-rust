@@ -6,7 +6,8 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
-use crate::{ElasticMeta, Email, ExpandingClassification, Readable, types::UpperString};
+use crate::{ElasticMeta, Readable, };
+use crate::types::{Email, UpperString, ExpandingClassification};
 
 
 

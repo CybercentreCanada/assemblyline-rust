@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, Readable, Sid};
+use crate::{ElasticMeta, Readable, types::Sid};
 
 
 /// Model of Scoring related to a File

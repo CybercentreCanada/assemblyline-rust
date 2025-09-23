@@ -359,7 +359,7 @@ impl DispatchClient {
     }
 
     /// Notifies the dispatcher of service completion, and possible new files to dispatch.
-    pub async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>) -> Result<()> {
+    pub async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
         let mut version = Some(version.unwrap_or(Version::Create));
 
         // Make sure the dispatcher knows we were working on this task
@@ -398,6 +398,14 @@ impl DispatchClient {
                     }
                 }    
             }
+        }
+
+        // Store any errors passed beside the result as well
+        let mut extra_errors = vec![];
+        for error in errors {
+            let error_key = error.build_unique_key(result.response.service_tool_version.as_deref(), Some(&task))?;
+            self.datastore.error.save(&error_key, &error, None, None).await?;
+            extra_errors.push(error_key);
         }
 
         // Send the result key to any watching systems
@@ -443,7 +451,8 @@ impl DispatchClient {
             },
             tags,
             extracted_names: file_names,
-            temporary_data: temporary_data.unwrap_or_default()
+            temporary_data: temporary_data.unwrap_or_default(),
+            extra_errors,
         };
 
         loop {

@@ -17,7 +17,8 @@ use struct_metadata::Described;
 
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
 use crate::types::strings::Keyword;
-use crate::{random_word, ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha256, Text};
+use crate::{random_word, ElasticMeta, Readable};
+use crate::types::{ClassificationString, ExpandingClassification, Sha256, Text};
 
 use super::tagging::Tagging;
 

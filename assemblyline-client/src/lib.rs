@@ -103,7 +103,7 @@ mod tests {
     use std::sync::Arc;
 
     use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
-    use assemblyline_models::ClassificationString;
+    use assemblyline_models::types::ClassificationString;
     use rand::Rng;
 
     use crate::{Authentication, Client, Connection};

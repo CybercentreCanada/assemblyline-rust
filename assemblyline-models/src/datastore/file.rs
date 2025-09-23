@@ -5,7 +5,8 @@ use serde::{Serialize, Deserialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, Text, MD5};
+use crate::{ElasticMeta, Readable};
+use crate::types::{ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
 
 /// Model of File
 #[derive(Debug, Serialize, Deserialize, Described, Clone)]

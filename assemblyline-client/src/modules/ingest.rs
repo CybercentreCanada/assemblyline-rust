@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use assemblyline_models::Sha256;
+use assemblyline_models::types::Sha256;
 use chrono::{DateTime, Utc};
 use reqwest::multipart::{Form, Part};
 use serde::Deserialize;

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, ExpandingClassification, Readable, Text};
+use crate::{ElasticMeta, Readable, types::{ExpandingClassification, Text}};
 
 
 /// Model of Service Heuristics

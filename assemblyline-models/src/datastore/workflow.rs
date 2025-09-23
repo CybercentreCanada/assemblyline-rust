@@ -1,14 +1,10 @@
-// from assemblyline import odm
-// from assemblyline.common import forge
-
-// Classification = forge.get_classification()
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Uuid, ElasticMeta, ExpandingClassification};
+use crate::types::{Uuid, ExpandingClassification};
+use crate::ElasticMeta;
 
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described)]

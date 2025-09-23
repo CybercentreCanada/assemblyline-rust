@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use assemblyline_models::Sha256;
+use assemblyline_models::types::Sha256;
 use assemblyline_models::datastore::file::File as FileModel;
 use assemblyline_models::datastore::result::Result as ResultModel;
 use serde::Deserialize;

@@ -5,7 +5,8 @@ use serde::{Serialize, Deserialize};
 use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
 use struct_metadata::Described;
 
-use crate::{ElasticMeta, JsonMap, ModelError};
+use crate::types::JsonMap;
+use crate::{ElasticMeta, ModelError};
 
 enum ClassificationMode {
     Uninitialized,

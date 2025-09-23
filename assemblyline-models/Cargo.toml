@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-models"
-version = "0.5.4"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -18,7 +18,12 @@ sha1 = "0.10"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"
+uuid = "1"
 
+idna = "1"
+unicode-normalization = "0.1"
+
+constcat = "0.6"
 regex = "1.11"
 thiserror = "2"
 

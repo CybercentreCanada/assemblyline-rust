@@ -162,7 +162,7 @@ pub mod models {
     use assemblyline_models::datastore::result::{BodyFormat, PromoteTo, ResponseBody};
     use assemblyline_models::{ClassificationString, JsonMap, Sha256, Text};
     use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Serialize};
+    use serde::{Deserialize, Deserializer, Serialize};
 
     /// Result Model
     #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -235,7 +235,7 @@ pub mod models {
         pub heuristic: Option<Heuristic>,
         /// List of tags associated to this section
         #[serde(default)]
-        pub tags: JsonMap,
+        pub tags: HashMap<String, Vec<serde_json::Value>>,
         /// List of safelisted tags
         #[serde(default)]
         pub safelisted_tags: HashMap<String, Vec<serde_json::Value>>,
@@ -252,7 +252,7 @@ pub mod models {
     #[derive(Serialize, Deserialize, Debug, Clone)]
     pub struct Heuristic {
         pub heur_id: HeuristicId,
-        #[serde(default)]
+        #[serde(default, deserialize_with="deserialize_array_or_str")]
         pub attack_ids: Vec<String>,
         #[serde(default)]
         pub signatures: HashMap<String, i32>,
@@ -276,6 +276,23 @@ pub mod models {
                 HeuristicId::Code(num) => f.write_fmt(format_args!("{num}")),
             }
         }
+    }
+
+    fn deserialize_array_or_str<'de, D>(deserializer: D) -> anyhow::Result<Vec<String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Helper {
+            List(Vec<String>),
+            Value(String),
+        }
+
+        Ok(match Helper::deserialize(deserializer)? {
+            Helper::List(items) => items,
+            Helper::Value(value) => vec![value],
+        })
     }
 
     fn default_frequency() -> i32 { 1 }

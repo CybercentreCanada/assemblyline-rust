@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::Wildcard;
-use crate::{ClassificationString, Sid};
+use crate::types::{Sid, Wildcard, ClassificationString};
 pub use crate::datastore::submission::{File, SubmissionParams};
 
 #[derive(Serialize, Deserialize)]
@@ -46,17 +45,17 @@ pub struct Submission {
 }
 
 impl Submission {
-    pub fn new(classification: ClassificationString) -> Self {
-        Self { 
-            sid: Sid(0), 
-            time: chrono::Utc::now(), 
-            files: Default::default(), 
-            metadata: Default::default(), 
-            notification: Default::default(), 
-            params: SubmissionParams::new(classification), 
-            scan_key: Default::default() 
-        }
-    }
+    // pub fn new(classification: ClassificationString) -> Self {
+    //     Self { 
+    //         sid: Sid(0), 
+    //         time: chrono::Utc::now(), 
+    //         files: Default::default(), 
+    //         metadata: Default::default(), 
+    //         notification: Default::default(), 
+    //         params: SubmissionParams::new(classification), 
+    //         scan_key: Default::default() 
+    //     }
+    // }
 }
 
 impl From<&crate::datastore::submission::Submission> for Submission {

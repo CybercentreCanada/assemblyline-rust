@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use assemblyline_models::config::Config;
-use assemblyline_models::datastore::tagging::FlatTags;
+use assemblyline_models::datastore::tagging::{FlatTags, TagInformation, TagValue};
 use assemblyline_models::datastore::Tagging;
 use assemblyline_models::Readable;
 use log::{debug, error, info};
@@ -57,8 +57,9 @@ use super::odm::flat_fields;
 //     return f"{t_type}__{t_value}"
 
 
-fn get_safelist_key(t_type: &str, t_value: &str) -> String {
-    format!("{t_type}__{t_value}")
+
+fn get_safelist_key(tag_type: &str, tag_value: &str) -> String {
+    format!("{tag_type}__{tag_value}")
 }
 
 
@@ -164,25 +165,28 @@ impl TagSafelister {
         Ok(new)
     }
 
-    pub fn is_safelisted(&self, t_type: &str, t_value: &str) -> bool {
-        if self.safelist.lock().contains(&get_safelist_key(t_type, t_value)) {
-            info!("Tag '{t_type}' with value '{t_value}' was safelisted.");
+    pub fn _is_safelisted(&self, safelist: &HashSet<String>, t_type: &'static TagInformation, t_value: &TagValue) -> bool {
+        let tag_label = t_type.full_path();
+        let tag_value_string = t_value.to_string();
+
+        if safelist.contains(&get_safelist_key(&tag_label, &tag_value_string)) {
+            info!("Tag '{tag_label}' with value '{tag_value_string}' was safelisted.");
             return true
         }
 
-        if let Some(possible_matches) = self.matched.get(t_type) {
+        if let Some(possible_matches) = self.matched.get(&tag_label) {
             for possible_match in possible_matches {
-                if t_value == possible_match {
-                    info!("Tag '{t_type}' with value '{t_value}' was safelisted by match rule.");
+                if tag_value_string == *possible_match {
+                    info!("Tag '{tag_label}' with value '{tag_value_string}' was safelisted by match rule.");
                     return true
                 }
             }
         }
 
-        if let Some(possible_regexes) = self.regex.get(t_type) {
+        if let Some(possible_regexes) = self.regex.get(&tag_label) {
             for regex in possible_regexes {
-                if regex.is_match(t_value) {
-                    info!("Tag '{t_type}' with value '{t_value}' was safelisted by regex '{}'.", regex.as_str());
+                if regex.is_match(&tag_value_string) {
+                    info!("Tag '{tag_label}' with value '{tag_value_string}' was safelisted by regex '{}'.", regex.as_str());
                     return true
                 }
             }
@@ -191,11 +195,12 @@ impl TagSafelister {
         return false
     }
 
-    pub fn safelist_many(&self, t_type: &str, t_values: Vec<String>) -> (Vec<String>, Vec<String>) {
+    pub fn safelist_many(&self, t_type: &'static TagInformation, t_values: Vec<TagValue>) -> (Vec<TagValue>, Vec<TagValue>) {
         let mut tags = vec![];
         let mut safelisted_tags = vec![];
+        let safelist = self.safelist.lock();
         for x in t_values {
-            if self.is_safelisted(t_type, &x) {
+            if self._is_safelisted(&safelist, t_type, &x) {
                 safelisted_tags.push(x)
             } else {
                 tags.push(x)
@@ -223,9 +228,9 @@ impl TagSafelister {
     }
 }
 
-pub async fn tag_safelist_watcher(config: Arc<Config>, ds: Arc<Elastic>, config_path: Option<PathBuf>) -> Result<Arc<Mutex<TagSafelister>>> {
+pub async fn tag_safelist_watcher(config: Arc<Config>, ds: Arc<Elastic>, config_path: Option<PathBuf>) -> Result<Arc<Mutex<Arc<TagSafelister>>>> {
     let safelist_data = get_tag_safelist_data(&config, ds.clone(), config_path.clone()).await?;
-    let data = Arc::new(Mutex::new(TagSafelister::new(ds.clone(), safelist_data).await?));
+    let data = Arc::new(Mutex::new(Arc::new(TagSafelister::new(ds.clone(), safelist_data).await?)));
     let input = data.clone();
     tokio::spawn(async move {
         loop {
@@ -246,7 +251,7 @@ pub async fn tag_safelist_watcher(config: Arc<Config>, ds: Arc<Elastic>, config_
 
             match TagSafelister::new(ds.clone(), new_data).await {
                 Ok(value) => {
-                    *input.lock() = value;
+                    *input.lock() = Arc::new(value);
                 },
                 Err(err) => {
                     error!("Could not update tag safelist: {err}");
