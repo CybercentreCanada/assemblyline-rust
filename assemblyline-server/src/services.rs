@@ -380,7 +380,7 @@ pub mod test {
     use assemblyline_models::datastore::service::Service;
     use assemblyline_models::datastore::submission::SubmissionParams;
     use assemblyline_models::messages::changes::ServiceChange;
-    use assemblyline_models::ClassificationString;
+    use assemblyline_models::types::ClassificationString;
     use serde_json::json;
 
     pub fn dummy_service(name: &str, stage: &str, category: Option<&str>, accepts: Option<&str>, rejects: Option<&str>, extra_data: Option<bool>) -> Service {
@@ -469,13 +469,15 @@ pub mod test {
         let (core, redis) = Core::test_custom_setup(|config| {
             config.services.stages = vec!["pre".to_string(), "core".to_string(), "post".to_string()];
         }).await;
-        let service_count = services.len();
+        let mut enabled_services = 0;
+
         println!("setup core");
 
         for (name, service) in &services {
             core.datastore.service.save(&service.key(), service, None, None).await.unwrap();
             core.datastore.service_delta.save_json(name, &mut[("version".to_owned(), json!(service.version))].into_iter().collect(), None, None).await.unwrap();
             if service.enabled {
+                enabled_services += 1;
                 core.services.get_service_stage_hash().set(name, &ServiceStage::Running).await.unwrap();
             } else {
                 core.services.get_service_stage_hash().set(name, &ServiceStage::Off).await.unwrap();
@@ -500,7 +502,8 @@ pub mod test {
                     None => continue 'outer
                 };
             }
-            if core.services.list_enabled().len() == service_count { break }
+            if core.services.list_enabled().len() == enabled_services { break }
+            println!("{}", core.services.list_enabled().len());
         }
         println!("Services confirmed");
         (core, redis)

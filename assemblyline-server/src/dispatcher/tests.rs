@@ -7,7 +7,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{result, submission, Error, File, Service, Submission};
 use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
 use assemblyline_models::messages::task::{DataItem, ServiceResult, Task};
-use assemblyline_models::{ClassificationString, Sha256};
+use assemblyline_models::types::{ClassificationString, Sha256};
 use log::{debug, info};
 use poem::listener::Acceptor;
 use poem::EndpointExt;
@@ -123,6 +123,7 @@ async fn start_test_dispatcher(core: Core) -> anyhow::Result<Arc<Dispatcher>> {
     Ok(dispatcher)
 }
 
+//MARK: simple
 #[tokio::test]
 async fn test_simple() {
     let (core, _guard) = setup().await;
@@ -238,6 +239,7 @@ async fn test_simple() {
     assert!(disp.get_test_report(sid).await.is_err());
 }
 
+// MARK: extracted
 #[tokio::test]
 async fn test_dispatch_extracted() {
     let (core, _guard) = setup().await;
@@ -323,6 +325,7 @@ async fn test_dispatch_extracted() {
     assert!(client.request_work("0", "sandbox", "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
 }
 
+// MARK: extracted bypass drp
 /// Dynamic Recursion Prevention is to prevent services belonging to the 'Dynamic Analysis'
 /// from analyzing the children of files they've analyzed.
 ///

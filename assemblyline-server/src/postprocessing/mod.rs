@@ -6,14 +6,14 @@ use std::time::Duration;
 
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::ArchiveAction;
-use assemblyline_models::Sid;
+use assemblyline_models::types::Sid;
 use bytes::Bytes;
 use anyhow::Result;
 use rand::Rng;
 use tokio::sync::mpsc;
 // use anyhow::Result;
 use itertools::Itertools;
-use log::{info, warn, error};
+use log::{debug, error, info, warn};
 use redis_objects::{Hashmap, PriorityQueue, Queue};
 use serde_json::json;
 use tokio::sync::RwLock;
@@ -226,10 +226,11 @@ impl ActionWorker {
         let mut webhooks: HashSet<Webhook> = HashSet::new();
 
         let actions = self.actions.read().await.clone();
-        for (fltr, action) in actions.values() {
+        for (action_name, (fltr, action)) in actions.iter() {
             if !fltr.test(&data)? {
                 continue
             }
+            debug!("Applying post processing action {action_name} to {}", submission.sid);
 
             // Check if we need to launch an alert
             create_alert |= action.raise_alert;

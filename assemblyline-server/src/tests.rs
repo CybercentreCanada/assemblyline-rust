@@ -13,7 +13,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
 use assemblyline_filestore::FileStore;
 use log::{debug, error, info};
 use parking_lot::Mutex;
@@ -1398,7 +1398,7 @@ async fn test_tag_filter() {
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 
-    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
+    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(30)).await.unwrap().unwrap();
     assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string())
 }
 

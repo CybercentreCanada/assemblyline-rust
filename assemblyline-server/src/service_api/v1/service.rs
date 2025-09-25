@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use assemblyline_models::datastore::Service;
-use assemblyline_models::JsonMap;
+use assemblyline_models::types::JsonMap;
 use poem::http::StatusCode;
 use poem::web::{Data, Json};
 use poem::{handler, put, Endpoint, EndpointExt, Result, Response, Route};

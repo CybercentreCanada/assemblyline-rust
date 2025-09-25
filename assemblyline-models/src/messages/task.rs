@@ -274,7 +274,7 @@ impl ServiceResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TagEntry {
     pub score: i32,    
     #[serde(rename="type")]

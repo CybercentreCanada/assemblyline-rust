@@ -1,0 +1,970 @@
+{
+    "freshen": true,
+    "result": {
+        "classification": "L0",
+        "drop_file": false,
+        "partial": false,
+        "response": {
+            "extracted": [
+                {
+                    "allow_dynamic_recursion": false,
+                    "classification": "L0",
+                    "description": "overlay extracted from binary's resources",
+                    "is_section_image": false,
+                    "is_supplementary": false,
+                    "name": "overlay",
+                    "parent_relation": "EXTRACTED",
+                    "sha256": "b19582ec7edc1579127d67e468badb164e5fd2916438f21904f540d26d7db78f"
+                }
+            ],
+            "milestones": {
+                "service_completed": "2025-09-11T15:43:52.419406Z",
+                "service_started": "2025-09-11T15:43:51.526005Z"
+            },
+            "service_context": null,
+            "service_debug_info": null,
+            "service_name": "PE",
+            "service_tool_version": null,
+            "service_version": "4.6.0.dev18",
+            "supplementary": [
+                {
+                    "allow_dynamic_recursion": false,
+                    "classification": "L0",
+                    "description": "certificate.1.1 extracted from binary's resources",
+                    "is_section_image": false,
+                    "is_supplementary": true,
+                    "name": "certificate.1.1",
+                    "parent_relation": "EXTRACTED",
+                    "sha256": "46011ede1c147eb2bc731a539b7c047b7ee93e48b9d3c3ba710ce132bbdfac6b"
+                },
+                {
+                    "allow_dynamic_recursion": false,
+                    "classification": "L0",
+                    "description": "certificate.1.2 extracted from binary's resources",
+                    "is_section_image": false,
+                    "is_supplementary": true,
+                    "name": "certificate.1.2",
+                    "parent_relation": "EXTRACTED",
+                    "sha256": "0b0701eaa7a18fd68430ebeab204028f8baee2a90e585f80eced4935062932bd"
+                },
+                {
+                    "allow_dynamic_recursion": false,
+                    "classification": "L0",
+                    "description": "Features extracted from the PE file, as a JSON file",
+                    "is_section_image": false,
+                    "is_supplementary": true,
+                    "name": "features.json",
+                    "parent_relation": "INFORMATION",
+                    "sha256": "b02621e8bc148710678f15cabf6e9fa15da61e772d08ea71210428efea9d871b"
+                },
+                {
+                    "allow_dynamic_recursion": false,
+                    "classification": "L0",
+                    "description": "Result Ontology from PE",
+                    "is_section_image": false,
+                    "is_supplementary": true,
+                    "name": "pe_0c6aa718584d13ed2a2e6e78949ece52c80cfb41a46cc37ee28b7f69c74523e5.ontology",
+                    "parent_relation": "INFORMATION",
+                    "sha256": "b091e26a4d03d13f761159570e5d4313b9059cd878ee6b6e2a258322022723fe"
+                }
+            ]
+        },
+        "result": {
+            "score": 0,
+            "sections": [
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Timestamp\\\", \\\"1662758445 (2022-09-09 21:20:45 +00:00 (UTC))\\\"], [\\\"Entrypoint\\\", \\\"0x2770b0\\\"], [\\\"Machine\\\", \\\"I386\\\"], [\\\"Magic\\\", \\\"PE32\\\"], [\\\"Image version\\\", \\\"0.0\\\"], [\\\"Linker version\\\", \\\"14.0\\\"], [\\\"Operating System version\\\", \\\"5.1\\\"], [\\\"Subsystem version\\\", \\\"5.1\\\"], [\\\"Subsystem\\\", \\\"WINDOWS_CUI\\\"], [\\\"NX\\\", true], [\\\"Position Independent\\\", true], [\\\"Checksum\\\", \\\"0x0037ac9d\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "linker": {
+                                    "timestamp": [1662758445,
+                                        "2022-09-09 21:20:45 +00:00 (UTC)"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Headers",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"sha512\\\", \\\"0a797bb303421f2d41698aa077ae3488adce4e914133c0d98c081dcfa7fdda6d4e737e8b3ed1c81db01da3487f957d03a4d10a57537d4a5f7adb67ac83089754\\\"], [\\\"sha384\\\", \\\"ab1330ef4321ffdf7a2181cc0be5804da341a2c6ece1f175e83dd1f2fc7959cb9020480b3a56b392a97914b70a1a2978\\\"], [\\\"sha256\\\", \\\"41a0149ba96d22fa9829291485fd670aa645a63a852ab8112ca46229b872ac1b\\\"], [\\\"sha1\\\", \\\"3e17eda15ffe138482be256c80d1f97679b0c1f7\\\"], [\\\"md5\\\", \\\"89a935c57b85e46f2576b6b298770377\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Authentihash",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": null,
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Sections",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 6.62463600065224], [\\\"Entropy without padding\\\", 6.624627221965453], [\\\"Offset\\\", 1024], [\\\"Size\\\", 2750976], [\\\"Virtual Size\\\", 2750824], [\\\"Characteristics\\\", \\\"CNT_CODE, MEM_EXECUTE, MEM_READ\\\"], [\\\"MD5\\\", \\\"5952ac05637eb7ce8596692b7822bf89\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [6.52517, 6.66876, 6.57473, 6.48632, 6.06399, 6.51308, 6.6182, 6.22139, 5.86668, 5.95824, 5.87319, 5.91387, 5.89463, 5.90456, 6.20944, 6.49302, 6.19147, 6.12255, 5.87412, 6.30901, 6.32787, 6.43906, 6.64456, 6.70321, 6.6624, 6.64506, 6.62847, 6.56134, 6.45916, 6.52488, 6.5567, 6.60539, 6.69202, 6.65165, 6.60224, 6.63482, 6.6654, 6.65186, 6.59476, 6.59059, 6.69725, 6.5609, 6.26979, 6.40126, 6.50056, 6.25645, 6.37663, 6.65674, 6.6796, 6.73411]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "5952ac05637eb7ce8596692b7822bf89"
+                                    ],
+                                    "name": [
+                                        ".text"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .text",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 4.859668003963016], [\\\"Entropy without padding\\\", 4.860616598444584], [\\\"Offset\\\", 2752000], [\\\"Size\\\", 645632], [\\\"Virtual Size\\\", 645460], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_READ\\\"], [\\\"MD5\\\", \\\"76ede146b241df23ebbb1f4c8d13d900\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [5.87477, 4.58542, 6.31455, 6.03629, 6.66191, 5.59843, 3.53781, 4.85383, 5.44253, 2.93653, 1.83743, 5.09212, 5.19963, 3.9442, 1.1538, 4.19742, 6.14495, 5.03084, 5.59037, 4.81332, 5.17233, 4.54622, 1.40134, 1.51479, 1.91458, 1.77967, 1.98866, 5.31988, 2.74558, 1.34342, 1.64048, 1.45354, 1.57858, 2.71823, 3.03831, 3.7573, 3.06193, 1.50198, 1.63902, 5.19518, 5.5536, 4.85567, 5.19975, 4.87562, 4.81682, 4.9025, 5.20371, 5.88835, 5.94225, 3.45783]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "76ede146b241df23ebbb1f4c8d13d900"
+                                    ],
+                                    "name": [
+                                        ".rdata"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .rdata",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 5.160879777030986], [\\\"Entropy without padding\\\", 5.160879777030986], [\\\"Offset\\\", 3397632], [\\\"Size\\\", 91648], [\\\"Virtual Size\\\", 143072], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_READ, MEM_WRITE\\\"], [\\\"MD5\\\", \\\"48e3f7c226324b0d84ba8d21f9f86690\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [2.04371, 3.76189, 5.15507, 5.18953, 5.13595, 5.04332, 4.31084, 4.64584, 5.00885, 5.03433, 5.02801, 5.03321, 5.03327, 4.98199, 5.02173, 5.10051, 5.03927, 5.06205, 5.11822, 5.14506, 4.97404, 4.83466, 5.20023, 4.95776, 5.07222, 4.81389, 4.86124, 4.87574, 4.9398, 4.884, 4.89477, 4.87432, 4.88033, 4.85684, 4.89475, 5.01046, 4.75504, 4.94056, 5.03443, 4.92117, 5.09443, 4.94928, 5.1763, 5.13419, 5.18981, 5.21039, 5.10427, 5.11606, 5.06697, 5.00183]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "48e3f7c226324b0d84ba8d21f9f86690"
+                                    ],
+                                    "name": [
+                                        ".data"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .data",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 0.08153941234324169], [\\\"Entropy without padding\\\", 2.0], [\\\"Offset\\\", 3489280], [\\\"Size\\\", 512], [\\\"Virtual Size\\\", 4], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_READ\\\"], [\\\"MD5\\\", \\\"22c6d6803878af0cad3cc36b349306de\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [0.14737, 0.0]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "22c6d6803878af0cad3cc36b349306de"
+                                    ],
+                                    "name": [
+                                        ".00cfg"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .00cfg",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 0.06116285224115448], [\\\"Entropy without padding\\\", 0.4035278227002514], [\\\"Offset\\\", 3489792], [\\\"Size\\\", 512], [\\\"Virtual Size\\\", 53], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_READ, MEM_WRITE\\\"], [\\\"MD5\\\", \\\"900c2b4392996c568a71c29c2698e06a\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [0.11056, 0.0]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "900c2b4392996c568a71c29c2698e06a"
+                                    ],
+                                    "name": [
+                                        ".tls"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .tls",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 2.8913410315331527], [\\\"Entropy without padding\\\", 6.122892423679587], [\\\"Offset\\\", 3490304], [\\\"Size\\\", 512], [\\\"Virtual Size\\\", 182], [\\\"Characteristics\\\", \\\"\\\"], [\\\"MD5\\\", \\\"51de89acdb3eb19d88b5d87333b9d122\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [4.9377, 0.0]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "51de89acdb3eb19d88b5d87333b9d122"
+                                    ],
+                                    "name": [
+                                        ".voltbl"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .voltbl",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 2.8155819359150076], [\\\"Entropy without padding\\\", 3.328583174271055], [\\\"Offset\\\", 3490816], [\\\"Size\\\", 1536], [\\\"Virtual Size\\\", 1240], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_READ\\\"], [\\\"MD5\\\", \\\"5d21b5792908cc52bd51a837be651d57\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [1.99927, 3.3242, 3.35502, 3.2654, 2.79447, 0.0]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "5d21b5792908cc52bd51a837be651d57"
+                                    ],
+                                    "name": [
+                                        ".rsrc"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .rsrc",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Entropy\\\", 6.583214447481882], [\\\"Entropy without padding\\\", 6.586500068074141], [\\\"Offset\\\", 3492352], [\\\"Size\\\", 105984], [\\\"Virtual Size\\\", 105828], [\\\"Characteristics\\\", \\\"CNT_INITIALIZED_DATA, MEM_DISCARDABLE, MEM_READ\\\"], [\\\"MD5\\\", \\\"c13ddd5f9bb856852240554a283665e0\\\"]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [6.64592, 6.75043, 6.67132, 6.53438, 6.19288, 6.27672, 6.60836, 6.64054, 6.72443, 6.60815, 6.63038, 6.6292, 6.66359, 6.67928, 6.62479, 6.6038, 6.66405, 6.68235, 6.70159, 6.68168, 6.66021, 6.71598, 6.6888, 6.68691, 6.6704, 6.69757, 6.28665, 5.72188, 5.89337, 5.89023, 5.83082, 5.88693, 5.86874, 5.89651, 5.73718, 5.79083, 5.61723, 5.61265, 5.892, 5.84381, 5.80556, 5.89492, 5.86638, 5.55422, 5.41125, 5.77851, 5.80345, 5.54098, 5.8076, 5.19454]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "sections": {
+                                    "hash": [
+                                        "c13ddd5f9bb856852240554a283665e0"
+                                    ],
+                                    "name": [
+                                        ".reloc"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Section - .reloc",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": null,
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Debugs",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Timestamp\\\", \\\"1662758445 (2022-09-09 21:20:45 +00:00 (UTC))\\\"], [\\\"Version\\\", \\\"0.0\\\"], [\\\"CV_Signature\\\", \\\"PDB_70\\\"], [\\\"Filename\\\", \\\"vk_swiftshader.dll.pdb\\\"], [\\\"GUID\\\", \\\"a1ce5e4a-6e5d-ce57-4c4c-44205044422e\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "debug": {
+                                    "guid": [
+                                        "a1ce5e4a-6e5d-ce57-4c4c-44205044422e"
+                                    ]
+                                },
+                                "pdb_filename": [
+                                    "vk_swiftshader.dll.pdb"
+                                ]
+                            }
+                        }
+                    },
+                    "title_text": "CODEVIEW",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "Name: vk_swiftshader.dll\\nVersion: 0.0\\nTimestamp: 0 (1970-01-01 00:00:00 +00:00 (UTC))",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "exports": {
+                                    "module_name": [
+                                        "vk_swiftshader.dll"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Export",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "Name: vkAcquireNextImage2KHR, ordinal: 1\\nName: vkAcquireNextImageKHR, ordinal: 2\\nName: vkAllocateCommandBuffers, ordinal: 3\\nName: vkAllocateDescriptorSets, ordinal: 4\\nName: vkAllocateMemory, ordinal: 5\\nName: vkBeginCommandBuffer, ordinal: 6\\nName: vkBindBufferMemory, ordinal: 7\\nName: vkBindBufferMemory2, ordinal: 8\\nName: vkBindImageMemory, ordinal: 9\\nName: vkBindImageMemory2, ordinal: 10\\nName: vkCmdBeginQuery, ordinal: 11\\nName: vkCmdBeginRenderPass, ordinal: 12\\nName: vkCmdBeginRenderPass2, ordinal: 13\\nName: vkCmdBeginRendering, ordinal: 14\\nName: vkCmdBindDescriptorSets, ordinal: 15\\nName: vkCmdBindIndexBuffer, ordinal: 16\\nName: vkCmdBindPipeline, ordinal: 17\\nName: vkCmdBindVertexBuffers, ordinal: 18\\nName: vkCmdBindVertexBuffers2, ordinal: 19\\nName: vkCmdBlitImage, ordinal: 20\\nName: vkCmdBlitImage2, ordinal: 21\\nName: vkCmdClearAttachments, ordinal: 22\\nName: vkCmdClearColorImage, ordinal: 23\\nName: vkCmdClearDepthStencilImage, ordinal: 24\\nName: vkCmdCopyBuffer, ordinal: 25\\nName: vkCmdCopyBuffer2, ordinal: 26\\nName: vkCmdCopyBufferToImage, ordinal: 27\\nName: vkCmdCopyBufferToImage2, ordinal: 28\\nName: vkCmdCopyImage, ordinal: 29\\nName: vkCmdCopyImage2, ordinal: 30\\nName: vkCmdCopyImageToBuffer, ordinal: 31\\nName: vkCmdCopyImageToBuffer2, ordinal: 32\\nName: vkCmdCopyQueryPoolResults, ordinal: 33\\nName: vkCmdDispatch, ordinal: 34\\nName: vkCmdDispatchBase, ordinal: 35\\nName: vkCmdDispatchIndirect, ordinal: 36\\nName: vkCmdDraw, ordinal: 37\\nName: vkCmdDrawIndexed, ordinal: 38\\nName: vkCmdDrawIndexedIndirect, ordinal: 39\\nName: vkCmdDrawIndexedIndirectCount, ordinal: 40\\nName: vkCmdDrawIndirect, ordinal: 41\\nName: vkCmdDrawIndirectCount, ordinal: 42\\nName: vkCmdEndQuery, ordinal: 43\\nName: vkCmdEndRenderPass, ordinal: 44\\nName: vkCmdEndRenderPass2, ordinal: 45\\nName: vkCmdEndRendering, ordinal: 46\\nName: vkCmdExecuteCommands, ordinal: 47\\nName: vkCmdFillBuffer, ordinal: 48\\nName: vkCmdNextSubpass, ordinal: 49\\nName: vkCmdNextSubpass2, ordinal: 50\\nName: vkCmdPipelineBarrier, ordinal: 51\\nName: vkCmdPipelineBarrier2, ordinal: 52\\nName: vkCmdPushConstants, ordinal: 53\\nName: vkCmdResetEvent, ordinal: 54\\nName: vkCmdResetEvent2, ordinal: 55\\nName: vkCmdResetQueryPool, ordinal: 56\\nName: vkCmdResolveImage, ordinal: 57\\nName: vkCmdResolveImage2, ordinal: 58\\nName: vkCmdSetBlendConstants, ordinal: 59\\nName: vkCmdSetCullMode, ordinal: 60\\nName: vkCmdSetDepthBias, ordinal: 61\\nName: vkCmdSetDepthBiasEnable, ordinal: 62\\nName: vkCmdSetDepthBounds, ordinal: 63\\nName: vkCmdSetDepthBoundsTestEnable, ordinal: 64\\nName: vkCmdSetDepthCompareOp, ordinal: 65\\nName: vkCmdSetDepthTestEnable, ordinal: 66\\nName: vkCmdSetDepthWriteEnable, ordinal: 67\\nName: vkCmdSetDeviceMask, ordinal: 68\\nName: vkCmdSetEvent, ordinal: 69\\nName: vkCmdSetEvent2, ordinal: 70\\nName: vkCmdSetFrontFace, ordinal: 71\\nName: vkCmdSetLineWidth, ordinal: 72\\nName: vkCmdSetPrimitiveRestartEnable, ordinal: 73\\nName: vkCmdSetPrimitiveTopology, ordinal: 74\\nName: vkCmdSetRasterizerDiscardEnable, ordinal: 75\\nName: vkCmdSetScissor, ordinal: 76\\nName: vkCmdSetScissorWithCount, ordinal: 77\\nName: vkCmdSetStencilCompareMask, ordinal: 78\\nName: vkCmdSetStencilOp, ordinal: 79\\nName: vkCmdSetStencilReference, ordinal: 80\\nName: vkCmdSetStencilTestEnable, ordinal: 81\\nName: vkCmdSetStencilWriteMask, ordinal: 82\\nName: vkCmdSetViewport, ordinal: 83\\nName: vkCmdSetViewportWithCount, ordinal: 84\\nName: vkCmdUpdateBuffer, ordinal: 85\\nName: vkCmdWaitEvents, ordinal: 86\\nName: vkCmdWaitEvents2, ordinal: 87\\nName: vkCmdWriteTimestamp, ordinal: 88\\nName: vkCmdWriteTimestamp2, ordinal: 89\\nName: vkCreateBuffer, ordinal: 90\\nName: vkCreateBufferView, ordinal: 91\\nName: vkCreateCommandPool, ordinal: 92\\nName: vkCreateComputePipelines, ordinal: 93\\nName: vkCreateDescriptorPool, ordinal: 94\\nName: vkCreateDescriptorSetLayout, ordinal: 95\\nName: vkCreateDescriptorUpdateTemplate, ordinal: 96\\nName: vkCreateDevice, ordinal: 97\\nName: vkCreateEvent, ordinal: 98\\nName: vkCreateFence, ordinal: 99\\nName: vkCreateFramebuffer, ordinal: 100",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "exports": {
+                                    "function_name": [
+                                        "vkAcquireNextImage2KHR",
+                                        "vkAcquireNextImageKHR",
+                                        "vkAllocateCommandBuffers",
+                                        "vkAllocateDescriptorSets",
+                                        "vkAllocateMemory",
+                                        "vkBeginCommandBuffer",
+                                        "vkBindBufferMemory",
+                                        "vkBindBufferMemory2",
+                                        "vkBindImageMemory",
+                                        "vkBindImageMemory2",
+                                        "vkCmdBeginQuery",
+                                        "vkCmdBeginRenderPass",
+                                        "vkCmdBeginRenderPass2",
+                                        "vkCmdBeginRendering",
+                                        "vkCmdBindDescriptorSets",
+                                        "vkCmdBindIndexBuffer",
+                                        "vkCmdBindPipeline",
+                                        "vkCmdBindVertexBuffers",
+                                        "vkCmdBindVertexBuffers2",
+                                        "vkCmdBlitImage",
+                                        "vkCmdBlitImage2",
+                                        "vkCmdClearAttachments",
+                                        "vkCmdClearColorImage",
+                                        "vkCmdClearDepthStencilImage",
+                                        "vkCmdCopyBuffer",
+                                        "vkCmdCopyBuffer2",
+                                        "vkCmdCopyBufferToImage",
+                                        "vkCmdCopyBufferToImage2",
+                                        "vkCmdCopyImage",
+                                        "vkCmdCopyImage2",
+                                        "vkCmdCopyImageToBuffer",
+                                        "vkCmdCopyImageToBuffer2",
+                                        "vkCmdCopyQueryPoolResults",
+                                        "vkCmdDispatch",
+                                        "vkCmdDispatchBase",
+                                        "vkCmdDispatchIndirect",
+                                        "vkCmdDraw",
+                                        "vkCmdDrawIndexed",
+                                        "vkCmdDrawIndexedIndirect",
+                                        "vkCmdDrawIndexedIndirectCount",
+                                        "vkCmdDrawIndirect",
+                                        "vkCmdDrawIndirectCount",
+                                        "vkCmdEndQuery",
+                                        "vkCmdEndRenderPass",
+                                        "vkCmdEndRenderPass2",
+                                        "vkCmdEndRendering",
+                                        "vkCmdExecuteCommands",
+                                        "vkCmdFillBuffer",
+                                        "vkCmdNextSubpass",
+                                        "vkCmdNextSubpass2",
+                                        "vkCmdPipelineBarrier",
+                                        "vkCmdPipelineBarrier2",
+                                        "vkCmdPushConstants",
+                                        "vkCmdResetEvent",
+                                        "vkCmdResetEvent2",
+                                        "vkCmdResetQueryPool",
+                                        "vkCmdResolveImage",
+                                        "vkCmdResolveImage2",
+                                        "vkCmdSetBlendConstants",
+                                        "vkCmdSetCullMode",
+                                        "vkCmdSetDepthBias",
+                                        "vkCmdSetDepthBiasEnable",
+                                        "vkCmdSetDepthBounds",
+                                        "vkCmdSetDepthBoundsTestEnable",
+                                        "vkCmdSetDepthCompareOp",
+                                        "vkCmdSetDepthTestEnable",
+                                        "vkCmdSetDepthWriteEnable",
+                                        "vkCmdSetDeviceMask",
+                                        "vkCmdSetEvent",
+                                        "vkCmdSetEvent2",
+                                        "vkCmdSetFrontFace",
+                                        "vkCmdSetLineWidth",
+                                        "vkCmdSetPrimitiveRestartEnable",
+                                        "vkCmdSetPrimitiveTopology",
+                                        "vkCmdSetRasterizerDiscardEnable",
+                                        "vkCmdSetScissor",
+                                        "vkCmdSetScissorWithCount",
+                                        "vkCmdSetStencilCompareMask",
+                                        "vkCmdSetStencilOp",
+                                        "vkCmdSetStencilReference",
+                                        "vkCmdSetStencilTestEnable",
+                                        "vkCmdSetStencilWriteMask",
+                                        "vkCmdSetViewport",
+                                        "vkCmdSetViewportWithCount",
+                                        "vkCmdUpdateBuffer",
+                                        "vkCmdWaitEvents",
+                                        "vkCmdWaitEvents2",
+                                        "vkCmdWriteTimestamp",
+                                        "vkCmdWriteTimestamp2",
+                                        "vkCreateBuffer",
+                                        "vkCreateBufferView",
+                                        "vkCreateCommandPool",
+                                        "vkCreateComputePipelines",
+                                        "vkCreateDescriptorPool",
+                                        "vkCreateDescriptorSetLayout",
+                                        "vkCreateDescriptorUpdateTemplate",
+                                        "vkCreateDevice",
+                                        "vkCreateEvent",
+                                        "vkCreateFence",
+                                        "vkCreateFramebuffer"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Entries",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "A total of 233 exports found, but only the first 100 are shown.",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": {
+                        "attack_ids": [],
+                        "frequency": 1,
+                        "heur_id": 30,
+                        "score": 0,
+                        "score_map": {},
+                        "signatures": {}
+                    },
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Too many exports",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": null,
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "imports": {
+                                    "fuzzy": [
+                                        "48:hWMHgRd3XaO8oWl3MnmBG2TZxp2VjxQZcJjEo4H4:hWwgjXa9oW6nm7xp2VjxQZcJR"
+                                    ],
+                                    "imphash": [
+                                        "e4ad26ec9334769567aee040de43484d"
+                                    ],
+                                    "sorted_fuzzy": [
+                                        "48:kWMHgRd3XaO8oWs3NnmBG2TZxp2VjxQZcJXEo4HB:kWwgjXa9oWenm7xp2VjxQZcJg"
+                                    ],
+                                    "sorted_sha1": [
+                                        "a5f7e69488305093964346e2bd5da59c5d194c15"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "Imports",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "AcquireSRWLockExclusive, CloseHandle, CompareStringW, ConvertFiberToThread, ConvertThreadToFiberEx, CreateEventW, CreateFiberEx, CreateFileW, CreateRemoteThreadEx, CreateThread, DecodePointer, DeleteCriticalSection, DeleteFiber, DeleteFileW, DeleteProcThreadAttributeList, EncodePointer, EnterCriticalSection, EnumSystemLocalesW, ExitProcess, ExitThread, FindClose, FindFirstFileExW, FindNextFileW, FlsAlloc, FlsSetValue, FlushFileBuffers, FlushInstructionCache, FreeEnvironmentStringsW, FreeLibrary, FreeLibraryAndExitThread, GetACP, GetCPInfo, GetCommandLineA, GetCommandLineW, GetConsoleMode, GetConsoleOutputCP, GetConsoleScreenBufferInfo, GetCurrentDirectoryW, GetCurrentProcess, GetCurrentProcessId, GetCurrentThread, GetCurrentThreadId, GetDateFormatW, GetEnvironmentStringsW, GetFileAttributesW, GetFileInformationByHandle, GetFileSizeEx, GetFileType, GetLastError, GetLocaleInfoW, GetLogicalProcessorInformationEx, GetModuleFileNameW, GetModuleHandleA, GetModuleHandleExW, GetModuleHandleW, GetOEMCP, GetProcAddress, GetProcessHeap, GetStartupInfoW, GetStdHandle, GetStringTypeW, GetSystemInfo, GetSystemTimeAsFileTime, GetTimeFormatW, GetTimeZoneInformation, GetUserDefaultLCID, HeapAlloc, HeapFree, HeapReAlloc, HeapSize, InitializeCriticalSection, InitializeCriticalSectionAndSpinCount, InitializeProcThreadAttributeList, InitializeSListHead, InterlockedFlushSList, IsDebuggerPresent, IsProcessorFeaturePresent, IsValidCodePage, IsValidLocale, LCMapStringW, LeaveCriticalSection, LoadLibraryExW, MultiByteToWideChar, OutputDebugStringA, QueryPerformanceCounter, QueryPerformanceFrequency, RaiseException, ReadConsoleW, ReadFile, ReleaseSRWLockExclusive, RemoveDirectoryW, ResetEvent, RtlUnwind, SetConsoleTextAttribute, SetEndOfFile, SetEnvironmentVariableW, SetEvent, SetFilePointerEx, SetLastError, SetStdHandle, SetUnhandledExceptionFilter, Sleep, SleepConditionVariableSRW, SwitchToFiber, SwitchToThread, TerminateProcess, TlsAlloc, TlsFree, TlsGetValue, TlsSetValue, TryAcquireSRWLockExclusive, UnhandledExceptionFilter, UpdateProcThreadAttribute, VerSetConditionMask, VerifyVersionInfoW, VirtualAlloc, VirtualFree, VirtualProtect, WaitForSingleObject, WaitForSingleObjectEx, WakeAllConditionVariable, WakeConditionVariable, WideCharToMultiByte, WriteConsoleW, WriteFile",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "KERNEL32.dll",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "GetClientRect, GetDC, IsWindow, ReleaseDC",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "USER32.dll",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "StretchDIBits",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "GDI32.dll",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Languages\\\", \\\"ENGLISH\\\"], [\\\"Sublanguages\\\", \\\"\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "resources": {
+                                    "language": [
+                                        "ENGLISH"
+                                    ]
+                                }
+                            },
+                            "string": {
+                                "extracted": [
+                                    "Waiting for debugger",
+                                    "Cancel",
+                                    "Attach a debugger or ESC to cancel"
+                                ]
+                            }
+                        }
+                    },
+                    "title_text": "Resources",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Type\\\", 0]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Version",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"file_date_LS\\\", 0], [\\\"file_date_MS\\\", 0], [\\\"file_flags\\\", 0], [\\\"file_flags_mask\\\", 23], [\\\"file_os\\\", \\\"WINDOWS32\\\"], [\\\"file_subtype\\\", \\\"UNKNOWN\\\"], [\\\"file_type\\\", \\\"DLL\\\"], [\\\"file_version_LS\\\", 1], [\\\"file_version_MS\\\", 327680], [\\\"product_version_LS\\\", 1], [\\\"product_version_MS\\\", 327680], [\\\"signature\\\", 4277077181], [\\\"struct_version\\\", 65536]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "fixed_file_info",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"key\\\", \\\"StringFileInfo\\\"], [\\\"type\\\", 1]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "versions": {
+                                    "description": [
+                                        "SwiftShader Vulkan 32-bit Dynamic Link Library"
+                                    ],
+                                    "filename": [
+                                        "vk_swiftshader.dll"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "string_file_info",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"key\\\", \\\"040904b0\\\"], [\\\"type\\\", 1], [\\\"lang\\\", \\\"ENGLISH\\\"], [\\\"sublang\\\", \\\"\\\"], [\\\"code_page\\\", \\\"UTF_16\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 3,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "langcode_items 1",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"FileDescription\\\", \\\"SwiftShader Vulkan 32-bit Dynamic Link Library\\\"], [\\\"FileVersion\\\", \\\"5.0.0\\\"], [\\\"InternalName\\\", \\\"Vulkan\\\"], [\\\"LegalCopyright\\\", \\\"Copyright (C) 2018 Google Inc.\\\"], [\\\"OriginalFilename\\\", \\\"vk_swiftshader.dll\\\"], [\\\"PrivateBuild\\\", \\\"5.0.0\\\"], [\\\"ProductName\\\", \\\"SwiftShader Vulkan Dynamic Link Library\\\"], [\\\"ProductVersion\\\", \\\"5.0.0\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 4,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "items",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"key\\\", \\\"VarFileInfo\\\"], [\\\"type\\\", 1], [\\\"translations\\\", \\\"78644233\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "var_file_info",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[{\\\"SHA256\\\": \\\"c8b96b2158c157cb16c65f20297e06c3cf179cd2567f27e685e84b388a541a7a\\\", \\\"Type\\\": \\\"DIALOG\\\", \\\"Entropy\\\": 3.1318645576195365}, {\\\"SHA256\\\": \\\"7094e22f6e6bf9dd53bbe7b04f710d4e31813dad22a40926838cbce38bcc8cd1\\\", \\\"Type\\\": \\\"VERSION\\\", \\\"Entropy\\\": 3.4414289726960705}]",
+                    "body_config": {
+                        "column_order": [
+                            "SHA256",
+                            "Type",
+                            "Entropy"
+                        ]
+                    },
+                    "body_format": "TABLE",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Summary",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": null,
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Signatures",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "Signer 1 (045296f8fcd829a75dc94294f5a415a4) is expired.",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "behavior": [
+                                "PE with Expired Signer"
+                            ]
+                        }
+                    },
+                    "title_text": "Expired signer found",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Version\\\", 1], [\\\"Algorithm\\\", \\\"SHA256\\\"], [\\\"Content Info Algorithm\\\", \\\"SHA256\\\"], [\\\"Content Info Digest\\\", \\\"41a0149ba96d22fa9829291485fd670aa645a63a852ab8112ca46229b872ac1b\\\"], [\\\"Content Info Content Type\\\", \\\"1.3.6.1.4.1.311.2.1.4\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 1,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Signature - 1",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Version\\\", 1], [\\\"Digest Algorithm\\\", \\\"SHA256\\\"], [\\\"Authenticated Attributes\\\", \\\"CONTENT_TYPE, MS_SPC_STATEMENT_TYPE, SPC_SP_OPUS_INFO, PKCS9_MESSAGE_DIGEST\\\"], [\\\"Unauthenticated Attributes\\\", \\\"MS_COUNTER_SIGN\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Signer - 1",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Program Name\\\", \\\"Adobe Acrobat\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 3,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "file": {
+                            "pe": {
+                                "authenticode": {
+                                    "spc_sp_opus_info": {
+                                        "program_name": [
+                                            "Adobe Acrobat"
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "title_text": "SPC_SP_OPUS_INFO attribute",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Version\\\", 3], [\\\"Subject\\\", \\\"??=US, ??=Delaware, ??=Private Organization, serialNumber=2748129, C=US, ST=ca, L=San Jose, O=Adobe Inc., OU=Acrobat DC, CN=Adobe Inc.\\\"], [\\\"Issuer\\\", \\\"C=US, O=DigiCert\\\\\\\\, Inc., CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1\\\"], [\\\"Serial Number\\\", \\\"045296f8fcd829a75dc94294f5a415a4\\\"], [\\\"Valid From\\\", \\\"2022-04-29T00:00:00\\\"], [\\\"Valid To\\\", \\\"2024-05-01T23:59:59\\\"], [\\\"Verification\\\", \\\"BADCERT_EXPIRED\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 3,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {
+                        "cert": {
+                            "issuer": [
+                                "C=US, O=DigiCert\\\\, Inc., CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1"
+                            ],
+                            "serial_no": [
+                                "045296f8fcd829a75dc94294f5a415a4"
+                            ],
+                            "subject": [
+                                "??=US, ??=Delaware, ??=Private Organization, serialNumber=2748129, C=US, ST=ca, L=San Jose, O=Adobe Inc., OU=Acrobat DC, CN=Adobe Inc."
+                            ],
+                            "thumbprint": [
+                                "d488bbf9a5bb199c80798b35f0c28cb9a5f55331",
+                                "0b0701eaa7a18fd68430ebeab204028f8baee2a90e585f80eced4935062932bd",
+                                "12bce56e799c89fe73426cf73a06fd29"
+                            ],
+                            "valid": {
+                                "end": [
+                                    "2024-05-01T23:59:59"
+                                ],
+                                "start": [
+                                    "2022-04-29T00:00:00"
+                                ]
+                            }
+                        }
+                    },
+                    "title_text": "Signer Certificate",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Version\\\", 3], [\\\"Subject\\\", \\\"C=US, O=DigiCert\\\\\\\\, Inc., CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1\\\"], [\\\"Issuer\\\", \\\"C=US, O=DigiCert Inc, OU=www.digicert.com, CN=DigiCert Trusted Root G4\\\"], [\\\"SHA1\\\", \\\"7b0f360b775f76c94a12ca48445aa2d2a875701c\\\"], [\\\"SHA256\\\", \\\"46011ede1c147eb2bc731a539b7c047b7ee93e48b9d3c3ba710ce132bbdfac6b\\\"], [\\\"MD5\\\", \\\"d91299e84355cd8d5a86795a0118b6e9\\\"], [\\\"Serial Number\\\", \\\"08ad40b260d29c4c9f5ecda9bd93aed9\\\"], [\\\"Valid From\\\", \\\"2021-04-29T00:00:00\\\"], [\\\"Valid To\\\", \\\"2036-04-28T23:59:59\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Certificate - 1",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"Version\\\", 3], [\\\"Subject\\\", \\\"??=US, ??=Delaware, ??=Private Organization, serialNumber=2748129, C=US, ST=ca, L=San Jose, O=Adobe Inc., OU=Acrobat DC, CN=Adobe Inc.\\\"], [\\\"Issuer\\\", \\\"C=US, O=DigiCert\\\\\\\\, Inc., CN=DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1\\\"], [\\\"SHA1\\\", \\\"d488bbf9a5bb199c80798b35f0c28cb9a5f55331\\\"], [\\\"SHA256\\\", \\\"0b0701eaa7a18fd68430ebeab204028f8baee2a90e585f80eced4935062932bd\\\"], [\\\"MD5\\\", \\\"12bce56e799c89fe73426cf73a06fd29\\\"], [\\\"Serial Number\\\", \\\"045296f8fcd829a75dc94294f5a415a4\\\"], [\\\"Valid From\\\", \\\"2022-04-29T00:00:00\\\"], [\\\"Valid To\\\", \\\"2024-05-01T23:59:59\\\"]]",
+                    "body_config": {},
+                    "body_format": "ORDERED_KEY_VALUE",
+                    "classification": "L0",
+                    "depth": 2,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Certificate - 2",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "[[\\\"ORDERED_KEY_VALUE\\\", [[\\\"Size\\\", 10704]], {}], [\\\"GRAPH_DATA\\\", {\\\"type\\\": \\\"colormap\\\", \\\"data\\\": {\\\"domain\\\": [0, 8], \\\"values\\\": [5.86156, 6.0602, 7.20485, 6.99159, 5.87342, 6.96319, 7.27248, 6.43126, 5.6078, 7.23248, 7.15005, 6.2759, 5.47596, 7.04792, 7.14403, 6.60195, 6.45796, 7.15379, 6.70616, 6.28143, 6.5941, 7.19262, 6.5913, 5.87711, 7.04523, 7.22014, 6.15786, 6.95149, 7.27751, 6.43847, 5.78659, 7.16342, 7.10723, 5.48408, 7.08187, 7.26375, 6.14395, 6.66847, 6.80489, 6.1153, 7.1093, 7.23139]}}, {}]]",
+                    "body_config": {},
+                    "body_format": "MULTI",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "Overlay",
+                    "zeroize_on_tag_safe": false
+                },
+                {
+                    "auto_collapse": false,
+                    "body": "(4x) X509 verify failed with: X509 - Certificate verification failed, e.g. CRL, CA or signature check failed\\n(4x) The certificate validity has expired",
+                    "body_config": {},
+                    "body_format": "TEXT",
+                    "classification": "L0",
+                    "depth": 0,
+                    "heuristic": null,
+                    "promote_to": null,
+                    "tags": {},
+                    "title_text": "LIEF logging information.",
+                    "zeroize_on_tag_safe": false
+                }
+            ]
+        },
+        "sha256": "0c6aa718584d13ed2a2e6e78949ece52c80cfb41a46cc37ee28b7f69c74523e5",
+        "size": 3609040,
+        "temp_submission_data": {},
+        "type": "executable/windows/dll32"
+    },
+    "task": {
+        "deep_scan": false,
+        "depth": 0,
+        "fileinfo": {
+            "magic": "PE32 executable (DLL) (console) Intel 80386, for MS Windows, 8 sections",
+            "md5": "b0ec89ab07113392af57f8132ceb65eb",
+            "mime": "application/vnd.microsoft.portable-executable",
+            "sha1": "a3f271d1307c4b49785fbe1a9e696ec10f921273",
+            "sha256": "0c6aa718584d13ed2a2e6e78949ece52c80cfb41a46cc37ee28b7f69c74523e5",
+            "size": 3609040,
+            "ssdeep": "49152:0eNegltG6XoZy7jK5NzVVVQzdcvcUh5VB0fyESnRJi4aVTIu7sJCsYffLV+4RNGK:TNPKZPuC2EOd97VD+G+rM",
+            "tlsh": "T1E5F58D02B251407AD04B13B2642CAF78AF748B455F760ADBCB587D94AFB12E057BE21F",
+            "type": "executable/windows/dll32",
+            "uri_info": null
+        },
+        "filename": "./vk_swiftshader.dll",
+        "ignore_cache": false,
+        "ignore_filtering": false,
+        "ignore_recursion_prevention": false,
+        "max_files": 500,
+        "metadata": {
+            "dispatcher__": "3fbabc41e70d35f5eca02904725b7faa",
+            "dispatcher_address__": "10.244.14.231:8080",
+            "task_id__": "13075227070534904105",
+            "worker__": "alsvc-pe-668db979d8-vc4p6"
+        },
+        "min_classification": "TLP:CLEAR",
+        "priority": 1000,
+        "safelist_config": {
+            "enabled": true,
+            "enforce_safelist_service": true,
+            "hash_types": [
+                "sha1",
+                "sha256"
+            ]
+        },
+        "service_config": {},
+        "service_name": "PE",
+        "sid": "1LIyQPIFFvQrt1fnoV3P93",
+        "tags": [],
+        "temporary_submission_data": [],
+        "ttl": 3
+    }
+}

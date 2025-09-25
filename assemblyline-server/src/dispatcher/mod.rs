@@ -20,8 +20,8 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
-use assemblyline_models::types::Wildcard;
-use assemblyline_models::{ExpandingClassification, JsonMap, Readable, Sha256, Sid};
+use assemblyline_models::types::{Wildcard, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::Readable;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;

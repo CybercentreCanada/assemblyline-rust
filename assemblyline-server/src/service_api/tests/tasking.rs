@@ -22,7 +22,7 @@ use std::time::Duration;
 use assemblyline_models::datastore::{EmptyResult, Error, Service};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
 use log::{debug, info};
 use poem::http::StatusCode;
 use poem::listener::Acceptor;
@@ -522,15 +522,15 @@ async fn test_finish_missing_file() {
 
 
 #[tokio::test]
-async fn malformed_result() {
-    let data = include_str!("malformed_result.json");
+async fn parse_sample_result() {
+    let data = include_str!("data/sample_result_1.json");
     
     let config = assemblyline_markings::classification::sample_config();
     assemblyline_models::set_global_classification(Arc::new(assemblyline_markings::classification::ClassificationParser::new(config).unwrap()));
 
     #[derive(Serialize, Deserialize)]
     struct Success {
-        task: assemblyline_models::JsonMap,
+        task: assemblyline_models::types::JsonMap,
         #[serde(default)]
         exec_time: u64,
         freshen: bool,

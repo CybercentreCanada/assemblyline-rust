@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 
-use assemblyline_models::JsonMap;
+use assemblyline_models::types::JsonMap;
 use serde::Deserialize;
 use serde_json::Value;
 use strum::Display;

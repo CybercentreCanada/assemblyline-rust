@@ -1,7 +1,7 @@
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::badlist::{BadhashTypes, Badlist, Hashes, Source, SourceTypes, Tag};
-use assemblyline_models::{ClassificationString, ExpandingClassification};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification};
 use chrono::Utc;
 use log::info;
 use rand::seq::IndexedRandom;

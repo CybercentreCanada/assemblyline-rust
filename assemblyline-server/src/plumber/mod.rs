@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::datastore::Service;
-use assemblyline_models::JsonMap;
+use assemblyline_models::types::JsonMap;
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;

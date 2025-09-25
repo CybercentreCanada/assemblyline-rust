@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::time::Duration;
 
-use assemblyline_models::{ElasticMeta, JsonMap, Readable};
+use assemblyline_models::{ElasticMeta, Readable, types::JsonMap};
 use itertools::Itertools;
 use serde::de::DeserializeOwned;
 use serde::Serialize;

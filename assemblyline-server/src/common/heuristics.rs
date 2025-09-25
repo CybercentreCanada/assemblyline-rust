@@ -13,10 +13,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assemblyline_models::datastore::heuristic::Heuristic as DatastoreHeuristic;
-use assemblyline_models::datastore::tagging::{get_tag_information, TagInformation, TagValue};
 use crate::service_api::v1::task::models::Heuristic as ServiceHeuristic;
 use assemblyline_models::datastore::result::Heuristic as ResultHeuristic;
-use assemblyline_models::{ExpandingClassification, Readable};
+use assemblyline_models::{types::ExpandingClassification, Readable};
 use log::{error, info, warn};
 use parking_lot::Mutex;
 use serde::Deserialize;

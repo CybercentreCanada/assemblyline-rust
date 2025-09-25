@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::messages::dispatching::SubmissionDispatchMessage;
-use assemblyline_models::Sid;
+use assemblyline_models::types::Sid;
 
 use crate::constants::service_queue_name;
 use crate::Core;

@@ -1,7 +1,7 @@
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::heuristic::Heuristic;
-use assemblyline_models::ExpandingClassification;
+use assemblyline_models::types::ExpandingClassification;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::service_api::helpers::APIResponse;

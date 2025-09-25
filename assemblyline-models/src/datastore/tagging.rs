@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use struct_metadata::{Described, MetadataKind};
 
 use crate::messages::task::TagEntry;
@@ -28,6 +29,12 @@ impl std::fmt::Display for TagValue {
             serde_json::Value::String(string) => f.write_str(string),
             other => f.write_fmt(format_args!("{other}"))
         }
+    }
+}
+
+impl From<&str> for TagValue {
+    fn from(value: &str) -> Self {
+        Self(serde_json::Value::String(value.to_owned()))
     }
 }
 
@@ -487,6 +494,10 @@ impl Described<ElasticMeta> for Tagging {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("The tagging data had an unsupported layout.")]
+pub struct LayoutError;
+
 impl Tagging {
 
 //     pub fn flatten(&self) -> Result<FlatTags, serde_json::Error> {
@@ -497,32 +508,40 @@ impl Tagging {
 //         Ok(flatten_tags(data, None))
 //     }
 
-    pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, serde_json::Error> {
+    pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, LayoutError> {
 
-        fn flatten_inner(output: &mut Vec<TagEntry>, path: &[&str], ) {
+        fn flatten_inner(output: &mut Vec<TagEntry>, path: &[&str], data: &JsonMap) -> Result<(), ()> {
+            for (key, value) in data {
+                let mut path = Vec::from(path);
+                path.push(key);
 
+                match value {
+                    serde_json::Value::Object(map) => {
+                        flatten_inner(output, &path, map)?;
+                    },
+                    serde_json::Value::Array(values) => {
+                        let path = path.join(".");
+                        for value in values {
+                            output.push(TagEntry { 
+                                score: 0, 
+                                tag_type: path.clone(),
+                                value: TagValue(value.clone()) 
+                            })
+                            // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
+                        }
+                    },
+                    _ => return Err(())
+                }
+            }
+            Ok(())
         }
 
-        todo!()
-        // // let safelisted = safelisted.unwrap_or(false);
-        // let mut out = vec![];
-        
-        // let tag_dict = if let serde_json::Value::Object(obj) = serde_json::to_value(self)? {
-        //     flatten_tags(obj, None)
-        // } else {
-        //     return Err(serde_json::Error::custom("tags couldn't fold to json"));
-        // };
+        let mut output = vec![];
+        if flatten_inner(&mut output, &[], &self.0).is_err() {
+            return Err(LayoutError)
+        }
 
-        // for (tag_type, values) in tag_dict.into_iter() {
-        //     for tag_value in values {
-        //         out.push(TagEntry { 
-        //             score: 0, 
-        //             tag_type: tag_type.clone(), 
-        //             value: tag_value, 
-        //         }); // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
-        //     }
-        // }
-        // Ok(out)
+        Ok(output)
     }
 }
 
@@ -561,14 +580,14 @@ impl FlatTags {
         fn insert(info: &'static TagInformation, output: &mut JsonMap, name: &[&str], values: Vec<TagValue>) -> Result<(), TagNameCollision> {
             if name.len() == 1 {
                 let inner = output.entry(name[0])
-                    .or_insert_with(|| serde_json::Value::Array(vec![]));
+                    .or_insert_with(|| Value::Array(vec![]));
                 match inner.as_array_mut() {
                     Some(obj) => { obj.extend(values.into_iter().map(|tag| tag.0)); Ok(()) },
                     None => Err(TagNameCollision(info.full_path())),
                 }
             } else {
                 let inner = output.entry(name[0])
-                    .or_insert_with(|| serde_json::Value::Object(JsonMap::default()));
+                    .or_insert_with(|| Value::Object(JsonMap::default()));
                 match inner.as_object_mut() {
                     Some(obj) => insert(info, obj, &name[1..], values),
                     None => Err(TagNameCollision(info.full_path())),
@@ -582,8 +601,52 @@ impl FlatTags {
     }
 }
 
+pub fn load_tags_from_object(data: JsonMap) -> (FlatTags, Vec<(String, String)>) {
 
-pub fn load_tags(data: HashMap<String, Vec<serde_json::Value>>) -> (FlatTags, Vec<(String, String)>) {
+    let mut accepted = FlatTags::default();
+    let mut rejected = vec![];
+
+    fn process(accepted: &mut FlatTags, rejected: &mut Vec<(String, String)>, path: &[&str], data: JsonMap) {
+        for (key, value) in data {
+            // build the label for the tag if it exists at this level of recursion 
+            let mut path = Vec::from(path);
+            path.push(&key);
+            let label = path.join(".");
+
+            // Try to use this tag label
+            if let Some(tag) = get_tag_information(&label) {
+                if let serde_json::Value::Array(values) = value {
+                    for value in values {
+                        match tag.processor.apply(value) {
+                            Ok(value) => accepted.entry(tag).or_default().push(TagValue(value)),
+                            Err(value) => rejected.push((label.to_string(), TagValue(value).to_string()))
+                        }
+                    }
+                } else {
+                    match tag.processor.apply(value) {
+                        Ok(value) => accepted.entry(tag).or_default().push(TagValue(value)),
+                        Err(value) => rejected.push((label.to_string(), TagValue(value).to_string()))
+                    }
+                }
+                continue
+            }
+
+            // if we couldn't use that tag label, try to recurse
+            if let serde_json::Value::Object(data) = value {
+                process(accepted, rejected, &path, data);
+            } else {
+                rejected.push((label.to_string(), TagValue(value).to_string()))
+            }
+        }
+    }
+
+    process(&mut accepted, &mut rejected, &[], data);
+
+    (accepted, rejected)
+}
+
+
+pub fn load_tags_from_list(data: HashMap<String, Vec<serde_json::Value>>) -> (FlatTags, Vec<(String, String)>) {
 
     let mut accepted = FlatTags::default();
     let mut rejected = vec![];
@@ -611,11 +674,58 @@ pub fn load_tags(data: HashMap<String, Vec<serde_json::Value>>) -> (FlatTags, Ve
 
 // MARK: Tests
 
+#[test]
+fn tagging_forms_round_trip() {
+    use serde_json::json;
+
+    let input = json!({
+        "file": {
+            "behavior": ["hop", "skip", "jump"],
+        },
+        "attribution": {
+            "actor": ["Randy"]
+        }
+    });
+    let serde_json::Value::Object(input) = input else { panic!() };
+
+    // convert input to flat tags
+    let (accepted, rejected) = load_tags_from_object(input);
+    assert!(rejected.is_empty());
+    assert_eq!(accepted.len(), 2);
+    assert_eq!(*accepted.get(get_tag_information("attribution.actor").unwrap()).unwrap(), vec![TagValue(json!("RANDY"))]);
+    assert_eq!(*accepted.get(get_tag_information("file.behavior").unwrap()).unwrap(), vec![TagValue(json!("hop")), TagValue(json!("skip")), TagValue(json!("jump"))]);
+
+    // convert flat tags to nested data
+    let tagging = accepted.to_tagging().unwrap();
+
+    // convert nested data to a list of tags
+    let list = tagging.to_list(None).unwrap();
+    assert_eq!(list, vec![
+        TagEntry{ score: 0, tag_type: "attribution.actor".to_owned(), value: TagValue::from("RANDY") },
+        TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("hop") },
+        TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("skip") },
+        TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("jump") },
+    ]);
+    
+    // convert nested data json
+    assert_eq!(serde_json::to_value(&tagging).unwrap(), json!({
+        "file": {
+            "behavior": ["hop", "skip", "jump"],
+        },
+        "attribution": {
+            "actor": ["RANDY"]
+        }
+    }))
+
+}
+
+
 /// test for invalid tag names
 #[test]
 fn tag_names() {
     use serde_json::{Value, json};
 
+    // From a list
     let mut input: HashMap<String, Vec<Value>> = HashMap::new();
     input.insert("attribution.actor".to_string(), vec![json!("abc"), json!("Big hats!"), json!([]), json!(100), json!(Option::<()>::None)]);
     input.insert("av.heuristic".to_string(), vec![json!("abc"), json!("Big hats!"), json!([]), json!(100), json!(Option::<()>::None)]);
@@ -624,7 +734,7 @@ fn tag_names() {
     input.insert("av".to_string(), vec![json!("100000")]);
     // input.insert("network.tls.ja3_hash".to_string(), vec![json!("abc"), json!("Big hats!"), json!([]), json!(100), json!(None)]);
 
-    let (accepted, mut rejected) = load_tags(input);
+    let (accepted, mut rejected) = load_tags_from_list(input);
 
     assert_eq!(accepted.len(), 2);
     assert_eq!(rejected.len(), 7);
@@ -642,6 +752,38 @@ fn tag_names() {
         ("av.heuristic".to_string(), "null".to_string()),
         ("av.heuristic.".to_string(), "100000".to_string()),
     ]);
+
+    // from a dictionary
+    let input = json!({
+        "attribution": {
+            "actor": ["abc", "Big hats!", [], 100, null]
+        },
+        "av": {
+            "heuristic": ["abc", "Big hats!", [], 100, null]
+        },
+        "cert": 100000,
+        "dynamic": ["abc", "Big hats!"]
+    });
+    let serde_json::Value::Object(input) = input else { panic!() };
+
+    let (accepted, mut rejected) = load_tags_from_object(input);
+
+    assert_eq!(accepted.len(), 2);
+    assert_eq!(rejected.len(), 6);
+
+    assert_eq!(*accepted.get(get_tag_information("attribution.actor").unwrap()).unwrap(), vec![TagValue(json!("ABC")), TagValue(json!("BIG HATS!")), TagValue(json!("100"))]);
+    assert_eq!(*accepted.get(get_tag_information("av.heuristic").unwrap()).unwrap(), vec![TagValue(json!("abc")), TagValue(json!("Big hats!")), TagValue(json!("100"))]);
+
+    rejected.sort_unstable();
+    assert_eq!(rejected, vec![
+        ("attribution.actor".to_string(), "[]".to_string()),
+        ("attribution.actor".to_string(), "null".to_string()),
+        ("av.heuristic".to_string(), "[]".to_string()),
+        ("av.heuristic".to_string(), "null".to_string()),
+        ("cert".to_string(), "100000".to_string()),
+        ("dynamic".to_string(), r#"["abc","Big hats!"]"#.to_string()),
+    ]);
+
 }
 
 

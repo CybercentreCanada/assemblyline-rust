@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Sid, Wildcard, ClassificationString};
+use crate::types::{Sid, Wildcard};
 pub use crate::datastore::submission::{File, SubmissionParams};
 
 #[derive(Serialize, Deserialize)]

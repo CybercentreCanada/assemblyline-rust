@@ -7,12 +7,12 @@ use anyhow::{bail, Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::datastore::heuristic::Heuristic;
-use assemblyline_models::datastore::tagging::load_tags;
+use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::strings::Keyword;
-use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_filestore::FileStore;
 use chrono::{TimeDelta, Utc};
 use itertools::Itertools;
@@ -757,13 +757,17 @@ impl TaskingClient {
         // Add scores to the heuristics, if any section set a heuristic
         let mut total_score = 0;
         let mut service_sections = vec![];
-
+        let mut all_dropped_tags = vec![];
         let mut section_heuristics = HashMap::new();
         for (index, mut section) in result.result.sections.into_iter().enumerate() {
             // let zeroize_on_sig_safe = section.zeroize_on_sig_safe;
-            let mut tags = section.tags;
 
+            // Parse out and separate valid from invalid tags
+            let (mut tags, dropped) = load_tags_from_object(section.tags);
             section.tags = Default::default();
+            all_dropped_tags.extend(dropped);
+
+            // if any heristics automatically create tags generate those tags now
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
                 heuristic.heur_id = crate::service_api::v1::task::models::HeuristicId::Name(heur_id.clone());
@@ -773,11 +777,18 @@ impl TaskingClient {
                         total_score += heuristic.score;
                         section_heuristics.insert(index, heuristic);
                         for (tag_key, tag_value) in new_tags {
-                            let entry = tags.entry(tag_key).or_default();
-                            let tag_value = serde_json::Value::String(tag_value);
-                            if !entry.contains(&tag_value) {
-                                entry.push(tag_value)
-                            }
+                            match get_tag_information(&tag_key) {
+                                Some(tag_key) => {
+                                    let entry = tags.entry(tag_key).or_default();
+                                    let tag_value = TagValue::from(tag_value);
+                                    if !entry.contains(&tag_value) {
+                                        entry.push(tag_value)
+                                    }
+                                },
+                                None => {
+                                    all_dropped_tags.push((tag_key, tag_value))
+                                },
+                            }                            
                         }
                     },
                     Err(err) => {
@@ -835,14 +846,9 @@ impl TaskingClient {
 
         // Process the tag values
         let mut sections = vec![];
-        let mut all_dropped_tags = vec![];
         for (index, (section, tags)) in service_sections.into_iter().enumerate() {
             // if any heuristics have been saved for this section get them
             let mut heuristic = section_heuristics.remove(&index);
-
-            // Parse out and separate valid from invalid tags
-            let (tags, dropped) = load_tags(tags, None);
-            all_dropped_tags.extend(dropped);
 
             // apply the safelister
             let safelister: Arc<TagSafelister> = self.tag_safelister.lock().clone();

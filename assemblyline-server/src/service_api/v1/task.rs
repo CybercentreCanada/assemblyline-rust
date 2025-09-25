@@ -12,6 +12,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use assemblyline_models::types::JsonMap;
 use log::debug;
 use poem::http::{HeaderMap, StatusCode};
 use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
@@ -138,21 +139,21 @@ async fn task_finished(
 #[serde(untagged)]
 pub enum FinishedBody {
     Success {
-        task: assemblyline_models::JsonMap,
+        task: JsonMap,
         #[serde(default)]
         exec_time: u64,
         freshen: bool,
         result: models::Result,
     },
     Error {
-        task: assemblyline_models::JsonMap,
+        task: JsonMap,
         #[serde(default)]
         exec_time: u64,
         error: assemblyline_models::datastore::error::Error,
     },
     Other {
         #[serde(flatten)]
-        content: assemblyline_models::JsonMap,
+        content: JsonMap,
     }
 }
 
@@ -160,7 +161,7 @@ pub mod models {
     use std::collections::HashMap;
 
     use assemblyline_models::datastore::result::{BodyFormat, PromoteTo, ResponseBody};
-    use assemblyline_models::{ClassificationString, JsonMap, Sha256, Text};
+    use assemblyline_models::types::{ClassificationString, JsonMap, Sha256, Text};
     use chrono::{DateTime, Utc};
     use serde::{Deserialize, Deserializer, Serialize};
 
@@ -235,7 +236,7 @@ pub mod models {
         pub heuristic: Option<Heuristic>,
         /// List of tags associated to this section
         #[serde(default)]
-        pub tags: HashMap<String, Vec<serde_json::Value>>,
+        pub tags: JsonMap,
         /// List of safelisted tags
         #[serde(default)]
         pub safelisted_tags: HashMap<String, Vec<serde_json::Value>>,

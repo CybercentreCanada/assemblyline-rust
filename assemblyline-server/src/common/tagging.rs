@@ -215,9 +215,9 @@ impl TagSafelister {
         for (tag, values) in tag_map {
             if values.is_empty() { continue }
 
-            let (kept_tags, tags_marked_safe) = self.safelist_many(&tag, values);
+            let (kept_tags, tags_marked_safe) = self.safelist_many(tag, values);
             if !kept_tags.is_empty() {
-                tags.insert(tag.clone(), kept_tags);
+                tags.insert(tag, kept_tags);
             }
             if !tags_marked_safe.is_empty() {
                 safelisted_tags.insert(tag, tags_marked_safe);

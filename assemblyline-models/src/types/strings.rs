@@ -409,12 +409,12 @@ fn find_top_level_domains() -> &'static HashSet<String> {
 
         combined_tlds
     });
-    &*TLDS
+    &TLDS
 }
 
 pub struct DomainValidator;
 impl StringValidator for DomainValidator {
-    fn validate(data: &str) -> Option<Cow<str>> {
+    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>> {
         match check_domain(data) {
             Ok(domain) => Some(domain.into()),
             Err(_) => None,
@@ -541,8 +541,8 @@ const IPV6_REGEX: &str = concat!(
 );
 const IP_REGEX: &str = concat!("(?:", IPV4_REGEX, "|", IPV6_REGEX, ")");
 const IP_ONLY_REGEX: &str = concat!("^", IP_REGEX, "$");
-const IPV4_ONLY_REGEX: &str = concat!("^", IPV4_REGEX, "$");
-const IPV6_ONLY_REGEX: &str = concat!("^", IPV6_REGEX, "$");
+// const IPV4_ONLY_REGEX: &str = concat!("^", IPV4_REGEX, "$");
+// const IPV6_ONLY_REGEX: &str = concat!("^", IPV6_REGEX, "$");
 
 pub fn is_ip(value: &str) -> bool {
     static IP: LazyLock<Regex> = LazyLock::new(|| {
@@ -630,7 +630,7 @@ pub fn is_mac(value: &str) -> bool {
 // MARK: Email
 pub struct EmailValidator;
 impl StringValidator for EmailValidator {
-    fn validate(data: &str) -> Option<Cow<str>> {
+    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>> {
         match check_email(data) {
             Ok(email) => Some(email.into()),
             Err(_) => None,

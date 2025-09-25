@@ -1,3 +1,4 @@
+#![allow(clippy::needless_return)]
 use std::fmt::Display;
 
 use serde::Deserialize;

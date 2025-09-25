@@ -15,6 +15,7 @@ use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
+use crate::datastore::tagging::LayoutError;
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
 use crate::types::strings::Keyword;
 use crate::{random_word, ElasticMeta, Readable};
@@ -357,7 +358,7 @@ impl Result {
         Ok(key_list.join("."))
     }
 
-    pub fn scored_tag_dict(&self) -> std::result::Result<HashMap<String, TagEntry>, serde_json::Error> {
+    pub fn scored_tag_dict(&self) -> std::result::Result<HashMap<String, TagEntry>, LayoutError> {
         let mut tags: HashMap<String, TagEntry> = Default::default();
         // Save the tags and their score
         for section in &self.result.sections {
