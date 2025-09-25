@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result, anyhow};
 use assemblyline_models::config::TemporaryKeyType;
 use assemblyline_models::datastore::submission::{SubmissionState, TraceEvent};
+use assemblyline_models::datastore::tagging::TagValue;
 use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{error, Service, Submission};
 use assemblyline_models::messages::dispatching::{CreateWatch, DispatcherCommand, DispatcherCommandMessage, FileTreeData, ListOutstanding, SubmissionDispatchMessage, WatchQueueMessage, WatchQueueStatus};
@@ -19,8 +20,8 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
-use assemblyline_models::types::Wildcard;
-use assemblyline_models::{ExpandingClassification, JsonMap, Readable, Sha256, Sid};
+use assemblyline_models::types::{Wildcard, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::Readable;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
@@ -2183,7 +2184,7 @@ impl Dispatcher {
             // Pull the tags keys and values into a searchable form
             let mut tags = JsonMap::new();
 
-            fn insert(target: &mut JsonMap, full_key: &str, key: &str, value: &str) {
+            fn insert(target: &mut JsonMap, full_key: &str, key: &str, value: &TagValue) {
                 match key.split_once(".") {
                     Some((root, key)) => {
                         let entry = target.entry(root).or_insert(serde_json::Value::Object(Default::default()));
@@ -2308,9 +2309,13 @@ impl Dispatcher {
             temporary_data,
             extracted_names,
             dynamic_recursion_bypass,
+            extra_errors,
         } = data;
 
         trace_event!(task, "process_result", file &sha256, service &service_name, "Processing result {}", summary.key);
+
+        // add extra errors from the service the global error list for the submission
+        task.extra_errors.extend(extra_errors);
 
         // check for/clear old partial results
         let mut force_redispatch = HashSet::new();

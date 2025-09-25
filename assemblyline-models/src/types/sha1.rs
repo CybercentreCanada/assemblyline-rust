@@ -25,12 +25,16 @@ impl std::ops::Deref for Sha1 {
     }
 }
 
+pub fn is_sha1(hex: &str) -> bool {
+    hex.len() == 40 && hex.chars().all(|c|c.is_ascii_hexdigit())
+}
+
 impl std::str::FromStr for Sha1 {
     type Err = ModelError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let hex = s.trim().to_ascii_lowercase();
-        if hex.len() != 40 || !hex.chars().all(|c|c.is_ascii_hexdigit()) {
+        if !is_sha1(&hex) {
             return Err(ModelError::InvalidSha1(hex))
         }
         Ok(Sha1(hex))

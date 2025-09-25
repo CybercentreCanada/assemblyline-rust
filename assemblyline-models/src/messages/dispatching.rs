@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Sha256, Sid};
+use crate::types::{Sha256, Sid};
 
 
 

@@ -6,7 +6,9 @@ use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
 use crate::messages::task::{generate_conf_key, Task};
-use crate::{random_word, random_words, ElasticMeta, Readable, Sha256, Text};
+use crate::{random_word, random_words, ElasticMeta, Readable};
+use crate::types::{Sha256, Text};
+
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
@@ -156,6 +158,10 @@ impl Error {
         ];
 
         Ok(key_list.join("."))
+    }
+
+    pub fn build_unique_key(&self, service_tool_version: Option<&str>, task: Option<&Task>) -> Result<String, serde_json::Error> {
+        Ok(self.build_key(service_tool_version, task)? + "." + &rand::random::<u64>().to_string())
     }
 }
 

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::types::Wildcard;
-use crate::{Domain, ElasticMeta, ExpandingClassification, Sha1, Sha256, Uri, Uuid, MD5};
+use crate::types::{Wildcard, Domain, ExpandingClassification, Sha1, Sha256, Uri, Uuid, MD5};
+use crate::ElasticMeta;
 use super::workflow::{Statuses, Priorities};
 
 

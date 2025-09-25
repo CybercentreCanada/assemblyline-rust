@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable, Sha1, Sha256, MD5};
+use crate::{ElasticMeta, Readable};
+use crate::types::{ClassificationString, ExpandingClassification, Sha1, Sha256, MD5};
 
 use super::badlist::SourceTypes;
 

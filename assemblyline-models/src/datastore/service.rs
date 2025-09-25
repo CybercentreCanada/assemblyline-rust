@@ -5,8 +5,8 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
-use crate::ClassificationString;
-use crate::{ElasticMeta, JsonMap, Readable, Text, types::NonZeroInteger};
+use crate::types::{ClassificationString, JsonMap, Text, NonZeroInteger};
+use crate::{ElasticMeta, Readable};
 
 /// Environment Variable Model
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]

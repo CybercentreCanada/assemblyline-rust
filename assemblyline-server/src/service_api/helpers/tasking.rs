@@ -7,14 +7,15 @@ use anyhow::{bail, Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::datastore::heuristic::Heuristic;
-use assemblyline_models::datastore::tagging::flatten_tags;
+use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::strings::Keyword;
-use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_filestore::FileStore;
 use chrono::{TimeDelta, Utc};
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use redis_objects::{increment, Hashmap, RedisObjects};
@@ -56,7 +57,7 @@ pub struct TaskingClient {
     services: ServiceHelper,
     heuristic_handler: HeuristicHandler,
     heuristics: Arc<Mutex<HashMap<String, Heuristic>>>,
-    tag_safelister: Arc<Mutex<TagSafelister>>,
+    tag_safelister: Arc<Mutex<Arc<TagSafelister>>>,
 }
 
 impl TaskingClient {
@@ -542,7 +543,7 @@ impl TaskingClient {
                 ).await?;
             }
 
-            self.dispatch_client.service_finished(task, result_key.clone(), result, None, Some(version)).await?;
+            self.dispatch_client.service_finished(task, result_key.clone(), result, None, Some(version), vec![]).await?;
             return Ok((None, true))
         }
 
@@ -554,7 +555,7 @@ impl TaskingClient {
                 increment!(metric_factory, cache_hit);
                 increment!(metric_factory, not_scored);
                 let result = create_empty_result_from_key(&result_key, self.config.submission.emptyresult_dtl.into(), &self.classification_engine)?;
-                self.dispatch_client.service_finished(task, empty_key, result, None, Some(version)).await?;
+                self.dispatch_client.service_finished(task, empty_key, result, None, Some(version), vec![]).await?;
                 return Ok((None, true))
             },
             Ok(None) => {},
@@ -756,12 +757,17 @@ impl TaskingClient {
         // Add scores to the heuristics, if any section set a heuristic
         let mut total_score = 0;
         let mut service_sections = vec![];
-        // let mut section_tags = vec![];
+        let mut all_dropped_tags = vec![];
         let mut section_heuristics = HashMap::new();
         for (index, mut section) in result.result.sections.into_iter().enumerate() {
             // let zeroize_on_sig_safe = section.zeroize_on_sig_safe;
-            let mut tags = flatten_tags(section.tags, None);
+
+            // Parse out and separate valid from invalid tags
+            let (mut tags, dropped) = load_tags_from_object(section.tags);
             section.tags = Default::default();
+            all_dropped_tags.extend(dropped);
+
+            // if any heristics automatically create tags generate those tags now
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
                 heuristic.heur_id = crate::service_api::v1::task::models::HeuristicId::Name(heur_id.clone());
@@ -771,11 +777,19 @@ impl TaskingClient {
                         total_score += heuristic.score;
                         section_heuristics.insert(index, heuristic);
                         for (tag_key, tag_value) in new_tags {
-                            let entry = tags.entry(tag_key).or_default();
-                            if !entry.contains(&tag_value) {
-                                entry.push(tag_value)
-                            }
-                        }                        
+                            match get_tag_information(&tag_key) {
+                                Some(tag_key) => {
+                                    let entry = tags.entry(tag_key).or_default();
+                                    let tag_value = TagValue::from(tag_value);
+                                    if !entry.contains(&tag_value) {
+                                        entry.push(tag_value)
+                                    }
+                                },
+                                None => {
+                                    all_dropped_tags.push((tag_key, tag_value))
+                                },
+                            }                            
+                        }
                     },
                     Err(err) => {
                         if err.downcast_ref::<InvalidHeuristicException>().is_some() {
@@ -836,25 +850,9 @@ impl TaskingClient {
             // if any heuristics have been saved for this section get them
             let mut heuristic = section_heuristics.remove(&index);
 
-            // Perform tag safelisting
-            let (tags, safelisted_tags) = self.tag_safelister.lock().get_validated_tag_map(tags);
-            
-            let formatted_tags = tags.to_tagging().context("to_tagging")?;
-            let passed_tags = formatted_tags.flatten().context("flatten")?;
-
-            let mut dropped  = vec![];
-            for (tag, values) in tags.iter() {
-                for value in values {
-                    if let Some(passed_values) = passed_tags.get(tag.as_str()) {
-                        if passed_values.contains(value) { continue }
-                    }
-                    dropped.push((tag, value))
-                }
-            }
-
-            if !dropped.is_empty() {
-                warn!("[{sid}] Invalid tag data from {service_name}: {dropped:?}");
-            }
+            // apply the safelister
+            let safelister: Arc<TagSafelister> = self.tag_safelister.lock().clone();
+            let (tags, safelisted_tags) = safelister.get_validated_tag_map(tags);
 
             // Set section score to zero and lower total score if service is set to zeroize score
             // and all tags were safelisted
@@ -865,7 +863,15 @@ impl TaskingClient {
                 }
             }
 
+            // convert the different tag structures to the layouts that the database wants to see
+            let formatted_tags = tags.to_tagging().context("to_tagging")?;
 
+            let mut converted_safelist = HashMap::new();
+            for (key, value) in safelisted_tags.into_iter() {
+                converted_safelist.insert(key.full_path(), value.into_iter().map(|item| Keyword::from(item.to_string())).collect_vec());
+            }
+
+            // build a database suitable result section
             sections.push(assemblyline_models::datastore::result::Section {
                 auto_collapse: section.auto_collapse,
                 body: section.body,
@@ -875,9 +881,37 @@ impl TaskingClient {
                 depth: section.depth,
                 heuristic,
                 tags: Box::new(formatted_tags),
-                safelisted_tags: safelisted_tags.into_inner().into_iter().map(|(k, v)|(k, v.into_iter().map(Keyword::from).collect())).collect(),
+                safelisted_tags: converted_safelist,
                 title_text: section.title_text,
                 promote_to: section.promote_to,
+            })
+        }
+
+        let mut tagging_error = vec![];
+        if !all_dropped_tags.is_empty() {
+
+            let error_message = all_dropped_tags
+                .into_iter()
+                .map(|(key, value)| key + "=" + &value)
+                .join(" | ");
+
+            warn!("[{sid}] Invalid tag data from {service_name}: {error_message}");
+            use assemblyline_models::datastore::error::{Error, Response, ErrorTypes, Status};
+
+            tagging_error.push(Error {
+                archive_ts: None,
+                created: Utc::now(),
+                expiry_ts,
+                response: Response { 
+                    message: format!("The following tags were rejected: {error_message}").into(), 
+                    service_debug_info: result.response.service_debug_info.clone(), 
+                    service_name: result.response.service_name.clone(), 
+                    service_tool_version: result.response.service_tool_version.clone(), 
+                    service_version: result.response.service_version.clone(), 
+                    status: Status::FailRecoverable,
+                },
+                sha256: result.sha256.clone(),
+                error_type: ErrorTypes::Exception,
             })
         }
 
@@ -900,7 +934,7 @@ impl TaskingClient {
         };
         let score = result.result.score;
         let result_key = result.build_key(Some(&task))?;
-        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None).await.context("service_finished")?;
+        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, tagging_error).await.context("service_finished")?;
 
         // Metrics
         let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);

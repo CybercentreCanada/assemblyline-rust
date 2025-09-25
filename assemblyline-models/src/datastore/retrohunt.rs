@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
-use crate::{Sha256, ElasticMeta, ClassificationString, Text, ExpandingClassification};
+use crate::{ElasticMeta, types::{Sha256, ClassificationString, Text, ExpandingClassification}};
 
 #[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumString, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
@@ -95,7 +95,7 @@ mod test {
     use chrono::Utc;
 
     use super::RetrohuntHit;
-    use crate::{serialize::test::setup_classification, ExpandingClassification};
+    use crate::{serialize::test::setup_classification, types::ExpandingClassification};
 
     #[test]
     fn hit_roundtrip(){

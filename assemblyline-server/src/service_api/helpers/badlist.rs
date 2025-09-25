@@ -22,7 +22,7 @@ use assemblyline_models::config::Config;
 use assemblyline_models::datastore::badlist;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::user::{User, UserRole};
-use assemblyline_models::ExpandingClassification;
+use assemblyline_models::types::ExpandingClassification;
 use chrono::{TimeDelta, Utc};
 use itertools::Itertools;
 use log::warn;

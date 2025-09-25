@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
-use assemblyline_models::ExpandingClassification;
+use assemblyline_models::types::ExpandingClassification;
 use chrono::{Utc, Duration};
 
 use assemblyline_models::messages::submission::Submission as MessageSubmission;

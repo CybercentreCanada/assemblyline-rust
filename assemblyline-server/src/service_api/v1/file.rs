@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use assemblyline_models::Sha256;
+use assemblyline_models::types::Sha256;
 use log::{error, info, warn};
 use poem::http::{HeaderMap, StatusCode};
 use poem::web::{Data, Multipart, Path};

@@ -5,8 +5,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use assemblyline_models::meta::{build_mapping_inner, flatten_fields, FieldMapping};
-use assemblyline_models::types::mapping_keys::FIELD_SANITIZER;
-use assemblyline_models::{ElasticMeta, JsonMap, Readable};
+use assemblyline_models::types::{JsonMap, mapping_keys::FIELD_SANITIZER};
+use assemblyline_models::{ElasticMeta, Readable};
 use itertools::Itertools;
 use log::{debug, error, warn};
 use reqwest::Method;

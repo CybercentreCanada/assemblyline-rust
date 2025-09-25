@@ -1,7 +1,7 @@
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::safelist::Safelist;
-use assemblyline_models::ExpandingClassification;
+use assemblyline_models::types::ExpandingClassification;
 use chrono::Utc;
 use reqwest::header::HeaderMap;
 

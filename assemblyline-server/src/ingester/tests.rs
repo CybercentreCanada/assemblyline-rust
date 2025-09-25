@@ -8,7 +8,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
-use assemblyline_models::{ClassificationString, JsonMap, Sha256, Sid, types::UpperString};
+use assemblyline_models::types::{ClassificationString, JsonMap, Sha256, Sid, UpperString};
 use itertools::Itertools;
 use rand::Rng;
 use serde_json::json;

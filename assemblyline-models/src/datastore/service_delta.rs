@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
 use crate::types::NonZeroInteger;
-use crate::{ClassificationString, ElasticMeta, JsonMap, Readable, Text};
+use crate::{ElasticMeta, Readable, types::{ClassificationString, JsonMap, Text}};
 
 use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, FetchMethods, ParamKinds, RegistryType, SignatureDelimiter};
 

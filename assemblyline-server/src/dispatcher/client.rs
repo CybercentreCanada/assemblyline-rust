@@ -6,57 +6,10 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 
-// from typing import Optional, Any, cast
-
-// from assemblyline.common import forge
-// from assemblyline.common.constants import DISPATCH_RUNNING_TASK_HASH, SUBMISSION_QUEUE, \
-//     make_watcher_list_name, DISPATCH_TASK_HASH
-// from assemblyline.common.forge import CachedObject, get_service_queue
-// from assemblyline.common.isotime import now_as_iso
-// from assemblyline.datastore.exceptions import VersionConflictException
-// from assemblyline.odm.base import DATEFORMAT
-// from assemblyline.odm.messages.dispatching import DispatcherCommandMessage, CREATE_WATCH, \
-//     CreateWatch, LIST_OUTSTANDING, ListOutstanding, UPDATE_BAD_SID
-// from assemblyline.odm.models.error import Error
-// from assemblyline.odm.models.file import File
-// from assemblyline.odm.models.result import Result
-// from assemblyline.odm.models.service import Service
-// from assemblyline.odm.models.submission import Submission
-// from assemblyline.remote.datatypes import get_client, reply_queue_name
-// from assemblyline.remote.datatypes.hash import ExpiringHash, Hash
-// from assemblyline.remote.datatypes.queues.named import NamedQueue
-// from assemblyline.remote.datatypes.set import ExpiringSet, Set
-// from assemblyline_core.dispatching.dispatcher import DISPATCH_START_EVENTS, DISPATCH_RESULT_QUEUE, \
-//     DISPATCH_COMMAND_QUEUE, QUEUE_EXPIRY, BAD_SID_HASH, ServiceTask, Dispatcher
-
-
-// MAX_CANCEL_RESPONSE_WAIT = 10
-const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
-
-// def weak_lru(maxsize=128, typed=False):
-//     'LRU Cache decorator that keeps a weak reference to "self"'
-//     def wrapper(func):
-
-//         @functools.lru_cache(maxsize, typed)
-//         def _func(_self, *args, **kwargs):
-//             return func(_self(), *args, **kwargs)
-
-//         @functools.wraps(func)
-//         def inner(self, *args, **kwargs):
-//             return _func(weakref.ref(self), *args, **kwargs)
-
-//         return inner
-
-//     return wrapper
-
-
-// class RetryRequestWork(Exception):
-//     pass
-
 use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
-use assemblyline_models::{JsonMap, Sid};
+use assemblyline_models::types::{JsonMap, Sid};
 use log::{debug, error, info};
 use reqwest::StatusCode;
 use tokio::sync::Mutex;
@@ -67,6 +20,12 @@ use crate::Core;
 
 use super::ServiceStartMessage;
 
+
+// MAX_CANCEL_RESPONSE_WAIT = 10
+const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
+
+// class RetryRequestWork(Exception):
+//     pass
 
 pub struct DispatchClient {
     datastore: Arc<Elastic>,
@@ -359,7 +318,7 @@ impl DispatchClient {
     }
 
     /// Notifies the dispatcher of service completion, and possible new files to dispatch.
-    pub async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>) -> Result<()> {
+    pub async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
         let mut version = Some(version.unwrap_or(Version::Create));
 
         // Make sure the dispatcher knows we were working on this task
@@ -398,6 +357,14 @@ impl DispatchClient {
                     }
                 }    
             }
+        }
+
+        // Store any errors passed beside the result as well
+        let mut extra_errors = vec![];
+        for error in errors {
+            let error_key = error.build_unique_key(result.response.service_tool_version.as_deref(), Some(&task))?;
+            self.datastore.error.save(&error_key, &error, None, None).await?;
+            extra_errors.push(error_key);
         }
 
         // Send the result key to any watching systems
@@ -443,7 +410,8 @@ impl DispatchClient {
             },
             tags,
             extracted_names: file_names,
-            temporary_data: temporary_data.unwrap_or_default()
+            temporary_data: temporary_data.unwrap_or_default(),
+            extra_errors,
         };
 
         loop {

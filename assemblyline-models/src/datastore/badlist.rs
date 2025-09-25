@@ -3,10 +3,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 use crate::types::classification::unrestricted_classification_string;
-use crate::{ClassificationString, ElasticMeta, ExpandingClassification, Readable, SSDeepHash, Sha1, Sha256, types::UpperString, MD5};
-
-// from assemblyline import odm
-// from assemblyline.common import forge
+use crate::types::{ClassificationString, ExpandingClassification, SSDeepHash, Sha1, Sha256, UpperString, MD5};
+use crate::{ElasticMeta, Readable};
 
 // Classification = forge.get_classification()
 #[derive(SerializeDisplay, DeserializeFromStr, Clone, Copy, strum::Display, strum::EnumString, Described, Debug, PartialEq, Eq)]
@@ -24,8 +22,6 @@ pub enum SourceTypes {
     User,
     External,
 }
-
-// SOURCE_TYPES = ["user", "external"]
 
 /// Attribution Tag Model
 #[derive(Debug, Serialize, Deserialize, Clone, Described, Default, PartialEq, Eq)]

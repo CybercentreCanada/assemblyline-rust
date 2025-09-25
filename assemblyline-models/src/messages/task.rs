@@ -4,10 +4,10 @@ use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
 
+use crate::datastore::tagging::TagValue;
 use crate::random_word;
-use crate::types::Wildcard;
-use crate::{MD5, Sha1, Sha256, Sid, JsonMap, SSDeepHash, datastore::file::URIInfo, config::ServiceSafelist};
-
+use crate::types::{JsonMap, Sid, Wildcard, MD5, Sha1, Sha256, SSDeepHash};
+use crate::{datastore::file::URIInfo, config::ServiceSafelist};
 
 
 /// File Information
@@ -43,7 +43,7 @@ pub struct TagItem {
     #[serde(rename="type")]
     pub tag_type: String,
     /// Value of tag item
-    pub value: String,
+    pub value: TagValue,
     /// Score of tag item
     pub score: Option<i32>,
 }
@@ -274,12 +274,12 @@ impl ServiceResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TagEntry {
     pub score: i32,    
     #[serde(rename="type")]
     pub tag_type: String,
-    pub value: String,
+    pub value: TagValue,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -295,6 +295,7 @@ pub struct ServiceResult {
     pub tags: HashMap<String, TagEntry>,
     pub extracted_names: HashMap<Sha256, String>,
     pub temporary_data: JsonMap,
+    pub extra_errors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]

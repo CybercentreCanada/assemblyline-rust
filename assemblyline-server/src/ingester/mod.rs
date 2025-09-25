@@ -17,7 +17,7 @@ use assemblyline_models::config::Priority;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::{ExpandingClassification, Sha256, Sid, types::UpperString};
+use assemblyline_models::types::{ExpandingClassification, Sha256, Sid, UpperString};
 use assemblyline_models::datastore::alert::ExtendedScanValues;
 use assemblyline_models::messages::submission::{Submission as MessageSubmission, SubmissionMessage};
 use assemblyline_models::datastore::submission::Submission as DatabaseSubmission;

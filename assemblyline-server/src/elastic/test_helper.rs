@@ -3,7 +3,7 @@ use std::sync::Arc;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ready_classification;
 use assemblyline_models::datastore::{File, Service};
-use assemblyline_models::Sha256;
+use assemblyline_models::types::Sha256;
 use log::debug;
 use rand::Rng;
 

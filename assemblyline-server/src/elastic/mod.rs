@@ -27,7 +27,7 @@ mod test_helper;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, Result as ResultModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};

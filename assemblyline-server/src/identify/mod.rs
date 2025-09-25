@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assemblyline_models::datastore::file::URIInfo;
-use assemblyline_models::{SSDeepHash, Sha1, Sha256, MD5};
+use assemblyline_models::types::{SSDeepHash, Sha1, Sha256, MD5};
 use digests::{get_digests_for_file_blocking, Digests, DEFAULT_BLOCKSIZE};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
