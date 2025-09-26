@@ -880,7 +880,7 @@ impl TaskingClient {
                 body_config: section.body_config,
                 depth: section.depth,
                 heuristic,
-                tags: Box::new(formatted_tags),
+                tags: formatted_tags,
                 safelisted_tags: converted_safelist,
                 title_text: section.title_text,
                 promote_to: section.promote_to,

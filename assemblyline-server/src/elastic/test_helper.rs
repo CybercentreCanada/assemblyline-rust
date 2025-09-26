@@ -100,6 +100,7 @@ async fn test_save_or_freshen_file() {
     }
     let expiry_create = chrono::Utc::now() + chrono::Duration::days(14).to_std().unwrap();
     let expiry_freshen = chrono::Utc::now() + chrono::Duration::days(15).to_std().unwrap();
+    let fast_expiry_freshen = chrono::Utc::now() + chrono::Duration::days(16).to_std().unwrap();
 
     // Generate file info for random file
     let mut f = File::gen_for_sample(&data, &mut rand::rng());
@@ -110,7 +111,7 @@ async fn test_save_or_freshen_file() {
 
     // Save the file
     let raw = if let serde_json::Value::Object(raw) = serde_json::to_value(&f).unwrap() { raw } else { panic!(); };
-    ds.save_or_freshen_file(&f.sha256, raw.clone(), Some(expiry_create), ce.restricted().to_owned(), &ce).await.unwrap();
+    assert_eq!(ds.save_or_freshen_file(&f.sha256, raw.clone(), Some(expiry_create), ce.restricted().to_owned(), &ce).await.unwrap(), 1);
 
     // Validate created file
     let (saved_file, _) = ds.file.get_if_exists(&f.sha256.to_string(), None).await.unwrap().unwrap();
@@ -122,8 +123,8 @@ async fn test_save_or_freshen_file() {
     assert_eq!(saved_file.seen.first, saved_file.seen.last);
     assert_eq!(saved_file.classification, ce.restricted());
 
-    // Freshen the file
-    ds.save_or_freshen_file(&f.sha256, raw, Some(expiry_freshen), ce.unrestricted().to_owned(), &ce).await.unwrap();
+    // Freshen the file (lowering classification, full versioned save)
+    assert_eq!(ds.save_or_freshen_file(&f.sha256, raw.clone(), Some(expiry_freshen), ce.unrestricted().to_owned(), &ce).await.unwrap(), 1);
 
     // Validate freshened file
     let (freshened_file, _) = ds.file.get_if_exists(&f.sha256.to_string(), None).await.unwrap().unwrap();
@@ -132,6 +133,19 @@ async fn test_save_or_freshen_file() {
     assert_eq!(freshened_file.md5, f.md5);
     assert_eq!(freshened_file.expiry_ts, Some(expiry_freshen));
     assert_eq!(freshened_file.seen.count, 2);
+    assert!(freshened_file.seen.first < freshened_file.seen.last);
+    assert_eq!(freshened_file.classification, ce.unrestricted());
+
+    // Freshen the file (only change expiry, should use update route)
+    assert_eq!(ds.save_or_freshen_file(&f.sha256, raw, Some(fast_expiry_freshen), ce.unrestricted().to_owned(), &ce).await.unwrap(), 1);
+
+    // Validate freshened file
+    let (freshened_file, _) = ds.file.get_if_exists(&f.sha256.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(freshened_file.sha256, f.sha256);
+    assert_eq!(freshened_file.sha1, f.sha1);
+    assert_eq!(freshened_file.md5, f.md5);
+    assert_eq!(freshened_file.expiry_ts, Some(fast_expiry_freshen));
+    assert_eq!(freshened_file.seen.count, 3);
     assert!(freshened_file.seen.first < freshened_file.seen.last);
     assert_eq!(freshened_file.classification, ce.unrestricted());
 }

@@ -1185,19 +1185,23 @@ impl Elastic {
         Ok(services)
     }
 
-    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> Result<()> {
+    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> Result<usize> {
+        let mut attempts = 0;
 
         // Remove control fields from new file info
-        for x in ["classification", "expiry_ts", "seen", "archive_ts", "labels", "label_categories", "comments"] {
+        for x in ["classification", "__access_lvl__", "__access_req__", "__access_grp1__", "__access_grp2__", "expiry_ts", "seen", "archive_ts", "labels", "label_categories", "comments"] {
             fileinfo.remove(x);
+        }
+
+        // strip uri info if we are dealing with a normal file to allow for update method
+        if let Some(value) = fileinfo.get("uri_info") {
+            if value.is_null() {
+                fileinfo.remove("uri_info");
+            }
         }
 
         // Reset archive_ts field
         fileinfo.insert("archive_ts".to_owned(), serde_json::Value::Null);
-
-        // # Clean up and prepare timestamps
-        // if isinstance(expiry, datetime):
-        //     expiry = expiry.strftime(DATEFORMAT)
 
         loop {
             let current = self.file.get_if_exists(sha256, None).await?;
@@ -1231,13 +1235,17 @@ impl Elastic {
                             } 
                         }
                         
+                        attempts += 1;
                         match self.file.update(sha256, batch, None, Some(8)).await {
-                            Ok(true) => return Ok(()),
+                            Ok(true) => {
+                                debug!("freshened via fast call");
+                                return Ok(attempts)
+                            },
                             Ok(false) => {
                                 warn!("fast save_or_freshen failed");
                             },
                             Err(err) => {
-                                error!("fast save_or_freshen failed: {err}");
+                                error!("fast save_or_freshen failed: {err:?}");
                             }
                         }
                     } else {
@@ -1270,30 +1278,18 @@ impl Elastic {
             if !seen.is_object() { *seen = json!(JsonMap::new()); }
             let seen = seen.as_object_mut().unwrap();
 
-            // seen.entry("count") = seen.get('count', 0) + 1
             seen.insert("count".to_string(), json!(extract_number(seen, "count") + 1));
             seen.insert("last".to_owned(), json!(now));
             seen.insert("first".to_owned(), seen.get("first").unwrap_or(&json!(now)).clone());
 
             // Update Classification
-            // current_fileinfo.insert("classification".to_owned(), json!(classification));
             ExpandingClassification::<false>::insert(cl_engine, &mut current_fileinfo, &classification)?;
 
             // write the file
-            // let current_fileinfo: File = serde_json::from_value(json!(current_fileinfo))?;
-            // let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
-            // match result {
-            //     Ok(_) => return Ok(()),
-            //     Err(err) if err.is_version_conflict() => {
-            //         info!("Retrying save or freshen due to version conflict: {err}");
-            //         continue
-            //     },
-            //     Err(err) => return Err(err)
-            // }
-            // let file: File = serde_json::from_value(serde_json::Value::Object(current_fileinfo))?;
+            attempts += 1;
             let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
             match result {
-                Ok(_) => return Ok(()),
+                Ok(_) => return Ok(attempts),
                 Err(err) if err.is_version_conflict() => {
                     debug!("Retrying save or freshen due to version conflict: {err}");
                     continue

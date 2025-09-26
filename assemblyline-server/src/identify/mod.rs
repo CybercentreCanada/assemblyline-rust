@@ -24,8 +24,6 @@ use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
 use magic_sys as _;
-use csv_scout;
-use magika;
 use crate::cachestore::CacheStore;
 use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence};
 use crate::IBool;
