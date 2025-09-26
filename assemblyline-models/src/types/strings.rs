@@ -181,7 +181,7 @@ pub struct ValidationError {
 
 
 pub trait StringValidator {
-    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>>;
+    fn validate<'a>(data: &'a str) -> Result<Cow<'a, str>, ValidationError>;
 }
 
 
@@ -224,9 +224,9 @@ impl<'de, Validator: StringValidator> Deserialize<'de> for ValidatedString<Valid
     where
         D: serde::Deserializer<'de> {
         let value = String::deserialize(deserializer)?;
-        match check_domain(&value) {
-            Ok(value) => Ok(Self { value, validator: PhantomData}),
-            Err(_) => Err(serde::de::Error::custom("domain rejected")),
+        match Validator::validate(&value) {
+            Ok(value) => Ok(Self { value: value.to_string(), validator: PhantomData}),
+            Err(error) => Err(serde::de::Error::custom(error.to_string())),
         }
     }
 }
@@ -248,13 +248,19 @@ impl<Validator: StringValidator> FromStr for ValidatedString<Validator> {
 
 // MARK: Domains
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum DomainError {
+    #[error("An empty string was provided where a domain was expected")]
     Empty,
+    #[error("No top level domain name found")]
     NoDot,
+    #[error("An invalid IDNA string was found")]
     InvalidIDNA,
+    #[error("Illigal characters were found")]
     IlligalCharacter,
+    #[error("The top level domain was rejected")]
     InvalidTLD,
+    #[error("Input failed validation")]
     Validation,
 }
 
@@ -414,10 +420,10 @@ fn find_top_level_domains() -> &'static HashSet<String> {
 
 pub struct DomainValidator;
 impl StringValidator for DomainValidator {
-    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>> {
+    fn validate<'a>(data: &'a str) -> Result<Cow<'a, str>, ValidationError> {
         match check_domain(data) {
-            Ok(domain) => Some(domain.into()),
-            Err(_) => None,
+            Ok(domain) => Ok(domain.into()),
+            Err(err) => Err(ValidationError { original: data.to_string(), name: "domain", error: err.to_string() }),
         }
     }
 }
@@ -489,11 +495,10 @@ pub fn check_uri(value: &str) -> Result<String, UriParseError> {
 
 pub struct UriValidator;
 impl StringValidator for UriValidator {
-    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>> {
-        if let Ok(uri) = check_uri(data) {
-            Some(uri.into())
-        } else {
-            None
+    fn validate<'a>(data: &'a str) -> Result<Cow<'a, str>, ValidationError> {
+        match check_uri(data) {
+            Ok(data) => Ok(data.into()),
+            Err(err) => Err(ValidationError { original: data.to_string(), name: "uri", error: err.to_string() }),
         }
     }
 }
@@ -630,10 +635,10 @@ pub fn is_mac(value: &str) -> bool {
 // MARK: Email
 pub struct EmailValidator;
 impl StringValidator for EmailValidator {
-    fn validate<'a>(data: &'a str) -> Option<Cow<'a, str>> {
+    fn validate<'a>(data: &'a str) -> Result<Cow<'a, str>, ValidationError> {
         match check_email(data) {
-            Ok(email) => Some(email.into()),
-            Err(_) => None,
+            Ok(email) => Ok(email.into()),
+            Err(err) => Err(ValidationError { original: data.to_string(), name: "email", error: err.to_string() }),
         }
     }
 }

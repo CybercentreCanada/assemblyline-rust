@@ -142,7 +142,7 @@ impl TagInformation {
     pub fn metadata_type(&self) -> struct_metadata::Descriptor<ElasticMeta> {
         use struct_metadata::{Kind, Descriptor};
         let metadata = ElasticMeta{copyto: Some("__text__"), ..Default::default()};
-        match self.processor {
+        let mut desc = match self.processor {
             TagProcessor::RuleMapping => struct_metadata::Descriptor { 
                 docs: None, 
                 metadata, 
@@ -172,7 +172,10 @@ impl TagInformation {
                 kind: Kind::String 
             },            
             _ => struct_metadata::Descriptor { docs: None, metadata, kind: Kind::String }
-        }
+        };
+
+        desc.docs = Some(vec![self.description]);
+        desc
     }
 }
 
@@ -508,7 +511,7 @@ impl Tagging {
 //         Ok(flatten_tags(data, None))
 //     }
 
-    pub fn to_list(&self, safelisted: Option<bool>) -> Result<Vec<TagEntry>, LayoutError> {
+    pub fn to_list(&self, _safelisted: Option<bool>) -> Result<Vec<TagEntry>, LayoutError> {
 
         fn flatten_inner(output: &mut Vec<TagEntry>, path: &[&str], data: &JsonMap) -> Result<(), ()> {
             for (key, value) in data {
@@ -914,7 +917,8 @@ fn network_tag_parsing() {
     assert_eq!(proc.apply(json!("user@www.google.com")), Ok(json!("user@www.google.com")));
     assert_eq!(proc.apply(json!("user@www.GooGle.com")), Ok(json!("user@www.google.com")));
     assert_eq!(proc.apply(json!("user@172.0.0.1")), Err(json!("user@172.0.0.1")));
-
+    assert_eq!(proc.apply(json!("john.doe@cyber.gc.ca")), Ok(json!("john.doe@cyber.gc.ca")));
+    
 
     let proc = TagProcessor::Mac;
     assert_eq!(proc.apply(json!("172.0.0.1")), Err(json!("172.0.0.1")));
@@ -927,7 +931,7 @@ fn network_tag_parsing() {
 
 #[test]
 fn misc_tag_parsing() {
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     let proc = TagProcessor::PhoneNumber;
     assert_eq!(proc.apply(json!("abc")), Err(json!("abc")));
