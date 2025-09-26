@@ -78,6 +78,7 @@ pub struct File {
     #[metadata(index=false, store=false)]
     pub from_archive: bool,
     /// URI structure to speed up specialty file searching
+    #[serde(default)]
     pub uri_info: Option<URIInfo>,
     /// List of comments made on a file
     #[serde(default)]

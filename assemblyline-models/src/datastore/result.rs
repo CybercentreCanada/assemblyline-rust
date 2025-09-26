@@ -134,7 +134,7 @@ pub struct Section {
     pub heuristic: Option<Heuristic>,
     /// List of tags associated to this section
     #[serde(default)]
-    pub tags: Box<Tagging>,
+    pub tags: Tagging,
     /// List of safelisted tags
     #[serde(default)]
     #[metadata(store=false, mapping="flattenedobject")]

@@ -183,7 +183,7 @@ impl TagInformation {
 // MARK: Tag List
 /// The list of all tags we are willing to accept. 
 /// This includes their path within a tagging dict, a textual description and how they should be processed for validation or normalization
-static ALL_VALID_TAGS: [TagInformation; 210] = [
+static ALL_VALID_TAGS: [TagInformation; 211] = [
     TagInformation::new(&["attribution", "actor"], "Attribution Actor", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "campaign"], "Attribution Campaign", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "category"], "Attribution Category", TagProcessor::Uppercase),
@@ -207,6 +207,8 @@ static ALL_VALID_TAGS: [TagInformation; 210] = [
     TagInformation::new(&["cert", "valid", "start"], "Start date of certificate validity", TagProcessor::String),
     TagInformation::new(&["cert", "valid", "end"], "End date of certificate validity", TagProcessor::String),
     TagInformation::new(&["cert", "version"], "Version", TagProcessor::String),
+
+    TagInformation::new(&["code", "sha256"], "Code Tagging: Sha256 of code", TagProcessor::Sha256),
 
     TagInformation::new(&["dynamic", "autorun_location"], "Autorun location", TagProcessor::String),
     TagInformation::new(&["dynamic", "dos_device"], "DOS Device", TagProcessor::String),
