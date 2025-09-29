@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result, anyhow};
-use assemblyline_models::config::TemporaryKeyType;
+use assemblyline_models::config::{Config, TemporaryKeyType};
 use assemblyline_models::datastore::submission::{SubmissionState, TraceEvent};
 use assemblyline_models::datastore::tagging::TagValue;
 use assemblyline_models::datastore::user::User;
@@ -187,6 +187,7 @@ struct SubmissionTask {
     file_schedules: HashMap<Sha256, Vec<Vec<String>>>,
     file_tags: HashMap<Sha256, HashMap<String, TagEntry>>, // = defaultdict(dict),
     file_depth: HashMap<Sha256, u32>,
+    //
     file_ancestry: HashMap<Sha256, Vec<Vec<AncestoryEntry>>>,
     file_temporary_data: HashMap<Sha256, TemporaryFileData>,
 
@@ -212,13 +213,14 @@ struct SubmissionTask {
     // mapping from file hash to a set of services that shouldn't be run on
     // any children (recursively) of that file
     _forbidden_services: HashMap<Sha256, HashSet<String>>,
+    // children : Set(parents)
     _parent_map: HashMap<Sha256, HashSet<Sha256>>,
 }
 
 
 impl SubmissionTask {
 
-    fn new(args: SubmissionDispatchMessage, access_control: Option<String>, scheduler: &ServiceHelper) -> Self {
+    fn new(args: SubmissionDispatchMessage, access_control: Option<String>, scheduler: &ServiceHelper, config: &Config) -> Self {
         let mut out = Self {
             submission: args.submission,
             completed_queue: args.completed_queue,
@@ -250,6 +252,38 @@ impl SubmissionTask {
             _forbidden_services: Default::default(),
             _parent_map: Default::default(),
         };
+
+
+        // initialize temporary data
+        let mut temp_data_config = config.submission.default_temporary_keys.clone();
+        temp_data_config.extend(&mut config.submission.temporary_keys.clone().into_iter());
+        let mut initial_temporary_data = TemporaryFileData::new(temp_data_config);
+        let max_temp_data_length = config.submission.max_temp_data_length as usize;
+
+        let root_sha = out.submission.files[0].sha256.clone();
+        let sid = &out.submission.sid;
+
+        // initialize initial temporary data
+        if let Some(initial) = &out.submission.params.initial_data {
+            match serde_json::from_str::<JsonMap>(&initial.0) {
+                Ok(init) => {
+                    for (key, value) in init {
+                        let encoded = serde_json::to_string(&value).expect("Expect a string value for initial data");
+                        if encoded.len() <= max_temp_data_length {
+                            initial_temporary_data.set_value(&key, value);
+                        }
+                    }
+                },
+                Err(err) => {
+                    warn!("[{sid}] could not process initialization data: {err}")
+                }
+            }
+        }
+
+        // add data for root level file information in case file tree is not present
+        out.file_temporary_data.insert(root_sha.clone(), initial_temporary_data);
+        out.file_depth.insert(root_sha.clone(), 0);
+        out.file_names.insert(root_sha.clone(), if out.submission.files[0].name.is_empty() { root_sha.to_string() } else { out.submission.files[0].name.clone() });
 
         // read cached file info into local storage
         for (hash, info) in args.file_infos {
@@ -955,8 +989,9 @@ impl Dispatcher {
                     access_control = Some(submitter.classification.classification.clone())
                 }
 
+
                 // This is probably a complete task
-                let task = SubmissionTask::new(message, access_control, &self.core.services);
+                let task = SubmissionTask::new(message, access_control, &self.core.services, &self.core.config);
                 self.dispatch_submission(task).await.context("dispatch_submission")?;
             }
         }
@@ -1361,7 +1396,7 @@ impl Dispatcher {
         }
 
         // Put the file back into processing
-        self.submission_queue.unpop(&SubmissionDispatchMessage::simple(submission, completed_queue)).await?;
+        self.submission_queue.unpop(&SubmissionDispatchMessage::new(submission, completed_queue)).await?;
         Ok(true)
     }
 
@@ -1392,7 +1427,7 @@ impl Dispatcher {
         if !self.active_submissions.exists(&sid).await? {
             info!("[{sid}] New submission received");
             task.trace_event("submission_start");
-            self.active_submissions.add(&sid, &SubmissionDispatchMessage::simple(task.submission.clone(),  task.completed_queue.clone())).await?;
+            self.active_submissions.add(&sid, &SubmissionDispatchMessage::new(task.submission.clone(),  task.completed_queue.clone())).await?;
 
             // Write all new submissions to the traffic queue
             self.traffic_queue.publish(&SubmissionMessage::started((&task.submission).into())).await?;
@@ -1403,32 +1438,33 @@ impl Dispatcher {
         }
 
         // Apply initial data parameter
-        let mut temp_data_config = self.core.config.submission.default_temporary_keys.clone();
-        temp_data_config.extend(&mut self.core.config.submission.temporary_keys.clone().into_iter());
-        let mut temporary_data = TemporaryFileData::new(temp_data_config);
-        let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
-        if let Some(initial) = &task.submission.params.initial_data {
-            match serde_json::from_str::<JsonMap>(&initial.0) {
-                Ok(init) => {
-                    for (key, value) in init {
-                        let encoded = serde_json::to_string(&value)?;
-                        if encoded.len() <= max_temp_data_length {
-                            temporary_data.set_value(&key, value);
-                        }
-                    }
-                },
-                Err(err) => {
-                    warn!("[{sid}] could not process initialization data: {err}")
-                }
-            }
-        }
-        task.file_temporary_data.insert(sha256.clone(), temporary_data);
+        // let mut temp_data_config = self.core.config.submission.default_temporary_keys.clone();
+        // temp_data_config.extend(&mut self.core.config.submission.temporary_keys.clone().into_iter());
+        // let mut temporary_data = TemporaryFileData::new(temp_data_config);
+        // let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
+        // if let Some(initial) = &task.submission.params.initial_data {
+        //     match serde_json::from_str::<JsonMap>(&initial.0) {
+        //         Ok(init) => {
+        //             for (key, value) in init {
+        //                 let encoded = serde_json::to_string(&value)?;
+        //                 if encoded.len() <= max_temp_data_length {
+        //                     temporary_data.set_value(&key, value);
+        //                 }
+        //             }
+        //         },
+        //         Err(err) => {
+        //             warn!("[{sid}] could not process initialization data: {err}")
+        //         }
+        //     }
+        // }
+        // task.file_temporary_data.insert(sha256.clone(), temporary_data);
 
 
-        // setup file parameters for root
-        task.file_depth.insert(sha256.clone(), 0);
-        let file_name = task.submission.files[0].name.clone();
-        task.file_names.insert(sha256.clone(), if file_name.is_empty() { sha256.to_string() } else { file_name });
+        // // setup file parameters for root
+        // task.file_depth.insert(sha256.clone(), 0);
+        // let file_name = task.file_temporary_data;
+        // task.file_names.insert(sha256.clone(), if file_name.is_empty() { sha256.to_string() } else { file_name });
+
         task.active_files.insert(sha256.clone());
 
         // Initialize ancestry chain by identifying the root file
@@ -1444,7 +1480,7 @@ impl Dispatcher {
         }]]);
 
         // create queue for processor
-        let (sender, reciever) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         {
             let mut queues = self.process_queues.write().await;
             match queues.entry(task.submission.sid) {
@@ -1462,7 +1498,7 @@ impl Dispatcher {
         }
 
         // Launch processor
-        tokio::spawn(self.clone().submission_worker(task, reciever));
+        tokio::spawn(self.clone().submission_worker(task, receiver));
         Ok(())
     }
 
@@ -1625,7 +1661,7 @@ impl Dispatcher {
                 },
                 DispatchAction::BadSid(_) => {
                     task.submission.to_be_deleted = true;
-                    self.active_submissions.set(&sid.to_string(), &SubmissionDispatchMessage::simple(task.submission.clone(), task.completed_queue.clone())).await?;
+                    self.active_submissions.set(&sid.to_string(), &SubmissionDispatchMessage::new(task.submission.clone(), task.completed_queue.clone())).await?;
                 },
                 DispatchAction::Check(_) => {
                     info!("[{sid}] checking dispatch status...");

@@ -628,7 +628,6 @@ impl<T: CollectionType> Collection<T> {
     async fn _get_if_exists<RT: Readable>(&self, key: &str, index_type: Option<Index>) -> Result<Option<(RT, Version)>> {
         let index_list = self.get_index_list(index_type)?;
 
-        println!("THE KEY IS {key}");
 
         for index in index_list {
             // fetch all the documents

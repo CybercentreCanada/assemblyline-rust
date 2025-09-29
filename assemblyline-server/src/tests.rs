@@ -400,7 +400,8 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     }
 }
 
-
+// create temporaray file stored in filestore
+// return the sha and size of the temporary file
 async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize) {
     let body = {
         let out = body.as_object_mut().unwrap();

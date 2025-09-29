@@ -40,6 +40,24 @@ pub struct FileInfo {
     pub uri_info: Option<URIInfo>,
 }
 
+#[cfg(feature = "rand")]
+impl rand::distr::Distribution<FileInfo> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> FileInfo {
+        FileInfo {
+                magic: "".to_string(),
+                md5: rng.random(),
+                mime: None,
+                sha1: rng.random(),
+                sha256: rng.random(),
+                size: rng.random(),
+                ssdeep: Some(rng.random()),
+                tlsh: None,
+                file_type: "unknown".to_owned(),
+                uri_info: None
+        }
+    }
+}
+
 /// Tag Item
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct TagItem {
@@ -124,18 +142,7 @@ impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
             sid: rng.random(),
             metadata: Default::default(),
             min_classification: Default::default(),
-            fileinfo: FileInfo {
-                magic: "".to_string(),
-                md5: rng.random(),
-                mime: None,
-                sha1: rng.random(),
-                sha256: rng.random(),
-                size: rng.random(),
-                ssdeep: Some(rng.random()),
-                tlsh: None,
-                file_type: "unknown".to_owned(),
-                uri_info: None
-            },
+            fileinfo: rng.random(),
             filename: random_word(rng),
             service_name: random_word(rng),
             service_config: Default::default(),

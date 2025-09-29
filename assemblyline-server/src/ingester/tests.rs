@@ -3,12 +3,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use assemblyline_models::messages::dispatching::FileTreeData;
+use assemblyline_models::messages::task::FileInfo;
+use chrono::Utc;
 use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::datastore::submission::{Verdict, SubmissionState, Times};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::datastore::Submission;
+use assemblyline_models::datastore::{Result, Submission};
 use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
-use assemblyline_models::types::{ClassificationString, JsonMap, Sha256, Sid, UpperString};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid, UpperString, Wildcard};
 use itertools::Itertools;
 use rand::Rng;
 use serde_json::json;
@@ -445,6 +449,145 @@ async fn test_submit_simple() {
     ingester.submit_manager.dispatch_submission_queue.pop().await.unwrap();
     assert_eq!(ingester.unique_queue.length().await.unwrap(), 0);
 }
+
+
+// MARK: tag filter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_submit_bundle() {
+    // When a ingester received a bundle, it should send the entire bundle with file_info, file_tree etc.
+    // to the dispatcher
+    // Step 1:
+    // 1. Create bundle
+    // 2. The submission in the bundle should be store in the database
+    // 3. The submission bundle is sent to the ingester for rescan services
+
+    // set up background processes
+    let (core, _redis_lock) = Core::test_setup().await;
+    let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
+
+    // setup information for the submission bundle data
+    let mut metadata: HashMap<String, Wildcard> = HashMap::new();
+    metadata.insert(String::from("bundle.source"), Wildcard::from("test_bundle"));
+
+    let errors : Vec<String> = vec!["error1".to_string(), "error2".to_string()];
+
+    let shas : Vec<Sha256> = vec![uniform_string('0', 64).parse().unwrap(), uniform_string('1', 64).parse().unwrap(), uniform_string('2', 64).parse().unwrap()];
+
+    let files =  vec![
+        File {
+        sha256: shas[0].clone(),
+        size: Some(100),
+        name: "root1".to_string()
+        },
+        File {
+        sha256: shas[1].clone(),
+        size: Some(100),
+        name: "child1".to_string()
+        },
+        File {
+        sha256: shas[2].clone(),
+        size: Some(100),
+        name: "child2".to_string()
+        }];
+
+    let results: HashMap<String, Result>  = HashMap::from([("result_key_1".to_string(), rand::rng().random())]);
+
+    let file_infos: HashMap<Sha256, FileInfo> = HashMap::from([
+        (shas[0].clone(), rand::rng().random()),
+        (shas[1].clone(), rand::rng().random()),
+        (shas[2].clone(), rand::rng().random())
+
+    ]);
+
+    let file_tree =
+        HashMap::from([
+            (files[0].sha256.clone(),
+                FileTreeData{
+                    name: vec![files[0].name.clone()],
+                    children:
+                    HashMap::from([
+                        (   files[1].sha256.clone(),
+                            FileTreeData {
+                            name: vec![files[1].name.clone()],
+                            children: Default::default()
+                        }),
+                        (   files[2].sha256.clone(),
+                            FileTreeData {
+                            name: vec![files[2].name.clone()],
+                            children: Default::default()
+                        })
+                    ])
+                }
+            )
+    ]);
+
+    // set up submission object to be stored in the database
+    // the submission object of the bundle should be stored in the database first before submitting to ingester
+    let submission = Submission {
+        archive_ts: Default::default(),
+        archived: false,
+        classification: ExpandingClassification::try_unrestricted().unwrap(),
+        tracing_events: Default::default(),
+        error_count: 0,
+        expiry_ts: Default::default(),
+        file_count: 1,
+        files: files.clone(),
+        max_score: 500,
+        metadata: metadata,
+        params: SubmissionParams::new(ClassificationString::unrestricted(&core.classification_parser)),
+        results: Default::default(),
+        sid: rand::rng().random(),
+        state: SubmissionState::Submitted,
+        to_be_deleted: false,
+        times:  Times {
+                    completed: None,
+                    submitted: Utc::now(),
+                },
+        verdict:  Verdict {
+                    malicious: vec![],
+                    non_malicious: vec![],
+                },
+        from_archive: false,
+        scan_key: None,
+        errors: errors.clone()
+    };
+
+    // The ingester message create from bundle should have all the other information about the submission including
+    // file_info, file tree, error keys, result data
+    let sub_message = MessageSubmission::from(&submission).set_errors(errors.clone()).set_file_infos(file_infos.clone()).set_results(results.clone()).set_file_tree(file_tree.clone());
+
+    // store the original submission to datastore
+    core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await.unwrap();
+
+    // submit this bundle to ingester
+    ingester.unique_queue.push(0.0, &IngestTask::new(sub_message)).await.unwrap();
+    ingester.submit_once(true).await.unwrap();
+
+
+    // The task has been passed to the submit tool and there are no other submissions
+    let dispatcher_message = ingester.submit_manager.dispatch_submission_queue.pop().await.unwrap();
+
+
+    // The dispatch message should have error, metadata, file, file_tree
+    match dispatcher_message {
+        None => panic!("No dispatcher message."),
+        Some(message) => {
+            assert_eq!(errors, message.errors);
+            assert_eq!(file_infos, message.file_infos);
+            assert_eq!(results, message.results);
+
+            assert!( message.file_tree.contains_key(&shas[0]));
+            let temp_tree = message.file_tree.get(&shas[0]).expect("File tree data should not be None for root");
+            assert_eq!(files[0].name, temp_tree.name[0]);
+            assert!(temp_tree.children.contains_key(&shas[1]));
+            assert!(temp_tree.children.contains_key(&shas[2]));
+            assert_eq!(temp_tree.children.get(&shas[1]).expect("File tree data should not be None for child1").name[0], files[1].name);
+            assert_eq!(temp_tree.children.get(&shas[2]).expect("File tree data should not be None for child2").name[0], files[2].name);
+
+        }
+    }
+}
+
 
 #[tokio::test]
 async fn test_submit_duplicate() {

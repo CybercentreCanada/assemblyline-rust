@@ -114,7 +114,7 @@ async fn start_test_dispatcher(core: Core) -> anyhow::Result<Arc<Dispatcher>> {
     let bind_address: SocketAddr = "0.0.0.0:0".parse()?;
     let tls_config = crate::config::TLSConfig::load().await?;
     let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
-    
+
     // Initialize Internal state
     let dispatcher = Dispatcher::new(core, tcp).await?;
 
@@ -161,7 +161,7 @@ async fn test_simple() {
     // Submit a problem, and check that it gets added to the dispatch hash
     // and the right service queues
     info!("==== first dispatch");
-    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
 
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
     // client.dispatch_bundle(&task).await.unwrap();
@@ -192,7 +192,7 @@ async fn test_simple() {
     ]);
     let service_task = task.queue_keys.get(&(file_hash.clone(), "extract".to_string())).unwrap().0.clone();
     client.service_failed(service_task, "abc123", make_error(file_hash.clone(), "extract", true)).await.unwrap();
-    
+
     let task = disp.get_test_report(sid).await.unwrap();
     assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
     assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
@@ -204,7 +204,7 @@ async fn test_simple() {
     let task_wrench = client.request_work("0", "wrench", "0", None, true, None).await.unwrap().unwrap();
     client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".to_owned()), None, None, vec![]).await.unwrap();
     client.service_failed(task_wrench, "wrench-error", make_error(file_hash.clone(), "wrench", false)).await.unwrap();
-    
+
     let task = disp.get_test_report(sid).await.unwrap();
     assert!(task.service_errors.contains_key(&(file_hash.clone(), "wrench".to_string())));
     assert!(task.service_results.contains_key(&(file_hash.clone(), "extract".to_string())));
@@ -282,7 +282,7 @@ async fn test_dispatch_extracted() {
     debug!("Dispatcher ready");
 
     // Launch the submission
-    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
@@ -293,9 +293,9 @@ async fn test_dispatch_extracted() {
     new_result.sha256 = file_hash.clone();
     new_result.response.service_name = "extract".to_string();
     new_result.response.extracted = vec![result::File{
-        sha256: second_file_hash.clone(), 
+        sha256: second_file_hash.clone(),
         name: "second-*".to_owned(),
-        description: "abc".into(), 
+        description: "abc".into(),
         classification: ClassificationString::unrestricted(&core.classification_parser),
         allow_dynamic_recursion: false,
         is_section_image: false,
@@ -303,7 +303,7 @@ async fn test_dispatch_extracted() {
     }];
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
-    // see that the job has reached 
+    // see that the job has reached
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
@@ -312,7 +312,7 @@ async fn test_dispatch_extracted() {
     new_result.response.service_name = "sandbox".to_string();
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
-    // 
+    //
     let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
@@ -374,7 +374,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     debug!("Dispatcher ready");
 
     // Launch the submission
-    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
@@ -386,15 +386,15 @@ async fn test_dispatch_extracted_bypass_drp()  {
     new_result.response.service_name = "extract".to_string();
     // This extracted file should be able to bypass Dynamic Recursion Prevention
     new_result.response.extracted = vec![result::File{
-        sha256: second_file_hash.clone(), 
+        sha256: second_file_hash.clone(),
         name: "second-*".to_owned(),
-        description: "abc".into(), 
+        description: "abc".into(),
         classification: ClassificationString::unrestricted(&core.classification_parser),
         allow_dynamic_recursion: true,
         is_section_image: false,
         parent_relation: "EXTRACTED".into(),
     }];
-    client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap(); 
+    client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // Then 'sandbox' service will analyze the same file, give result
     let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
@@ -463,7 +463,7 @@ async fn test_timeout() {
 
     // Submit a problem, and check that it gets added to the dispatch hash
     // and the right service queues
-    let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
+    let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
@@ -486,7 +486,7 @@ async fn test_timeout() {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    panic!();    
+    panic!();
 }
 
 #[poem::handler]

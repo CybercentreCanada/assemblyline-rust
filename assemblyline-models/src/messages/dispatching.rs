@@ -6,7 +6,7 @@ use crate::types::{Sha256, Sid};
 
 
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SubmissionDispatchMessage {
     pub submission: crate::datastore::Submission,
     #[serde(default)]
@@ -22,7 +22,7 @@ pub struct SubmissionDispatchMessage {
 }
 
 impl SubmissionDispatchMessage {
-    pub fn simple(submission: crate::datastore::Submission, completed_queue: Option<String>) -> Self {
+    pub fn new(submission: crate::datastore::Submission, completed_queue: Option<String>) -> Self {
         Self {
             submission,
             completed_queue,
@@ -39,18 +39,18 @@ impl SubmissionDispatchMessage {
     }
 
     pub fn set_file_tree(mut self, file_tree: HashMap<Sha256, FileTreeData>) -> Self {
-        self.file_tree = file_tree.clone();
+        self.file_tree = file_tree;
         self
     }
 
 
     pub fn set_results(mut self, results: HashMap<String, crate::datastore::result::Result>) -> Self {
-        self.results = results.clone();
+        self.results = results;
         self
     }
 
     pub fn set_errors(mut self, errors:  Vec<String>) -> Self {
-        self.errors = errors.clone();
+        self.errors = errors;
         self
     }
 

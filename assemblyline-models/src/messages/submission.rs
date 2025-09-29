@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Sid, Wildcard};
+use crate::types::{Sid, Wildcard, Sha256};
 
 use crate::messages::dispatching::FileTreeData;
-use crate::{meta, ClassificationString, Sha256, Sid};
+
 pub use crate::datastore::submission::{File, SubmissionParams};
 
 #[derive(Serialize, Deserialize)]
@@ -111,6 +111,11 @@ impl Submission {
 
     pub fn set_file_infos(mut self, file_infos: HashMap<Sha256, super::task::FileInfo>) -> Self {
         self.file_infos = file_infos;
+        self
+    }
+
+    pub fn set_file_tree(mut self, file_tree: HashMap<Sha256, FileTreeData>) -> Self{
+        self.file_tree = file_tree;
         self
     }
 }

@@ -388,6 +388,7 @@ impl Ingester {
     }
 
     async fn submit_once(self: &Arc<Self>, block_on_redis: bool) -> Result<()> {
+
         // Check if there is room for more submissions
         let length = self.scanning.length().await?;
         if length >= self.core.config.core.ingester.max_inflight {
