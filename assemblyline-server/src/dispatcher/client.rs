@@ -10,7 +10,7 @@ use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::types::{JsonMap, Sid};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use reqwest::StatusCode;
 use tokio::sync::Mutex;
 
@@ -203,7 +203,7 @@ impl DispatchClient {
     // :return: The job found, and a boolean value indicating if this is the first time this task has
     //         been returned by request_work.
     pub async fn request_work(&self, worker_id: &str, service_name: &str, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
-        let timeout = timeout.unwrap_or_else(|| Duration::from_secs(60));
+        let timeout = timeout.unwrap_or_else(|| Duration::from_secs(120));
         let low_priority = low_priority.unwrap_or_default();
         let start = std::time::Instant::now();
         while start.elapsed() < timeout {
@@ -390,6 +390,10 @@ impl DispatchClient {
             children.push((extracted_data.sha256, extracted_data.parent_relation.into()));
         }
 
+        let sid = task.sid;
+        let sha256 = result.sha256.clone();
+        let service_name = task.service_name.clone();
+
         // prepare report for the server
         let url = format!("https://{}/result", task.dispatcher_address);
         let dispatcher = task.dispatcher.to_string();
@@ -423,13 +427,14 @@ impl DispatchClient {
                 Ok(response) => if response.status().is_success() {
                     return Ok(())
                 } else {
-                    bail!("Error refused by dispatcher");
+                    bail!("Result refused by dispatcher");
                 },
                 Err(err) => {
-                    error!("Error reaching dispatcher: {err}");
                     if !self.is_dispatcher(&dispatcher).await? {
+                        warn!("Error [{sid}/{sha256}/{service_name}] reaching dispatcher (dispatcher not on record): {err}");
                         return Ok(())
                     } else {
+                        error!("Error [{sid}/{sha256}/{service_name}] reaching dispatcher: {err}");
                         tokio::time::sleep(Duration::from_secs(1)).await;
                     }
                 },
