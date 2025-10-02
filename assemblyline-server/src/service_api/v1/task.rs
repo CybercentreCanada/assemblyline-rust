@@ -88,7 +88,7 @@ async fn get_task(
             Some(status_expiry), 
             remaining
         ).await;
-        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}) attempt {attempts} complete");
+        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
 
         match result {
             Ok((task, retry)) => {
