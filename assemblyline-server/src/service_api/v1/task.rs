@@ -74,7 +74,7 @@ async fn get_task(
 
     loop {
         let remaining = timeout.saturating_sub(start_time.elapsed());
-        debug!("get_task {service_name} timeout ({remaining:?}/{timeout:?}) after {attempts} attempts");
+        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}) after {attempts} attempts");
         if remaining.is_zero() {
             break
         }
@@ -88,6 +88,7 @@ async fn get_task(
             Some(status_expiry), 
             remaining
         ).await;
+        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}) attempt {attempts} complete");
 
         match result {
             Ok((task, retry)) => {
