@@ -219,6 +219,8 @@ impl DispatchClient {
     async fn _request_work(&self, worker_id: &str, service_name: &str, _service_version: &str,
                       timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
     {
+        let start_time = std::time::Instant::now();
+        debug!("request_work {worker_id}/{service_name} timeout: {timeout:?} blocking: {blocking}");
         // For when we repeatedly retry on bad task dequeue-ing
         if timeout.is_zero() {
             debug!("{service_name}:{worker_id} no task returned [timeout]");
@@ -238,7 +240,7 @@ impl DispatchClient {
         let mut task = match result {
             Some(task) => task,
             None => {
-                debug!("{service_name}:{worker_id} no task returned: [empty message]");
+                debug!("{service_name}:{worker_id} no task returned: [empty message] after {:?}", start_time.elapsed());
                 return Ok(None)
             }
         };

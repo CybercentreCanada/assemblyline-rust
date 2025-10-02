@@ -443,6 +443,7 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 impl TaskingClient {
     pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<i64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
         let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
+        let start_time = std::time::Instant::now();
 
         let status_expiry = match status_expiry {
             Some(expiry) => expiry,
@@ -470,7 +471,7 @@ impl TaskingClient {
             Some(task) => task,
             None => {
                 // We've reached the timeout and no task found in service queue
-                debug!("TaskingClient::get_task timeout for {client_id} running {service_name}");
+                debug!("TaskingClient::get_task timeout for {client_id} running {service_name} after {:?}", start_time.elapsed());
                 return Ok((None, false))
             }
         };
