@@ -51,6 +51,15 @@ const ONE_DAY: Duration = Duration::from_secs(ONE_HOUR.as_secs() * 24);
 const DEFAULT_RESULT_BATCH_SIZE: usize = 50;
 const USER_CACHE_TIME: Duration = Duration::from_secs(30);
 
+/// How long to wait after verifying that a task is enqueued before checking again.
+/// This prevents the dispatcher from:
+/// a) repeatedly pushing the same task into queue when service instances 
+///    are available causing a fast turn around 
+/// b) repeatedly polling redis about the state of a queue in quick sucession 
+///    when the queue is unlikely to have changed that quickly without
+///    us getting notified via a task start query
+const QUEUE_CHECK_INTERVAL: Duration = Duration::from_millis(500);
+
 // ERROR_BATCH_SIZE = int(os.environ.get('DISPATCHER_ERROR_BATCH_SIZE', '50'))
 
 
@@ -111,7 +120,7 @@ enum DispatchAction {
 }
 
 pub struct TestReport {
-    pub queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
+    pub queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>, Instant)>,
     pub service_results: HashMap<(Sha256, String), ResultSummary>,
     pub service_errors: HashMap<(Sha256, String), String>,
 }
@@ -207,7 +216,7 @@ struct SubmissionTask {
     service_errors: HashMap<(Sha256, String), String>,
     service_attempts: HashMap<(Sha256, String), u32>, //] = defaultdict(int),
     running_services: HashMap<(Sha256, String), ServiceTask>,
-    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>)>,
+    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>, Instant)>,
 
     // mapping from file hash to a set of services that shouldn't be run on
     // any children (recursively) of that file
@@ -695,7 +704,7 @@ pub struct Dispatcher {
     instance_address: String,
 
     finalizing: Arc<Flag>,
-    finalizing_start: Mutex<Option<std::time::Instant>>,
+    finalizing_start: Mutex<Option<Instant>>,
     shutdown_grace: u64,
     result_batch_size: usize,
     user_cache: UserCache,
@@ -891,7 +900,7 @@ impl Dispatcher {
     /// if the counter hasn't started calling this method starts it
     fn get_finalizing_start(&self) -> Duration {
         let mut start = self.finalizing_start.lock();
-        start.get_or_insert_with(std::time::Instant::now).elapsed()
+        start.get_or_insert_with(Instant::now).elapsed()
     }
 
     /// get how long we will wait after getting a termination signal to allow for clean shutdown
@@ -1555,7 +1564,7 @@ impl Dispatcher {
                     };
 
                     let key = (message.sha, message.service_name.clone());
-                    if let Some((service_task, queue_key)) = task.queue_keys.remove(&key) {
+                    if let Some((service_task, queue_key, last_queue_check)) = task.queue_keys.remove(&key) {
                         // If this task is already finished (result message processed before start
                         // message) we can skip setting a timeout
                         if task.service_errors.contains_key(&key) || task.service_results.contains_key(&key) {
@@ -1567,7 +1576,7 @@ impl Dispatcher {
                         if let Some(request_id) = message.task_id {
                             if request_id != service_task.task_id {
                                 // trying to start the wrong task, put the queue key back and ignore this message
-                                task.queue_keys.insert(key, (service_task, queue_key));
+                                task.queue_keys.insert(key, (service_task, queue_key, last_queue_check));
                                 finish(Err(anyhow!("This task has been replaced")));
                                 continue
                             }
@@ -1632,7 +1641,7 @@ impl Dispatcher {
                     submission_timeout = Instant::now();
                 },
                 DispatchAction::Terminate(_, respond) => {
-                    for ((_, service_name), (_, key)) in &task.queue_keys {
+                    for ((_, service_name), (_, key, _)) in &task.queue_keys {
                         let service_queue = self.core.get_service_queue(service_name);
                         service_queue.remove(key).await?;
                     }
@@ -1758,8 +1767,13 @@ impl Dispatcher {
                 }
 
                 // Check if this task is already sitting in queue
-                if let Some((_, dispatch_key)) = task.queue_keys.get(&key) {
+                if let Some((_, dispatch_key, last_check)) = task.queue_keys.get_mut(&key) {
+                    if last_check.elapsed() < QUEUE_CHECK_INTERVAL {
+                        enqueued.push(service_name);
+                        continue
+                    }
                     if service_queue.rank(dispatch_key).await?.is_some() {
+                        *last_check = Instant::now();
                         enqueued.push(service_name);
                         continue
                     }
@@ -1889,7 +1903,7 @@ impl Dispatcher {
 
                 // Its a new task, send it to the service
                 let queue_key = service_queue.push(service_task.priority as f64, &service_task).await?;
-                task.queue_keys.insert(key.clone(), (service_task, queue_key));
+                task.queue_keys.insert(key.clone(), (service_task, queue_key, Instant::now()));
                 sent.push(service_name);
                 task.service_logs.entry(key).or_default().push(format!("Submitted to queue at {}", chrono::Utc::now()));
             }
@@ -2057,8 +2071,13 @@ impl Dispatcher {
                     // Check if the service is in queue, and handle it the same as being in progress.
                     // Check this one last, since it can require a remote call to redis rather than checking a dict.
                     let service_queue = self.core.get_service_queue(&service_name);
-                    if let Some((_, queue_key)) = task.queue_keys.get(&key) {
-                        if task.queue_keys.contains_key(&key) && service_queue.rank(queue_key).await?.is_some() {
+                    if let Some((_, queue_key, last_check)) = task.queue_keys.get_mut(&key) {
+                        if last_check.elapsed() < QUEUE_CHECK_INTERVAL {
+                            processing_files.push(sha256.clone());
+                            continue
+                        }
+                        if service_queue.rank(queue_key).await?.is_some() {
+                            *last_check = Instant::now();
                             processing_files.push(sha256.clone());
                             continue
                         }
@@ -2343,7 +2362,7 @@ impl Dispatcher {
         }
 
         // remove pending messages related to this task
-        if let Some((_, queue_key)) = task.queue_keys.remove(&key) {
+        if let Some((_, queue_key, _)) = task.queue_keys.remove(&key) {
             self.core.get_service_queue(&service_name).remove(&queue_key).await?;
         }
 
@@ -2560,7 +2579,7 @@ impl Dispatcher {
         let sid = task.submission.sid;
         let key = (sha256.clone(), service_name.to_string());
         let mut service_task = None;
-        if let Some((_t, _)) = task.queue_keys.remove(&key) {
+        if let Some((_t, _, _)) = task.queue_keys.remove(&key) {
             service_task = Some(_t);
         }
         if let Some(_t) = task.running_services.remove(&key) {
@@ -2646,7 +2665,7 @@ impl Drop for QuotaGuard {
 
 struct UserCache {
     datastore: Arc<Elastic>,
-    cache: Mutex<HashMap<String, (Arc<User>, std::time::Instant)>>,
+    cache: Mutex<HashMap<String, (Arc<User>, Instant)>>,
 }
 
 impl UserCache {
@@ -2666,7 +2685,7 @@ impl UserCache {
 
         if let Some((user, _)) = self.datastore.user.get_if_exists(name, None).await.context("fetching user data")? {
             let user = Arc::new(user);
-            self.cache.lock().insert(name.to_string(), (user.clone(), std::time::Instant::now()));
+            self.cache.lock().insert(name.to_string(), (user.clone(), Instant::now()));
             return Ok(Some(user))
         }
         return Ok(None)
