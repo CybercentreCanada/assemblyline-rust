@@ -1804,18 +1804,20 @@ impl Dispatcher {
                 if service.uses_tags || service.uses_tag_scores {
                     if let Some(file_tags) = task.file_tags.get(sha256) {
                         for tag in file_tags.values() {
+                            let short_type = match tag.tag_type.rsplit_once(".") {
+                                Some((_, value)) => value.to_owned(),
+                                None => tag.tag_type.clone(),
+                            };
+
                             tags.push(TagItem {
                                 tag_type: tag.tag_type.clone(),
                                 value: tag.value.clone(),
-                                score: Some(tag.score)
+                                score: Some(tag.score),
+                                short_type
                             });
                         }
                     }
                 }
-                // tag_fields = ['type', 'value', 'short_type']
-                // if service.uses_tag_scores {
-                //     tag_fields.append('score')
-                // }
 
                 // Load the temp submission data we will pass
                 let mut temp_data = vec![];

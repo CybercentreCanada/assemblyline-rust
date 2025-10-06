@@ -90,16 +90,16 @@ async fn get_task(
             Some(status_expiry), 
             remaining
         ).await;
-        let task_found = result.as_ref().map(|(inner, _)| inner.is_some()).unwrap_or(false);
-        debug!("get_task({task_found}) {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
 
         match result {
             Ok((task, retry)) => {
                 if let Some(task) = task {
+                    debug!("get_task found task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
                     return Ok(make_api_response(json!({"task": task})))
                 } else if !retry {
                     return Ok(make_api_response(json!({"task": false})))
                 }
+                debug!("get_task none {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
             },
             Err(err) => if err.downcast_ref::<ServiceMissing>().is_some() {
                 return Err(make_api_error(StatusCode::NOT_FOUND, &err.to_string(), json!({})))
