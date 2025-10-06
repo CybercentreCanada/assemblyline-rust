@@ -42,6 +42,8 @@ pub struct TagItem {
     /// Type of tag item
     #[serde(rename="type")]
     pub tag_type: String,
+    ///Short version of tag type
+    pub short_type: String,
     /// Value of tag item
     pub value: TagValue,
     /// Score of tag item
@@ -280,6 +282,7 @@ pub struct TagEntry {
     #[serde(rename="type")]
     pub tag_type: String,
     pub value: TagValue,
+    
 }
 
 #[derive(Serialize, Deserialize)]

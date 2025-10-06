@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "assemblyline-markings 0.1.13",
  "base62",
@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-server"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
