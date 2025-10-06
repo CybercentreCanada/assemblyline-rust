@@ -1809,10 +1809,16 @@ impl Dispatcher {
                                 None => tag.tag_type.clone(),
                             };
 
+                            let score = if service.uses_tag_scores {
+                                Some(tag.score)
+                            } else {
+                                None
+                            };
+
                             tags.push(TagItem {
                                 tag_type: tag.tag_type.clone(),
                                 value: tag.value.clone(),
-                                score: Some(tag.score),
+                                score,
                                 short_type
                             });
                         }

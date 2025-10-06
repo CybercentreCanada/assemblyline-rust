@@ -47,6 +47,7 @@ pub struct TagItem {
     /// Value of tag item
     pub value: TagValue,
     /// Score of tag item
+    #[serde(skip_serializing_if="Option::is_none")]
     pub score: Option<i32>,
 }
 
@@ -282,7 +283,7 @@ pub struct TagEntry {
     #[serde(rename="type")]
     pub tag_type: String,
     pub value: TagValue,
-    
+
 }
 
 #[derive(Serialize, Deserialize)]
