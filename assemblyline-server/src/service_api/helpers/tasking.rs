@@ -53,7 +53,7 @@ pub struct TaskingClient {
     filestore: Arc<FileStore>,
     classification_engine: Arc<ClassificationParser>,
     dispatch_client: DispatchClient,
-    status_table: Hashmap<(String, ServiceStatus, i64)>,
+    status_table: Hashmap<(String, ServiceStatus, f64)>,
     services: ServiceHelper,
     heuristic_handler: HeuristicHandler,
     heuristics: Arc<Mutex<HashMap<String, Heuristic>>>,
@@ -72,8 +72,6 @@ impl TaskingClient {
         // if not register_only:
         // self.dispatch_client = DispatchClient(self.datastore, redis=redis, redis_persist=redis_persist)
         
-        // self.status_table = ExpiringHash(SERVICE_STATE_HASH, ttl=60*30, host=redis)
-
         // self.reload_heuristics({})
         
         
@@ -441,13 +439,13 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 } 
 
 impl TaskingClient {
-    pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<i64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
+    pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
         let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
         let start_time = std::time::Instant::now();
 
         let status_expiry = match status_expiry {
             Some(expiry) => expiry,
-            None => (chrono::Utc::now() + timeout).timestamp(),
+            None => timestamp(timeout),
         };
 
         let service_data = match self.services.get(service_name) {
@@ -475,12 +473,20 @@ impl TaskingClient {
                 return Ok((None, false))
             }
         };
+        debug!("TaskingClient::get_task found task for {client_id} running {service_name} after {:?}", start_time.elapsed());
 
         // We've got a task to process, consider us busy
-        let timeout = (Utc::now() + Duration::from_secs(service_data.timeout as u64)).timestamp();
+        let timeout = timestamp(Duration::from_secs(service_data.timeout as u64));
         self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Running, timeout)).await?;
         increment!(metric_factory, execute);
 
+        // If caching is disabled or ignored we can return the task right away
+        if task.ignore_cache || service_data.disable_cache {
+            increment!(metric_factory, cache_skipped);
+            return Ok((Some(task), false))
+        }
+
+        // get the cache key for if a result exists for this task already
         let result_key = assemblyline_models::datastore::Result::help_build_key(
             &task.fileinfo.sha256,
             service_name,
@@ -490,12 +496,6 @@ impl TaskingClient {
             service_tool_version,
             Some(&task)
         )?;
-
-        // If caching is disabled or ignored we can return the task right away
-        if task.ignore_cache || service_data.disable_cache {
-            increment!(metric_factory, cache_skipped);
-            return Ok((Some(task), false))
-        }
 
         // Checking for previous results for this key
         let possible_result = self.datastore.result.get_if_exists(&result_key, None).await?;
@@ -948,7 +948,7 @@ impl TaskingClient {
         let exec_time = if exec_time > 0 { format!(" in {exec_time}ms") } else { String::new() };
         info!("[{sid}] {client_id} - {service_name} successfully completed task {exec_time}");
 
-        self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Idle, (Utc::now() + TimeDelta::seconds(5)).timestamp())).await?;
+        self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Idle, timestamp(Duration::from_secs(5)))).await?;
         Ok(vec![])
     }
 
@@ -982,7 +982,12 @@ impl TaskingClient {
             increment!(metric_factory, fail_nonrecoverable);
         }
 
-        self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Idle, (Utc::now() + TimeDelta::seconds(5)).timestamp())).await?;
+        self.status_table.set(client_id, &(service_name.to_owned(), ServiceStatus::Idle, timestamp(Duration::from_secs(5)))).await?;
         Ok(())
     }
+}
+
+
+pub fn timestamp(offset: Duration) -> f64 {
+    ((Utc::now() + offset).timestamp_millis() as f64)/1_000.0
 }

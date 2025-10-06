@@ -22,11 +22,13 @@ use serde_json::json;
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_error, make_api_response, make_empty_api_error};
-use crate::service_api::helpers::tasking::{ServiceMissing, TaskingClient};
+use crate::service_api::helpers::tasking::{timestamp, ServiceMissing, TaskingClient};
 use crate::Core;
 
 use super::require_header;
 
+/// Extra time added to the status duration to ensure it is stable between state changes
+const EXTRA_STATUS_TIME: Duration = Duration::from_secs(1);
 
 // SUB_API = 'task'
 // task_api = make_subapi_blueprint(SUB_API, api_version=1)
@@ -68,7 +70,7 @@ async fn get_task(
         Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse [{timeout_string}] as number")))
     };
 
-    let status_expiry = (chrono::Utc::now() + timeout).timestamp();
+    let status_expiry = timestamp(timeout + EXTRA_STATUS_TIME);
     let start_time = std::time::Instant::now();
     let mut attempts = 0;
 
@@ -88,7 +90,8 @@ async fn get_task(
             Some(status_expiry), 
             remaining
         ).await;
-        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
+        let task_found = result.as_ref().map(|(inner, _)| inner.is_some()).unwrap_or(false);
+        debug!("get_task({task_found}) {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
 
         match result {
             Ok((task, retry)) => {
