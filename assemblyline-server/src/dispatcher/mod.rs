@@ -37,6 +37,7 @@ use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
 use crate::elastic::Elastic;
 use crate::http::TlsAcceptor;
+use crate::logging::FormattedList;
 use crate::postprocessing::ActionWorker;
 use crate::services::{get_schedule_names, ServiceHelper};
 use crate::{Core, Flag};
@@ -1918,14 +1919,16 @@ impl Dispatcher {
 
             if !sent.is_empty() || !enqueued.is_empty() || !running.is_empty() {
                 // If we have confirmed that we are waiting, or have taken an action, log that.
-                info!("[{sid}] File {sha256} sent to: {sent:?} already in queue for: {enqueued:?} running on: {running:?}");
-                trace_event!(task, "dispatch_file_result", file sha256, "sent to: {sent:?} already in queue for: {enqueued:?} running on: {running:?}");
+                info!("[{sid}] File {sha256} sent to: {} already in queue for: {} running on: {}",
+                      FormattedList(&sent), FormattedList(&enqueued), FormattedList(&running));
+                trace_event!(task, "dispatch_file_result", file sha256, "sent to: {} already in queue for: {} running on: {}",
+                             FormattedList(&sent), FormattedList(&enqueued), FormattedList(&running));
                 return Ok(());
             } else if !skipped.is_empty() {
                 // Not waiting for anything, and have started skipping what is left over
                 // because this submission is terminated. Drop through to the base
                 // case where the file is complete
-                info!("[{sid}] File {sha256} skipping {skipped:?}");
+                info!("[{sid}] File {sha256} skipping {}", FormattedList(&skipped));
             } else {
                 // If we are not waiting, and have not taken an action, we must have hit the
                 // retry limit on the only service running. In that case, we can move directly
@@ -2121,13 +2124,13 @@ impl Dispatcher {
         // file isn't done yet, and hasn't been filtered by any of the previous few steps
         // poke those files.
         if !pending_files.is_empty() {
-            trace_event!(task, "submission_check", "Dispatching {pending_files:?}");
-            debug!("[{sid}] Dispatching {} files: {:?}", pending_files.len(), pending_files);
+            trace_event!(task, "submission_check", "Dispatching {}", FormattedList(&pending_files));
+            debug!("[{sid}] Dispatching {} files: {}", pending_files.len(), FormattedList(&pending_files));
             for file_hash in pending_files {
                 task.send_dispatch_action(DispatchAction::DispatchFile(sid, file_hash));
             }
         } else if !processing_files.is_empty() {
-            trace_event!(task, "submission_check", "Waiting for {processing_files:?}");
+            trace_event!(task, "submission_check", "Waiting for {}", FormattedList(&processing_files));
             debug!("[{sid}] Not finished waiting on {} files: {}", processing_files.len(), processing_files.len());
         } else {
             trace_event!(task, "submission_check", "Finished");
@@ -2524,13 +2527,13 @@ impl Dispatcher {
         // Not worth running if we know we are waiting for another service
         if task.running_services.keys().any(|(_s, _)| *_s == sha256) {
             let services: Vec<&String> = task.running_services.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
-            debug!("[{sid} :: {sha256}] Delaying dispatching, already being processed by {services:?}");
+            debug!("[{sid} :: {sha256}] Delaying dispatching, already being processed by {}", FormattedList(&services));
             return Ok(())
         }
         // Not worth running if we know we have services in queue
         if task.queue_keys.keys().any(|(_s, _)| *_s == sha256) {
             let services: Vec<&String> = task.queue_keys.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
-            debug!("[{sid} :: {sha256}] Delaying dispatching, already queued for {services:?}");
+            debug!("[{sid} :: {sha256}] Delaying dispatching, already queued for {}", FormattedList(&services));
             return Ok(())
         }
 

@@ -264,3 +264,19 @@ fn json_format(
     serde_json::to_writer(w, &line)?;
     Ok(())
 }
+
+/// A wrapper over a slice reference to print it as a comma separated list 
+pub struct FormattedList<'a, I: std::fmt::Display> (pub &'a [I]);
+
+impl<I: std::fmt::Display> std::fmt::Display for FormattedList<'_, I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.0.is_empty() {
+            self.0[0].fmt(f)?;
+            for i in &self.0[1..] {
+                f.write_str(", ")?;
+                i.fmt(f)?;
+            }
+        }
+        Ok(())
+    }
+}
