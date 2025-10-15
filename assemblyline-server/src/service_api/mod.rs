@@ -11,7 +11,7 @@ use crate::Core;
 pub mod helpers;
 pub mod v1;
 #[cfg(test)]
-mod tests;
+pub (crate) mod tests;
 
 pub async fn api(core: Arc<Core>) -> Result<impl Endpoint> {
     let tasking_client = Arc::new(TaskingClient::new(&core).await?);

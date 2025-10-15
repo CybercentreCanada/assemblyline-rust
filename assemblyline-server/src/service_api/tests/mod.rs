@@ -18,7 +18,7 @@ mod badlist;
 mod file;
 mod safelist;
 mod service;
-mod tasking;
+pub (crate) mod tasking;
 
 const AUTH_KEY: &str = "test_key_abc_123";
 

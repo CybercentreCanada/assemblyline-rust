@@ -14,7 +14,6 @@ use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
-use assemblyline_filestore::FileStore;
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -25,68 +24,28 @@ use tokio::sync::{mpsc, Notify};
 use assemblyline_models::messages::submission::{File, Notification, Submission as MessageSubmission};
 
 use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
-use crate::dispatcher::client::DispatchClient;
 use crate::dispatcher::Dispatcher;
 
 use crate::ingester::{IngestTask, Ingester, SCANNING_TABLE_NAME};
 use crate::plumber::Plumber;
 use crate::postprocessing::SubmissionFilter;
+use crate::service_api::helpers::APIResponse;
+use crate::service_api::tests::tasking::TaskResp;
 use crate::services::test::{dummy_service, setup_services};
 use crate::{Core, Flag, TestGuard};
 
-// from __future__ import annotations
-// import hashlib
-// import json
-// import typing
-// import time
-// import threading
-// import logging
-// from tempfile import NamedTemporaryFile
-// from typing import TYPE_CHECKING, Any
-
-// import pytest
-
-// from assemblyline.common import forge
-// from assemblyline.common.forge import get_service_queue
-// from assemblyline.common.isotime import now_as_iso
-// from assemblyline.common.uid import get_random_id
-// from assemblyline.datastore.helper import AssemblylineDatastore
-// from assemblyline.odm.models.config import Config
-// from assemblyline.odm.models.error import Error
-// from assemblyline.odm.models.result import Result
-// from assemblyline.odm.models.service_delta import ServiceDelta
-// from assemblyline.odm.models.submission import Submission
-// from assemblyline.odm.models.user import User
-// from assemblyline.odm.randomizer import random_model_obj
-// from assemblyline.odm.messages.submission import Submission as SubmissionInput
-// from assemblyline.remote.datatypes.queues.named import NamedQueue
-
-// import assemblyline_core
-// from assemblyline_core.plumber.run_plumber import Plumber
-// from assemblyline_core.dispatching import dispatcher
-// from assemblyline_core.dispatching.client import DispatchClient
-// from assemblyline_core.dispatching.dispatcher import Dispatcher
-// from assemblyline_core.ingester.ingester import IngestTask, Ingester
-// from assemblyline_core.server_base import ServerBase, get_service_stage_hash, ServiceStage
-
-// from test_scheduler import dummy_service
-
-// if TYPE_CHECKING:
-//     from redis import Redis
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 
-/// Replaces everything past the dispatcher.
+/// A fake service that works through the service server to do different test scenarios 
+/// based on configuration stored in the target file
 /// MARK: MockService
-/// Including service API, in the future probably include that in this test.
 struct MockService {
     service_name: String,
     service_queue: redis_objects::PriorityQueue<Task>,
+    server_address: String,
     classification_engine: Arc<ClassificationParser>,
-    // self.datastore = datastore
-    filestore: Arc<FileStore>,
-    // self.queue = get_service_queue(name, redis)
 
     hits: Mutex<HashMap<String, u64>>,
     finish: Mutex<HashMap<String, u64>>,
@@ -95,18 +54,13 @@ struct MockService {
     running: Arc<Flag>,
     local_running: Flag,
     stopped: Flag,
-    dispatch_client: DispatchClient,
     signal: Arc<Notify>,
     local_signal: Notify,
 }
 
 impl MockService {
-    async fn new(name: &str, signal: Arc<Notify>, core: &Core) -> Arc<Self> {
-        // self.service_name = name
-        // self.datastore = datastore
-        // self.filestore = filestore
-        // self.queue = get_service_queue(name, redis)
-        // self.dispatch_client = DispatchClient(self.datastore, redis)
+    async fn new(name: &str, signal: Arc<Notify>, core: &Core, server_address: String) -> Arc<Self> {
+
         Arc::new(Self {
             service_name: name.to_string(),
             service_queue: core.get_service_queue(name),
@@ -114,26 +68,48 @@ impl MockService {
             stopped: Flag::new(false),
             running: core.running.clone(),
             classification_engine: core.classification_parser.clone(),
-            filestore: core.filestore.clone(),
-            dispatch_client: DispatchClient::new_from_core(core).await.unwrap(),
             hits: Mutex::new(Default::default()),
             finish: Mutex::new(Default::default()),
             drops: Mutex::new(Default::default()),
             signal,
             local_signal: Notify::new(),
+            server_address,
         })
     }
 
     async fn run(self: Arc<Self>) {
+        use reqwest::header::{HeaderMap, HeaderValue};
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Container-Id", HeaderValue::from_str(&self.service_name).unwrap());
+        headers.insert("X-APIKey", HeaderValue::from_str(AUTH_KEY).unwrap());
+        headers.insert("Service-Name", HeaderValue::from_str(&self.service_name).unwrap());
+        headers.insert("Service-Version", HeaderValue::from_str("0").unwrap());
+        headers.insert("Service-Tool-Version", HeaderValue::from_str("0").unwrap());
+        headers.insert("Timeout", HeaderValue::from_str("3").unwrap());
+        // ("X-Forwarded-For", "127.0.0.1".to_owned()),
+        let address = self.server_address.clone();
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(90))
+            .build().unwrap();
+
         while self.running.read() && self.local_running.read() {
-            let task = self.dispatch_client.request_work("worker", &self.service_name, "0", Some(Duration::from_secs(3)), true, None).await.unwrap();
-            let task = match task {
-                Some(task) => task,
-                None => continue,
+
+            let response = client.get(format!("{address}/api/v1/task/")).send().await.unwrap();
+            let body = response.error_for_status().unwrap().bytes().await.unwrap();
+            let body: APIResponse<TaskResp> = serde_json::from_slice(&body).unwrap();
+
+            let task = match body.api_response {
+                TaskResp::Task { task } => task,
+                TaskResp::None { task: _ } => continue,
             };
+
             info!("{} has received a job {}", self.service_name, task.sid);
 
-            let file = self.filestore.get(&task.fileinfo.sha256).await.unwrap().unwrap();
+            let response = client.get(format!("{address}/api/v1/file/{}/", task.fileinfo.sha256)).send().await.unwrap();
+            let file = response.error_for_status().unwrap().bytes().await.unwrap();
 
             let mut instructions: JsonMap = serde_json::from_slice(&file).unwrap();
             let mut instructions: JsonMap = match instructions.remove(&self.service_name) {
@@ -183,8 +159,13 @@ impl MockService {
             if instructions.get("failure").and_then(|x|x.as_bool()).unwrap_or(false) {
                 let mut error: assemblyline_models::datastore::Error = serde_json::from_value(instructions.get("error").unwrap().clone()).unwrap();
                 error.sha256 = task.fileinfo.sha256.clone();
-                let key = rand::rng().random::<u128>().to_string();
-                self.dispatch_client.service_failed(task, &key, error).await.unwrap();
+                // let key = rand::rng().random::<u128>().to_string();
+                // self.dispatch_client.service_failed(task, &key, error).await.unwrap();
+                let response = client.post(format!("{address}/api/v1/task/")).json(&json!({
+                    "task": task,
+                    "error": error
+                })).send().await.unwrap();
+                response.error_for_status().unwrap();
                 continue
             }
 
@@ -271,11 +252,23 @@ impl MockService {
 
             debug!("result: {result_key} -> {result:?}");
             let sha = task.fileinfo.sha256.to_string();
-            self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None, vec![]).await.unwrap();
+
+            let serde_json::Value::Object(mut result) = serde_json::to_value(result).unwrap() else { panic!() };
+            result.insert("temp_submission_data".to_owned(), serde_json::Value::Object(temporary_data));
+
+            // self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None, vec![]).await.unwrap();
+            let response = client.post(format!("{address}/api/v1/task/")).json(&json!({
+                "task": task,
+                "freshen": false,
+                "result": result
+            })).send().await.unwrap();
+            response.error_for_status().unwrap();
+
             *self.finish.lock().entry(sha).or_default() += 1;
         }
         self.stopped.set(true);
     }
+
 }
 
 fn test_services() -> HashMap<String, Service> {
@@ -297,6 +290,7 @@ struct TestContext {
     components: tokio::task::JoinSet<()>,
     signal: Arc<Notify>,
     services: Vec<Arc<MockService>>,
+    service_server: tokio::task::JoinHandle<()>,
 }
 
 impl TestContext {
@@ -330,6 +324,15 @@ impl TestContext {
     }
 }
 
+const AUTH_KEY: &str = "test_key_abc_123";
+
+async fn start_api_server(core: Core) -> (tokio::task::JoinHandle<()>, String) {
+    std::env::set_var("SERVICE_API_KEY", AUTH_KEY);
+    let (port, server) = crate::service_api::tests::launch(Arc::new(core)).await;
+    (server, format!("http://localhost:{port}"))
+}
+
+
 // MARK: setup
 async fn setup() -> TestContext {
     setup_custom(|i| i).await
@@ -337,15 +340,19 @@ async fn setup() -> TestContext {
 
 async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
     std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
+
+    // Configure the services
     let mut service_configurations = test_services();
     service_configurations.get_mut("core-a").unwrap().timeout = 100;
     service_configurations.get_mut("core-b").unwrap().timeout = 100;
     let (core, guard) = setup_services(service_configurations).await;
 
+    // launch the api Server
+    let (service_server, api_address) = start_api_server(core.clone()).await;
+
+    // launch the services
     let signal = Arc::new(Notify::new());
     let mut components = tokio::task::JoinSet::new();
-
-    // Register services
     let mut services = vec![];
     let stages = core.services.get_service_stage_hash();
     for (name, service) in test_services() {
@@ -360,7 +367,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
         stages.set(&name, &ServiceStage::Running).await.unwrap();
 
         for _ in 0..count {
-            let service_agent = MockService::new(&name, signal.clone(), &core).await;
+            let service_agent = MockService::new(&name, signal.clone(), &core, api_address.clone()).await;
             components.spawn(service_agent.clone().run());
             services.push(service_agent);
         }
@@ -387,6 +394,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
     plumber.start(&mut components).await.unwrap();
 
+
     TestContext {
         metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await),
         ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
@@ -396,7 +404,8 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
         ingester,
         components,
         signal,
-        services
+        services,
+        service_server
     }
 }
 

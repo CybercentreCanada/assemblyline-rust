@@ -121,7 +121,7 @@ async fn mock_dispatcher() -> (mpsc::Receiver<MockItem>, String) {
 #[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
-enum TaskResp {
+pub enum TaskResp {
     Task {
         task: Task
     },
