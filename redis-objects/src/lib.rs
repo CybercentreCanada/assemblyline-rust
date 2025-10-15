@@ -72,7 +72,13 @@ impl RedisObjects {
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");
-        let cfg = deadpool_redis::Config::from_connection_info(config.clone());
+        // configuration for the pool manager itself
+        let mut pool_cfg = deadpool_redis::PoolConfig::new(1024);
+        pool_cfg.timeouts.wait = Some(Duration::from_secs(5));
+
+        // load redis configuration and create the pool
+        let mut cfg = deadpool_redis::Config::from_connection_info(config.clone());
+        cfg.pool = Some(pool_cfg);
         let pool = cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
         let client = redis::Client::open(config)?;
         Ok(Arc::new(Self{ 

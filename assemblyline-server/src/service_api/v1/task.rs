@@ -22,11 +22,13 @@ use serde_json::json;
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_error, make_api_response, make_empty_api_error};
-use crate::service_api::helpers::tasking::{ServiceMissing, TaskingClient};
+use crate::service_api::helpers::tasking::{timestamp, ServiceMissing, TaskingClient};
 use crate::Core;
 
 use super::require_header;
 
+/// Extra time added to the status duration to ensure it is stable between state changes
+const EXTRA_STATUS_TIME: Duration = Duration::from_secs(1);
 
 // SUB_API = 'task'
 // task_api = make_subapi_blueprint(SUB_API, api_version=1)
@@ -59,22 +61,23 @@ async fn get_task(
         service_tool_version,
         client_id
     } = client_info;
-    debug!("Getting task for {service_name} {service_version} [{}]", service_tool_version.as_deref().unwrap_or("None"));
 
+    debug!("Getting task for {service_name} {service_version} [{}]", service_tool_version.as_deref().unwrap_or("None"));
     let timeout_string = require_header!(headers, "timeout", "30");
+    
     let timeout = match timeout_string.parse() {
         Ok(timeout) => Duration::from_secs_f64(timeout),
         Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse [{timeout_string}] as number")))
     };
 
-    let status_expiry = (chrono::Utc::now() + timeout).timestamp();
+    let status_expiry = timestamp(timeout + EXTRA_STATUS_TIME);
     let start_time = std::time::Instant::now();
     let mut attempts = 0;
 
     loop {
         let remaining = timeout.saturating_sub(start_time.elapsed());
+        debug!("get_task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}) after {attempts} attempts");
         if remaining.is_zero() {
-            debug!("get {service_name} task timeout ({timeout:?}) after {attempts} attempts");
             break
         }
         attempts += 1;
@@ -91,10 +94,12 @@ async fn get_task(
         match result {
             Ok((task, retry)) => {
                 if let Some(task) = task {
+                    debug!("get_task found task {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
                     return Ok(make_api_response(json!({"task": task})))
                 } else if !retry {
                     return Ok(make_api_response(json!({"task": false})))
                 }
+                debug!("get_task none {client_id}/{service_name} timeout ({remaining:?}/{timeout:?}/{:?}) attempt {attempts} complete", start_time.elapsed());
             },
             Err(err) => if err.downcast_ref::<ServiceMissing>().is_some() {
                 return Err(make_api_error(StatusCode::NOT_FOUND, &err.to_string(), json!({})))

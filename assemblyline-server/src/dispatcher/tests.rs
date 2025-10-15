@@ -21,30 +21,6 @@ use crate::services::test::{dummy_service, setup_services};
 use crate::{Core, TestGuard};
 
 
-// import logging
-// import time
-// from unittest import mock
-
-// import json
-// import pytest
-
-// from assemblyline.common.forge import get_service_queue, get_classification
-// from assemblyline.odm.models.error import Error
-// from assemblyline.odm.models.file import File
-// from assemblyline.odm.models.result import Result
-// from assemblyline.odm.models.user import User
-// from assemblyline.odm.randomizer import random_model_obj, random_minimal_obj, get_random_hash
-// from assemblyline.odm import models
-// from assemblyline.common.metrics import MetricsFactory
-
-// from assemblyline_core.dispatching.client import DispatchClient, DISPATCH_RESULT_QUEUE
-// from assemblyline_core.dispatching.dispatcher import Dispatcher, ServiceTask, Submission
-// from assemblyline_core.dispatching.schedules import Scheduler as RealScheduler
-
-// # noinspection PyUnresolvedReferences
-// from assemblyline_core.dispatching.timeout import TimeoutTable
-// from mocking import ToggleTrue
-// from test_scheduler import dummy_service
 
 fn test_services() -> HashMap<String, Service> {
     let mut bonus = dummy_service("bonus", "pre", None, None, Some("unknown"), Some(true));
@@ -88,26 +64,6 @@ fn make_error(file_hash: Sha256, service: &str, recoverable: bool) -> Error {
     }
     return new_error
 }
-
-// def wait_result(task, file_hash, service):
-//     for _ in range(10):
-//         if (file_hash, service) in task.service_results:
-//             return True
-//         time.sleep(0.05)
-
-
-// def wait_error(task, file_hash, service):
-//     for _ in range(10):
-//         if (file_hash, service) in task.service_errors:
-//             return True
-//         time.sleep(0.05)
-
-
-// @pytest.fixture(autouse=True)
-// def log_config(caplog):
-//     caplog.set_level(logging.INFO, logger='assemblyline')
-//     from assemblyline.common import log as al_log
-//     al_log.init_logging = lambda *args: None
 
 async fn start_test_dispatcher(core: Core) -> anyhow::Result<Arc<Dispatcher>> {
     // Bind the HTTP interface

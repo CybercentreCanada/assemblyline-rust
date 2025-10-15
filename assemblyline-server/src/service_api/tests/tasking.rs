@@ -1,21 +1,3 @@
-// from unittest.mock import patch, MagicMock
-
-// import pytest
-
-// from assemblyline.odm.models.result import Result
-// from assemblyline.odm.models.error import Error
-// from assemblyline.odm.messages.task import Task
-// from assemblyline.odm.randomizer import random_minimal_obj, random_model_obj
-// from assemblyline.common.constants import SERVICE_STATE_HASH
-// from assemblyline.remote.datatypes.hash import ExpiringHash
-// from assemblyline.common import forge
-// from assemblyline.odm import randomizer
-// from assemblyline.remote.datatypes import get_client
-
-// from assemblyline_service_server import app
-// from assemblyline_service_server.api.v1 import task
-// from assemblyline_service_server.config import AUTH_KEY
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -139,7 +121,7 @@ async fn mock_dispatcher() -> (mpsc::Receiver<MockItem>, String) {
 #[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
-enum TaskResp {
+pub enum TaskResp {
     Task {
         task: Task
     },

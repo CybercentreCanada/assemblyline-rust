@@ -50,17 +50,6 @@ pub enum ServiceStage {
     Paused = 3,
 }
 
-
-/// A table storing information about the state of a service, expected type is ExpiringHash
-/// with a default ttl of None, and the ttl set per field based on the timeouts of queries
-/// and service operation
-#[derive(Debug, strum::FromRepr, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-pub enum ServiceStatus {
-    Idle = 0,
-    Running = 1,
-}
-
-
 impl<'de> Deserialize<'de> for ServiceStage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -75,6 +64,36 @@ impl<'de> Deserialize<'de> for ServiceStage {
 }
 
 impl Serialize for ServiceStage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        (*self as usize).serialize(serializer)
+    }
+}
+
+/// A table storing information about the state of a service, expected type is ExpiringHash
+/// with a default ttl of None, and the ttl set per field based on the timeouts of queries
+/// and service operation
+#[derive(Debug, strum::FromRepr, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceStatus {
+    Idle = 0,
+    Running = 1,
+}
+
+impl<'de> Deserialize<'de> for ServiceStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> 
+    {
+        let value = usize::deserialize(deserializer)?;
+        match Self::from_repr(value) {
+            Some(value) => Ok(value),
+            None => Err(serde::de::Error::custom("Invalid service status")),
+        }
+    }
+}
+
+impl Serialize for ServiceStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer {

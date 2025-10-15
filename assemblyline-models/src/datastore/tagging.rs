@@ -177,6 +177,10 @@ impl TagInformation {
         desc.docs = Some(vec![self.description]);
         desc
     }
+
+    pub fn inner_mapping(&self) -> bool {
+        matches!(self.processor, TagProcessor::RuleMapping)
+    }
 }
 
 
@@ -582,13 +586,50 @@ pub struct TagNameCollision(String);
 impl FlatTags {
     pub fn to_tagging(self) -> Result<Tagging, TagNameCollision> {
         let mut output = JsonMap::default();
+
+        // let mut groups: HashMap<&'static str, Vec<(&[&'static str], _, _)>> = HashMap::new();
+        // for (tag, value) in self.tags {
+        //     let path = tag.name;
+        //     let items = groups.entry(path[0]).or_default();
+        //     items.push((&path[1..], tag, value))
+        // }
+
         fn insert(info: &'static TagInformation, output: &mut JsonMap, name: &[&str], values: Vec<TagValue>) -> Result<(), TagNameCollision> {
             if name.len() == 1 {
-                let inner = output.entry(name[0])
-                    .or_insert_with(|| Value::Array(vec![]));
-                match inner.as_array_mut() {
-                    Some(obj) => { obj.extend(values.into_iter().map(|tag| tag.0)); Ok(()) },
-                    None => Err(TagNameCollision(info.full_path())),
+                if info.inner_mapping() {
+                    let outer = output.entry(name[0]).or_insert_with(|| Value::Object(Default::default()));
+                    match outer.as_object_mut() {
+                        Some(outer) => {
+                            for value in values {
+                                if let Value::Object(value) = value.0 {
+                                    for (subkey, value) in value {
+                                        let values = match value {
+                                            Value::Array(values) => values,
+                                            other => vec![other]
+                                        };
+
+                                        let inner = outer.entry(subkey)
+                                            .or_insert_with(|| Value::Array(vec![]));
+                                        match inner.as_array_mut() {
+                                            Some(obj) => { obj.extend(values); },
+                                            None => return Err(TagNameCollision(info.full_path())),
+                                        }
+                                    }
+                                } else {
+                                    return Err(TagNameCollision(info.full_path()))
+                                }
+                            }
+                            Ok(())
+                        },
+                        None => Err(TagNameCollision(info.full_path())),
+                    }
+                } else {
+                    let inner = output.entry(name[0])
+                        .or_insert_with(|| Value::Array(vec![]));
+                    match inner.as_array_mut() {
+                        Some(obj) => { obj.extend(values.into_iter().map(|tag| tag.0)); Ok(()) },
+                        None => Err(TagNameCollision(info.full_path())),
+                    }
                 }
             } else {
                 let inner = output.entry(name[0])
@@ -650,7 +691,7 @@ pub fn load_tags_from_object(data: JsonMap) -> (FlatTags, Vec<(String, String)>)
     (accepted, rejected)
 }
 
-
+#[cfg(test)]
 pub fn load_tags_from_list(data: HashMap<String, Vec<serde_json::Value>>) -> (FlatTags, Vec<(String, String)>) {
 
     let mut accepted = FlatTags::default();
@@ -686,6 +727,10 @@ fn tagging_forms_round_trip() {
     let input = json!({
         "file": {
             "behavior": ["hop", "skip", "jump"],
+            "rule": {
+                "service_abc": ["RULE.a10", "RULE.a11"],
+                "service_xyz": ["RULE.a10"]
+            }
         },
         "attribution": {
             "actor": ["Randy"]
@@ -696,12 +741,27 @@ fn tagging_forms_round_trip() {
     // convert input to flat tags
     let (accepted, rejected) = load_tags_from_object(input);
     assert!(rejected.is_empty());
-    assert_eq!(accepted.len(), 2);
+    assert_eq!(accepted.len(), 3);
     assert_eq!(*accepted.get(get_tag_information("attribution.actor").unwrap()).unwrap(), vec![TagValue(json!("RANDY"))]);
     assert_eq!(*accepted.get(get_tag_information("file.behavior").unwrap()).unwrap(), vec![TagValue(json!("hop")), TagValue(json!("skip")), TagValue(json!("jump"))]);
+    assert_eq!(*accepted.get(get_tag_information("file.rule").unwrap()).unwrap(), vec![TagValue(json!({"service_abc": ["RULE.a10", "RULE.a11"], "service_xyz": ["RULE.a10"]}))]);
 
     // convert flat tags to nested data
     let tagging = accepted.to_tagging().unwrap();
+
+    // convert nested data json
+    assert_eq!(serde_json::to_value(&tagging).unwrap(), json!({
+        "file": {
+            "behavior": ["hop", "skip", "jump"],
+            "rule": {
+                "service_abc": ["RULE.a10", "RULE.a11"],
+                "service_xyz": ["RULE.a10"]
+            }
+        },
+        "attribution": {
+            "actor": ["RANDY"]
+        }
+    }));
 
     // convert nested data to a list of tags
     let list = tagging.to_list(None).unwrap();
@@ -710,18 +770,10 @@ fn tagging_forms_round_trip() {
         TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("hop") },
         TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("skip") },
         TagEntry{ score: 0, tag_type: "file.behavior".to_owned(), value: TagValue::from("jump") },
+        TagEntry{ score: 0, tag_type: "file.rule.service_abc".to_owned(), value: TagValue::from("RULE.a10") },
+        TagEntry{ score: 0, tag_type: "file.rule.service_abc".to_owned(), value: TagValue::from("RULE.a11") },
+        TagEntry{ score: 0, tag_type: "file.rule.service_xyz".to_owned(), value: TagValue::from("RULE.a10") },
     ]);
-
-    // convert nested data json
-    assert_eq!(serde_json::to_value(&tagging).unwrap(), json!({
-        "file": {
-            "behavior": ["hop", "skip", "jump"],
-        },
-        "attribution": {
-            "actor": ["RANDY"]
-        }
-    }))
-
 }
 
 
