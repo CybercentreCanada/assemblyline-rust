@@ -748,20 +748,6 @@ pub struct Dispatcher {
     pub postprocess_worker: Arc<ActionWorker>,
 }
 
-//     def __init__(self, datastore=None, redis=None, redis_persist=None, logger=None,
-//                  config=None, counter_name='dispatcher'):
-//         super().__init__('assemblyline.dispatcher', config=config, datastore=datastore,
-//                          redis=redis, redis_persist=redis_persist, logger=logger)
-
-//         # Load the datastore collections that we are going to be using
-//         self.instance_id = uuid.uuid4().hex
-//         self.tasks: dict[str, SubmissionTask] = {}
-//         self.finalizing = threading.Event()
-//         self.finalizing_start = 0.0
-
-//         # Submissions that should have alerts generated
-//         self.alert_queue = NamedQueue(ALERT_QUEUE_NAME, self.redis_persist)
-
 
 impl Dispatcher {
     pub async fn new(core: Core, tcp: TlsAcceptor) -> Result<Arc<Self>> {
@@ -1418,8 +1404,7 @@ impl Dispatcher {
             match serde_json::from_str::<JsonMap>(&initial.0) {
                 Ok(init) => {
                     for (key, value) in init {
-                        let encoded = serde_json::to_string(&value)?;
-                        if encoded.len() <= max_temp_data_length {
+                        if estimate_size(&value) <= max_temp_data_length {
                             temporary_data.set_value(&key, value);
                         }
                     }
@@ -2411,8 +2396,7 @@ impl Dispatcher {
         let mut changed_keys = vec![];
         if let Some(existing) = task.file_temporary_data.get_mut(&sha256) {
             for (key, value) in temporary_data {
-                let encoded = serde_json::to_string(&value)?;
-                if encoded.len() <= max_temp_data_length && existing.set_value(&key, value) {
+                if estimate_size(&value) <= max_temp_data_length && existing.set_value(&key, value) {
                     changed_keys.push(key);
                 }
             }
@@ -2700,5 +2684,40 @@ impl UserCache {
             return Ok(Some(user))
         }
         return Ok(None)
+    }
+}
+
+
+/// Estimate the size an object would take in json
+/// this is for enforcing size limits and can undercount a little bit if it needs to 
+/// should never be used when the accurate size of the data is important
+pub fn estimate_size(value: &serde_json::Value) -> usize {
+    match value {
+        // keywords have a fixed length
+        serde_json::Value::Null => 4,
+        serde_json::Value::Bool(true) => 4,
+        serde_json::Value::Bool(false) => 5,
+        // if a number can fit in an i64 use log to figure out its written size, otherwise fallback to generating the string
+        serde_json::Value::Number(number) => {
+            if let Some(num) = number.as_i64() {
+                if num < 0 {
+                    2 + (-num).ilog10() as usize
+                } else {
+                    1 + num.checked_ilog10().unwrap_or_default() as usize
+                }
+            } else {
+                number.to_string().len()
+            }
+        },
+        // strings are their own length plus 2 (if we ignore escaping)
+        serde_json::Value::String(value) => value.len() + 2,
+        // array is 2 (open close brackets) + the sum of (item lengths + 1 each (commas)) - 1 for extra comma
+        serde_json::Value::Array(values) => {
+            values.iter().map(estimate_size).fold(1 + values.len(), |a, b| a + b)
+        },
+        // similar to array but add in key size same as string + 1 for the :
+        serde_json::Value::Object(map) => {
+            map.iter().map(|(k, v)| 3 + k.len() + estimate_size(v)).fold(1 + map.len(), |a, b| a + b)
+        },
     }
 }
