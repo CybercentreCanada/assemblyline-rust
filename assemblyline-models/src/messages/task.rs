@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::datastore::tagging::TagValue;
 use crate::random_word;
-use crate::types::{JsonMap, Sid, Wildcard, MD5, Sha1, Sha256, SSDeepHash};
+use crate::types::{JsonMap, SSDeepHash, ServiceName, Sha1, Sha256, Sid, Wildcard, MD5};
 use crate::{datastore::file::URIInfo, config::ServiceSafelist};
 
 
@@ -78,7 +78,7 @@ pub struct Task {
     /// File name
     pub filename: String,
     /// Service name
-    pub service_name: String,
+    pub service_name: ServiceName,
     /// Service specific parameters
     pub service_config: JsonMap,
     /// File depth relative to initital submitted file
@@ -136,7 +136,7 @@ impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
                 uri_info: None 
             },
             filename: random_word(rng),
-            service_name: random_word(rng),
+            service_name: ServiceName::from_string(random_word(rng)),
             service_config: Default::default(),
             depth: rng.random(),
             max_files: rng.random(),
@@ -173,7 +173,7 @@ impl Task {
         TaskSignature { 
             task_id: self.task_id, 
             sid: self.sid, 
-            service: self.service_name.clone(), 
+            service: self.service_name, 
             hash: self.fileinfo.sha256.clone() 
         }
     } 
@@ -223,7 +223,7 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
 pub struct TaskSignature {
     pub task_id: u64,
     pub sid: Sid,
-    pub service: String,
+    pub service: ServiceName,
     pub hash: Sha256,
 }
 
@@ -269,10 +269,10 @@ impl ServiceResponse {
         }
     }
 
-    pub fn service_name(&self) -> &str {
+    pub fn service_name(&self) -> ServiceName {
         match self {
-            ServiceResponse::Result(item) => &item.service_name,
-            ServiceResponse::Error(item) => &item.service_task.service_name,
+            ServiceResponse::Result(item) => item.service_name,
+            ServiceResponse::Error(item) => item.service_task.service_name,
         }
     }
 }
@@ -291,7 +291,7 @@ pub struct ServiceResult {
     pub dynamic_recursion_bypass: Vec<Sha256>,
     pub sid: Sid,
     pub sha256: Sha256,
-    pub service_name: String,
+    pub service_name: ServiceName,
     pub service_version: String,
     pub service_tool_version: Option<String>,
     pub expiry_ts: Option<chrono::DateTime<chrono::Utc>>,

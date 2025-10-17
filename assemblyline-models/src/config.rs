@@ -3,6 +3,8 @@ use std::{collections::HashMap, path::PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 
+use crate::types::ServiceName;
+
 
 /// Named Value
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
@@ -53,7 +55,7 @@ fn default_webhook_retries() -> Option<u32> { Some(3) }
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ResubmitOptions {
-    pub additional_services: Vec<String>,
+    pub additional_services: Vec<ServiceName>,
     pub random_below: Option<i32>,
 }
 
@@ -753,7 +755,7 @@ impl Default for Metrics {
 #[serde(default)]
 pub struct Archiver {
     /// List of minimum required service before archiving takes place
-    pub minimum_required_services: Vec<String>,
+    pub minimum_required_services: Vec<ServiceName>,
 }
 
 /// Redis Configuration

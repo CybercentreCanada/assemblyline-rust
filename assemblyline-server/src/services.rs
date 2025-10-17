@@ -13,6 +13,7 @@ use assemblyline_models::config::Services as ServiceConfig;
 use assemblyline_models::datastore::submission::SubmissionParams;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
+use assemblyline_models::types::ServiceName;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::{RwLock, Mutex};
@@ -37,8 +38,8 @@ pub struct ServiceHelper{
 }
 
 struct ServiceInfo {
-    services: HashMap<String, Arc<Service>>,
-    access_cache: HashMap<String, Vec<String>>,
+    services: HashMap<ServiceName, Arc<Service>>,
+    access_cache: HashMap<String, Vec<ServiceName>>,
 }
 
 impl ServiceHelper {
@@ -70,8 +71,8 @@ impl ServiceHelper {
         })
     }
 
-    pub fn get(&self, name: &str) -> Option<Arc<Service>> {
-        self.inner.read().services.get(name).cloned()
+    pub fn get(&self, name: ServiceName) -> Option<Arc<Service>> {
+        self.inner.read().services.get(&name).cloned()
     }
 
     /// A hash from service name to ServiceStage enum values.
@@ -79,19 +80,19 @@ impl ServiceHelper {
         &self.service_stage_hash
     }
 
-    pub fn list_all(&self) -> HashMap<String, Arc<Service>> {
+    pub fn list_all(&self) -> HashMap<ServiceName, Arc<Service>> {
         self.inner.read().services.clone()
     }
 
-    pub fn list_enabled(&self) -> HashMap<String, Arc<Service>> {
+    pub fn list_enabled(&self) -> HashMap<ServiceName, Arc<Service>> {
         let mut services = self.inner.read().services.clone();
         services.retain(|_key, service| service.enabled);
         services
     }
 
     /// get the list of services in each category
-    pub fn categories(&self) -> HashMap<String, Vec<String>> {
-        let mut output: HashMap<String, Vec<String>> = Default::default();
+    pub fn categories(&self) -> HashMap<ServiceName, Vec<ServiceName>> {
+        let mut output: HashMap<ServiceName, Vec<ServiceName>> = Default::default();
         for service in self.inner.read().services.values() {
             output.entry(service.category.clone()).or_default().push(service.name.clone());
         }
@@ -102,7 +103,7 @@ impl ServiceHelper {
     ///
     /// Args:
     ///     services (list): List of service category or service names.
-    pub fn expand_categories(&self, mut services: Vec<String>) -> Vec<String> {
+    pub fn expand_categories(&self, mut services: Vec<ServiceName>) -> Vec<ServiceName> {
         // handle null input quickly without having to get the data lock
         if services.is_empty() {
             return vec![]
@@ -113,7 +114,7 @@ impl ServiceHelper {
 
         // do the actual expansion into this new list
         let mut found_services = vec![];
-        let mut seen_categories = HashSet::<String>::new();
+        let mut seen_categories = HashSet::<ServiceName>::new();
         while let Some(name) = services.pop() {
 
             // If we found a new category mix in it's content
@@ -144,7 +145,7 @@ impl ServiceHelper {
         params: &SubmissionParams, 
         file_type: &str, 
         file_depth: u32, //int = 0,
-        runtime_excluded: Option<Vec<String>>, // Optional[list[str]] = None,
+        runtime_excluded: Option<Vec<ServiceName>>, // Optional[list[str]] = None,
         submitter_c12n: Option<String> // = Classification.UNRESTRICTED
     ) -> Result<Vec<Vec<Arc<Service>>>>
     {
@@ -152,7 +153,7 @@ impl ServiceHelper {
         let all_services = self.list_enabled();
 
         // Retrieve a list of services that the classfication group is allowed to submit to
-        let accessible: Vec<String> = match submitter_c12n {
+        let accessible: Vec<ServiceName> = match submitter_c12n {
             None => all_services.keys().cloned().collect(),
             Some(submitter_c12n) => self.get_accessible_services(&submitter_c12n)?,
         };
@@ -175,7 +176,7 @@ impl ServiceHelper {
         //   - We're running submission with Deep Scanning
         //   - We want to Ignore Filtering (perform as much unfiltered analysis as possible)
         let use_safelist = self.config.safelist.enabled && !self.config.safelist.enforce_safelist_service;
-        let safelist = "Safelist".to_string();
+        let safelist = ServiceName::from("Safelist");
         if selected.contains(&safelist) && file_depth > 0 && use_safelist && !(params.deep_scan || params.ignore_filtering) {
             // Alter schedule to remove Safelist, if scheduled to run
             selected.retain(|item| item != &safelist);
@@ -227,7 +228,7 @@ impl ServiceHelper {
         }
     }
 
-    fn get_accessible_services(&self, user_c12n: &str) -> Result<Vec<String>> {
+    fn get_accessible_services(&self, user_c12n: &str) -> Result<Vec<ServiceName>> {
         // try to load services from cache
         let mut info = self.inner.write();
         if let Some(data) = info.access_cache.get(user_c12n) {
@@ -330,7 +331,7 @@ impl RegexCache {
     }
 }
 
-pub fn get_schedule_names(schedule: &Vec<Vec<Arc<Service>>>) -> Vec<Vec<String>> {
+pub fn get_schedule_names(schedule: &Vec<Vec<Arc<Service>>>) -> Vec<Vec<ServiceName>> {
     let mut names = vec![];
     for row in schedule {
         let mut stage = vec![];
@@ -380,7 +381,7 @@ pub mod test {
     use assemblyline_models::datastore::service::Service;
     use assemblyline_models::datastore::submission::SubmissionParams;
     use assemblyline_models::messages::changes::ServiceChange;
-    use assemblyline_models::types::ClassificationString;
+    use assemblyline_models::types::{ClassificationString, ServiceName};
     use serde_json::json;
 
     pub fn dummy_service(name: &str, stage: &str, category: Option<&str>, accepts: Option<&str>, rejects: Option<&str>, extra_data: Option<bool>) -> Service {
@@ -411,7 +412,7 @@ pub mod test {
         })).unwrap()
     }
 
-    fn test_services() -> HashMap<String, Service> {
+    fn test_services() -> HashMap<ServiceName, Service> {
         return [
             ("extract", dummy_service(
                 "extract",
@@ -461,10 +462,10 @@ pub mod test {
                 None,
                 None
             ))
-        ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
+        ].into_iter().map(|(key, value)|(key.into(), value)).collect()
     }
 
-    pub async fn setup_services(services: HashMap<String, Service>) -> (Core, TestGuard) {
+    pub async fn setup_services(services: HashMap<ServiceName, Service>) -> (Core, TestGuard) {
         println!("start setup");
         let (core, redis) = Core::test_custom_setup(|config| {
             config.services.stages = vec!["pre".to_string(), "core".to_string(), "post".to_string()];
@@ -496,7 +497,7 @@ pub mod test {
                 
         'outer: for step in 0..1000 {
             tokio::time::sleep(Duration::from_millis(step)).await;
-            for name in services.keys() {
+            for &name in services.keys() {
                 let _ = match core.services.get(name) {
                     Some(value) => value,
                     None => continue 'outer
@@ -515,8 +516,8 @@ pub mod test {
 
     fn make_params(core: &Core, accept: &[&str], reject: &[&str]) -> SubmissionParams {
         let mut params = SubmissionParams::new(ClassificationString::new(core.classification_parser.unrestricted().to_owned(), &core.classification_parser).unwrap());
-        params.services.selected = accept.iter().map(|item|item.to_string()).collect();
-        params.services.excluded = reject.iter().map(|item|item.to_string()).collect();
+        params.services.selected = accept.iter().map(|item|(*item).into()).collect();
+        params.services.excluded = reject.iter().map(|item|(*item).into()).collect();
         params
     }
 
@@ -528,9 +529,9 @@ pub mod test {
             &["static", "av"], &["dynamic"]), "document/word", 0, None, None).unwrap();
         
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
-            vec!["AnAV"],
-            vec!["polish"]
+            vec!["Safelist".into()],
+            vec!["AnAV".into()],
+            vec!["polish".into()]
         ])
     }
 
@@ -541,9 +542,9 @@ pub mod test {
             &["static", "av", "dynamic"], &[]), "document/word", 0, None, None).unwrap();
         
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
-            vec!["AnAV", "cuckoo"],
-            vec!["polish"]
+            vec!["Safelist".into()],
+            vec!["AnAV".into(), "cuckoo".into()],
+            vec!["polish".into()]
         ])
     }
 
@@ -554,9 +555,9 @@ pub mod test {
             &[], &[]), "document/word", 0, None, None).unwrap();
         
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
-            vec!["AnAV", "cuckoo"],
-            vec!["polish"]
+            vec!["Safelist".into()],
+            vec!["AnAV".into(), "cuckoo".into()],
+            vec!["polish".into()]
         ])
     }
 
@@ -567,9 +568,9 @@ pub mod test {
             &[], &[]), "archive/zip", 0, None, None).unwrap();
         
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist", "extract"],
-            vec!["AnAV"],
-            vec!["not_documents", "polish"]
+            vec!["Safelist".into(), "extract".into()],
+            vec!["AnAV".into()],
+            vec!["not_documents".into(), "polish".into()]
         ])
     }
 
@@ -580,7 +581,7 @@ pub mod test {
         let mut params = make_params(&core, &["Safelist"], &[]);
         let schedule = core.services.build_schedule(&params, "archive/word", 0, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
+            vec!["Safelist".into()],
             vec![],
             vec![]
         ]);
@@ -591,7 +592,7 @@ pub mod test {
         params.ignore_filtering = false;
         let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            Vec::<String>::new(),
+            Vec::<ServiceName>::new(),
             vec![],
             vec![]
         ]);
@@ -601,7 +602,7 @@ pub mod test {
         params.ignore_filtering = false;
         let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
+            vec!["Safelist".into()],
             vec![],
             vec![]
         ]);
@@ -611,7 +612,7 @@ pub mod test {
         params.ignore_filtering = true;
         let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist"],
+            vec!["Safelist".into()],
             vec![],
             vec![]
         ]);

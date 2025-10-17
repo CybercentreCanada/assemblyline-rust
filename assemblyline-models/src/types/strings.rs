@@ -16,6 +16,54 @@ use crate::types::net_static::TLDS_SPECIAL_BY_DOMAIN;
 use crate::{ElasticMeta, ModelError};
 
 
+/// A perminantly interned string that holds the name or catagory of a service.
+/// Can be dereferenced to the underlying string.
+/// Here intern gives us fast comparison and copy with the cost of unreclaimable memory.
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ServiceName(internment::Intern<String>);
+
+impl std::fmt::Display for ServiceName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::ops::Deref for ServiceName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+
+impl<'de> Deserialize<'de> for ServiceName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+        let value = <&'de str>::deserialize(deserializer)?;
+        Ok(Self(internment::Intern::from_ref(value)))
+    }
+}
+
+impl Described<ElasticMeta> for ServiceName {
+    fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
+        String::metadata()
+    }
+}
+
+impl ServiceName {
+    pub fn from_string(value: String) -> Self {
+        Self(internment::Intern::new(value))
+    }
+}
+
+impl From<&str> for ServiceName {
+    fn from(value: &str) -> Self {
+        Self(internment::Intern::from_ref(value))
+    }
+}
+
 /// A string that maps to a keyword field in elasticsearch.
 /// 
 /// This is the default behaviour for a String in a mapped struct, the only reason

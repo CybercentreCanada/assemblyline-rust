@@ -7,7 +7,7 @@ use strum::IntoEnumIterator;
 
 use crate::messages::task::{generate_conf_key, Task};
 use crate::{random_word, random_words, ElasticMeta, Readable};
-use crate::types::{Sha256, Text};
+use crate::types::{ServiceName, Sha256, Text};
 
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
@@ -83,7 +83,7 @@ pub struct Response {
     pub service_debug_info: Option<String>,
     /// Service Name
     #[metadata(copyto="__text__")]
-    pub service_name: String,
+    pub service_name: ServiceName,
     /// Service Tool Version
     #[metadata(copyto="__text__")]
     pub service_tool_version: Option<String>,
@@ -100,7 +100,7 @@ impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
         Response {
             message: Text(random_words(rng, word_count).join(" ")),
             service_debug_info: None,
-            service_name: random_word(rng),
+            service_name: ServiceName::from_string(random_word(rng)),
             service_tool_version: None,
             service_version: "0.0".to_string(),
             status: rng.random(),

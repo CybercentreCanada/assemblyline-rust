@@ -12,7 +12,7 @@ pub mod ids;
 pub mod net_static;
 
 pub use ssdeep::{SSDeepHash};
-pub use strings::{Wildcard, UpperString, Text, Domain, Email, Uri};
+pub use strings::{Wildcard, ServiceName, UpperString, Text, Domain, Email, Uri};
 pub use md5::MD5;
 pub use sha256::Sha256;
 pub use sha1::Sha1;

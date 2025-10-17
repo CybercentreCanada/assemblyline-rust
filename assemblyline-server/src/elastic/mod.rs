@@ -27,7 +27,7 @@ mod test_helper;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, ServiceName, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, Result as ResultModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
@@ -116,7 +116,7 @@ pub fn create_empty_result_from_key(key: &str, dtl: i64, cl_engine: &Classificat
         expiry_ts: Some(Utc::now() + TimeDelta::days(dtl)),
         classification: ExpandingClassification::new(cl_engine.unrestricted().to_owned(), cl_engine)?,
         response: assemblyline_models::datastore::result::ResponseBody {
-            service_name: svc_name.to_owned(),
+            service_name: ServiceName::from(svc_name),
             service_version: svc_version.to_owned(),
             milestones: Default::default(),
             service_tool_version: Default::default(),
