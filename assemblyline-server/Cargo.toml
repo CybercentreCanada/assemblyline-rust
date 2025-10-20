@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-server"
-version = "0.2.23"
+version = "0.2.24"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -13,6 +13,11 @@ log = "0.4"
 flexi_logger = { version = "0.31", features=["syslog_writer"] }
 gethostname = "1.0"
 local-ip-address = "0.6"
+
+# Metric collection
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tracing-elastic-apm = "3.4"
 
 # Utilities
 chrono = "0.4"

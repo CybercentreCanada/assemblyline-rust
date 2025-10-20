@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
+use tracing::instrument;
 
 use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
@@ -223,6 +224,12 @@ struct SubmissionTask {
     // any children (recursively) of that file
     _forbidden_services: HashMap<Sha256, HashSet<String>>,
     _parent_map: HashMap<Sha256, HashSet<Sha256>>,
+}
+
+impl std::fmt::Debug for SubmissionTask {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubmissionTask").field("sid", &self.submission.sid).field("active_files", &self.active_files.len()).field("dropped_files", &self.dropped_files.len()).finish()
+    }
 }
 
 
@@ -748,6 +755,11 @@ pub struct Dispatcher {
     pub postprocess_worker: Arc<ActionWorker>,
 }
 
+impl std::fmt::Debug for Dispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dispatcher").field("instance_id", &self.instance_id).field("instance_address", &self.instance_address).field("finalizing", &self.finalizing.read()).finish()
+    }
+}
 
 impl Dispatcher {
     pub async fn new(core: Core, tcp: TlsAcceptor) -> Result<Arc<Self>> {
@@ -916,6 +928,7 @@ impl Dispatcher {
                 self.core.sleep(std::time::Duration::from_millis(100)).await;
             }
 
+
             if self.finalizing.read() {
                 let finalizing_time = self.get_finalizing_start();
                 if self.active_submissions.length().await? > 0 && finalizing_time < self.get_finalizing_window() {
@@ -924,39 +937,45 @@ impl Dispatcher {
                     self.core.running.set(false);
                 }
             } else {
-                // Check if we are at the submission limit globally
-                if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
-                    self.core.sleep(ONE_SECOND).await;
-                    continue
-                }
-
-                // Check if we are maxing out our share of the submission limit
-                let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
-                let max_tasks = self.core.config.core.dispatcher.max_inflight / running;
-                if self.active_submissions.length().await? >= max_tasks {
-                    self.core.sleep(ONE_SECOND).await;
-                    continue
-                }
-
-                // Grab a submission message
-                let message = match self.submission_queue.pop_timeout(ONE_SECOND).await? {
-                    Some(message) => message,
-                    None => continue
-                };
-
-                // Fetch the access level of the submitter and attach it to the task.
-                // This is for performance rather than security reasons.
-                let mut access_control = None;
-                if let Some(submitter) = self.user_cache.get(&message.submission.params.submitter).await? {
-                    access_control = Some(submitter.classification.classification.clone())
-                }
-
-                // This is probably a complete task
-                let task = SubmissionTask::new(message, access_control, &self.core.services);
-                self.dispatch_submission(task).await.context("dispatch_submission")?;
+                self.pull_one_submission().await?;
             }
         }
         Ok(())
+    }
+
+    #[instrument]
+    async fn pull_one_submission(self: &Arc<Self>) -> Result<()> {
+        // Check if we are at the submission limit globally
+        if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
+            self.core.sleep(ONE_SECOND).await;
+            return Ok(())
+        }
+
+        // Check if we are maxing out our share of the submission limit
+        let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
+        let max_tasks = self.core.config.core.dispatcher.max_inflight / running;
+        if self.active_submissions.length().await? >= max_tasks {
+            self.core.sleep(ONE_SECOND).await;
+            return Ok(())
+        }
+
+        // Grab a submission message
+        let message = match self.submission_queue.pop_timeout(ONE_SECOND).await? {
+            Some(message) => message,
+            None => return Ok(())
+        };
+
+        // Fetch the access level of the submitter and attach it to the task.
+        // This is for performance rather than security reasons.
+        let mut access_control = None;
+        if let Some(submitter) = self.user_cache.get(&message.submission.params.submitter).await? {
+            access_control = Some(submitter.classification.classification.clone())
+        }
+
+        // This is probably a complete task
+        let task = SubmissionTask::new(message, access_control, &self.core.services);
+        self.dispatch_submission(task).await.context("dispatch_submission")?;
+        return Ok(())
     }
 
     async fn pull_service_starts(self: &Arc<Self>) -> Result<()> {
@@ -1367,6 +1386,7 @@ impl Dispatcher {
     // Preconditions:
     //     - File exists in the filestore and file collection in the datastore
     //     - Submission is stored in the datastore
+    #[instrument]
     async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
         // let submission = &task.submission;
         let sid = task.submission.sid.to_string();
@@ -1656,6 +1676,7 @@ impl Dispatcher {
     // :param sha256: hash of the file to check.
     // :param timed_out_host: Name of the host that timed out after maximum service attempts.
     // :return: true if submission is finished.
+    #[instrument]
     async fn dispatch_file(&self, task: &mut SubmissionTask, sha256: &Sha256) -> Result<()> {
         // let submission = &task.submission;
         // let params = &submission.params;
@@ -1936,6 +1957,7 @@ impl Dispatcher {
         Ok(())
     }
 
+    #[instrument]
     async fn get_fileinfo(&self, task: &mut SubmissionTask, sha256: &Sha256) -> Result<Option<Arc<FileInfo>>> {
         // First try to get the info from local cache
         if let Some(file_info) = task.file_info.get(sha256) {
@@ -1992,6 +2014,7 @@ impl Dispatcher {
     //
     // :param task: Task object for the submission in question.
     // :return: true if submission has been finished.
+    #[instrument]
     async fn check_submission(&self, task: &mut SubmissionTask) -> Result<bool> {
         let sid = task.submission.sid;
 
@@ -2151,6 +2174,7 @@ impl Dispatcher {
     /// All of the services for all of the files in this submission have finished or failed.
     ///
     /// Update the records in the datastore, and flush the working data from redis.
+    #[instrument]
     async fn finalize_submission(&self, task: &mut SubmissionTask, max_score: i32, file_list: HashSet<Sha256>) -> Result<()> {
         let submission = &mut task.submission;
         let sid = submission.sid;
@@ -2180,6 +2204,7 @@ impl Dispatcher {
     }
 
     /// Clean up code that is the same for canceled and finished submissions
+    #[instrument]
     async fn _cleanup_submission(&self, task: &SubmissionTask) -> Result<()> {
         let submission = &task.submission;
         let sid = submission.sid;
@@ -2251,6 +2276,7 @@ impl Dispatcher {
         Ok(())
     }
 
+    #[instrument]
     async fn retry_error(&self, task: &mut SubmissionTask, sha256: &Sha256, service_name: &str) -> Result<()> {
         let sid = task.submission.sid;
         warn!("[{sid}/{sha256}] {service_name} marking task failed: TASK PREEMPTED ");
@@ -2308,7 +2334,7 @@ impl Dispatcher {
         Ok(())
     }
 
-
+    #[instrument]
     async fn process_service_result(&self, task: &mut SubmissionTask, data: ServiceResult) -> Result<()> {
         // let submission: &Submission = &task.submission;
         let sid = task.submission.sid;
