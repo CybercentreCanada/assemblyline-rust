@@ -708,23 +708,22 @@ fn default_redis_persistant() -> RedisServer {
 // }
 
 
-// @odm.model(index=False, store=False)
-// class APMServer(odm.Model):
-//     server_url: str = odm.Optional(odm.Keyword(), description="URL to API server")
-//     token: str = odm.Optional(odm.Keyword(), description="Authentication token for server")
-
-
-// DEFAULT_APM_SERVER = {
-//     'server_url': None,
-//     'token': None
-// }
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct APMServer {
+    /// URL to API server
+    pub server_url: Option<String>,
+    /// Authentication token for server
+    pub token: Option<String>,
+}
 
 
 /// Metrics Configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Metrics {
-//     apm_server: APMServer = odm.Compound(APMServer, default=DEFAULT_APM_SERVER, description="APM server configuration")
+    /// APM server configuration
+    pub apm_server: APMServer,
 //     elasticsearch: ESMetrics = odm.Compound(ESMetrics, default=DEFAULT_ES_METRICS, description="Where to export metrics?")
     /// How often should we be exporting metrics in seconds?
     pub export_interval: u32,
@@ -735,16 +734,11 @@ pub struct Metrics {
 impl Default for Metrics {
     fn default() -> Self {
         Self { 
+            apm_server: Default::default(),
             export_interval: 5, 
             redis: default_redis_nonpersistant()
         }
     }
-// DEFAULT_METRICS = {
-//     'apm_server': DEFAULT_APM_SERVER,
-//     'elasticsearch': DEFAULT_ES_METRICS,
-//     'export_interval': 5,
-//     'redis': DEFAULT_REDIS_NP,
-// }
 }
 
 
