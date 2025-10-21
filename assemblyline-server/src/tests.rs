@@ -339,6 +339,11 @@ async fn setup() -> TestContext {
 }
 
 async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
+    tokio::time::timeout(std::time::Duration::from_secs(30), _setup_inner(ingest_op)).await
+        .expect("initalization timeout. testing parallelism likely too high for environment.")
+}
+
+async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
     std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
 
     // Configure the services
