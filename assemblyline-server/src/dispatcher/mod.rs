@@ -1515,8 +1515,10 @@ impl Dispatcher {
             let mut message = task.pop_internal_task();
 
             // check for submission timeout
-            if submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
-                message = Some(DispatchAction::Check(sid));
+            if message.is_none() {
+                if submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
+                    message = Some(DispatchAction::Check(sid));
+                }
             }
 
             // check for service timeouts, make sure we have processed messages in the queue before checking timeouts

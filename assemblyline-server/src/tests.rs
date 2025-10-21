@@ -656,32 +656,7 @@ async fn test_ingest_retry() {
         // let failures = failures.clone();
         |mut ingester| {
             ingester.set_retry_delay(chrono::Duration::seconds(1));
-
             *ingester.test_hook_fail_submit.lock() = 1;
-
-            // let redis = ingester.submit_manager.dispatch_submission_queue.host();
-            // let queue = redis.queue("replacement-dispatch-queue-".to_string() + &rand::rng().random::<u64>().to_string(), None);
-            // let mut original_queue = queue.clone();
-            // std::mem::swap(&mut original_queue, &mut ingester.submit_manager.dispatch_submission_queue);
-
-            // tokio::spawn(async move {
-            //     loop {
-            //         let item = queue.pop_timeout(Duration::from_secs(60)).await.unwrap();
-            //         if let Some(item) = item {
-            //             println!("dispatcher proxy saw item {} + 1", attempts.lock().len());
-            //             attempts.lock().push(item.clone());
-            //             if attempts.lock().len() > 1 {
-            //                 original_queue.push(&item).await.unwrap();
-            //             } else {
-            //                 println!("dispatcher proxy dropped message");
-            //                 failures.lock().push(item);
-            //             }
-            //         } else {
-            //             println!("dispatcher proxy empty message?");
-            //         }
-            //     }
-            // });
-
             ingester
         }
     }).await;
