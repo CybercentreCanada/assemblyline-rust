@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::dispatcher::ServiceStartMessage;
 use crate::http::TlsAcceptor;
 use crate::logging::LoggerMiddleware;
+use tracing::instrument;
 
 use super::Dispatcher;
 
@@ -15,6 +16,7 @@ use serde::{Serialize, Deserialize};
 
 
 /// API endpoint for starting a task
+#[instrument]
 #[handler]
 async fn start_task(
     Json(request): Json<ServiceStartMessage>,
@@ -33,6 +35,7 @@ async fn start_task(
 }
 
 /// API endpoint for finishing a task (with an error)
+#[instrument]
 #[handler]
 async fn handle_task_error (
     Json(request): Json<ServiceError>,
@@ -42,6 +45,7 @@ async fn handle_task_error (
 }
 
 /// API endpoint for finishing a task
+#[instrument]
 #[handler]
 async fn handle_task_result (
     Json(request): Json<ServiceResult>,
@@ -64,6 +68,7 @@ pub struct BasicStatus {
 }
 
 /// API endpoint for null status that is always available
+#[instrument]
 #[handler]
 fn get_status(Data(dispatcher): Data<&Arc<Dispatcher>>) -> Json<BasicStatus> {
     Json(BasicStatus{

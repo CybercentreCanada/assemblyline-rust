@@ -144,7 +144,7 @@ impl DispatchAction {
 }
 
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ServiceStartMessage {
     sid: Sid,
     sha: Sha256,
@@ -153,6 +153,7 @@ struct ServiceStartMessage {
     dispatcher_id: String,
     task_id: Option<u64>,
 }
+
 
 #[derive(Serialize, Deserialize, Clone)]
 struct AncestoryEntry {

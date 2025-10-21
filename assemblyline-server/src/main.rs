@@ -114,6 +114,11 @@ async fn main() -> ExitCode {
     // Load configuration
     let (config, config_path) = load_configuration(args.config).await.expect("Could not load configuration");
 
+    // configure logging, the object returned here owns the log processing internals
+    // and needs to be held until the program ends
+    let _log_manager = configure_logging(&config).expect("Could not configure logging");
+    info!("Configuration loaded from: {}", config_path.to_string_lossy());
+
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {
         let config = tracing_elastic_apm::config::Config::new(url.to_string())
@@ -122,13 +127,10 @@ async fn main() -> ExitCode {
         let layer = tracing_elastic_apm::new_layer(args.command.label().to_string(), config).expect("Could not initialize APM");
 
         tracing_subscriber::registry().with(layer).init();
+        info!("APM exporter configured");
+    } else {
+        info!("APM collection disabled");
     }
-
-
-    // configure logging, the object returned here owns the log processing internals
-    // and needs to be held until the program ends
-    let _log_manager = configure_logging(&config).expect("Could not configure logging");
-    info!("Configuration loaded from: {config_path:?}");
 
     // Connect to all the supporting components
     let core = match Core::setup(config, "", args.secure_connections).await {
