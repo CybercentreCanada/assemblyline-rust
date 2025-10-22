@@ -84,7 +84,7 @@ async fn get_task(
 
         let result = tasking.get_task(
             client_id, 
-            service_name, 
+            *service_name, 
             service_version, 
             service_tool_version.as_deref(), 
             Some(status_expiry), 
@@ -133,7 +133,7 @@ async fn task_finished(
     tasking: Data<&Arc<TaskingClient>>,
     Json(body): Json<FinishedBody>,
 ) -> Result<Response> {
-    let service_name = &client_info.service_name;
+    let service_name = client_info.service_name;
     match tasking.task_finished(body, &client_info.client_id, service_name).await {
         Ok(response) => Ok(make_api_response(response)),
         Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}")))

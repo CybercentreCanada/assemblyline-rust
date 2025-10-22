@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use assemblyline_models::types::ServiceName;
 use itertools::Itertools;
 use log::{debug, warn};
 use poem::http::HeaderName;
@@ -108,7 +109,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
 #[derive(Debug, Clone)]
 pub struct ClientInfo {
     pub client_id: String,
-    pub service_name: String,
+    pub service_name: ServiceName,
     pub service_version: String,
     pub service_tool_version: Option<String>,
 }
@@ -122,7 +123,7 @@ impl ClientInfo {
 
         Ok(ClientInfo {
             client_id: read_required_header(req, "CONTAINER-ID")?.to_owned(),
-            service_name: read_required_header(req, "SERVICE-NAME")?.to_owned(),
+            service_name: read_required_header(req, "SERVICE-NAME")?.to_owned().as_str().into(),
             service_version: read_required_header(req, "SERVICE-VERSION")?.replace("stable", ""),
             service_tool_version,
         })

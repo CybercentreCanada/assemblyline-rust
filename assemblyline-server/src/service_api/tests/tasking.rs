@@ -161,7 +161,7 @@ async fn setup_service(core: &Core) -> Service {
     let start = std::time::Instant::now();
     loop {
         if start.elapsed() > TIMEOUT { panic!(); }
-        if core.services.get(&name).is_some() { break }
+        if core.services.get(name).is_some() { break }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     service

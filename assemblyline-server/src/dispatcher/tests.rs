@@ -242,7 +242,7 @@ async fn test_dispatch_extracted() {
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
@@ -260,7 +260,7 @@ async fn test_dispatch_extracted() {
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job has reached 
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
@@ -269,7 +269,7 @@ async fn test_dispatch_extracted() {
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // 
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
     let mut new_result: result::Result = rand::rng().random();
@@ -278,7 +278,7 @@ async fn test_dispatch_extracted() {
     client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job doesn't reach sandbox
-    assert!(client.request_work("0", "sandbox", "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
+    assert!(client.request_work("0", "sandbox".into(), "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
 }
 
 // MARK: extracted bypass drp
@@ -334,7 +334,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
     // Finish one service extracting a file
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
@@ -353,7 +353,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap(); 
 
     // Then 'sandbox' service will analyze the same file, give result
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
@@ -362,7 +362,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // "extract" service should have a task for the extracted file, give results to move onto next stage
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
     let mut new_result: result::Result = rand::rng().random();
@@ -372,7 +372,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
 
     // "sandbox" should have a task for the extracted file
     // disp.dispatch_file(disp.tasks.get(sid), second_file_hash)
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
 }
@@ -422,15 +422,15 @@ async fn test_timeout() {
     let task = SubmissionDispatchMessage::simple(sub.clone(), Some("some-completion-queue".to_string()));
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services)).await.unwrap();
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 

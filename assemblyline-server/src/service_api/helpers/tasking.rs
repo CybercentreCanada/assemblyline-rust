@@ -988,7 +988,7 @@ impl TaskingClient {
         task: Task, 
         mut error: assemblyline_models::datastore::error::Error,
         client_id: &str, 
-        service_name: &str,
+        service_name: ServiceName,
     ) -> Result<()> {
         info!("[{}] {client_id} - {service_name} failed to complete task in {exec_time}ms", task.sid);
 

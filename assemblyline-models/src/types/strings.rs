@@ -40,9 +40,25 @@ impl std::ops::Deref for ServiceName {
 impl<'de> Deserialize<'de> for ServiceName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> {
-        let value = <&'de str>::deserialize(deserializer)?;
-        Ok(Self(internment::Intern::from_ref(value)))
+        D: serde::Deserializer<'de> 
+    {
+        struct Visitor {}
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ServiceName;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "expected a string holding a service name or catagory")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ServiceName(internment::Intern::from_ref(s)))
+            }
+        }
+        deserializer.deserialize_str(Visitor{})
     }
 }
 

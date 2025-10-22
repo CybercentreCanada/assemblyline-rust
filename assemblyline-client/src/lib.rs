@@ -165,7 +165,7 @@ mod tests {
         let _result = client.ingest.single()
             .metadata_item("testbatch".to_owned(), batch.clone())
             .notification_queue(batch.clone())
-            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".to_owned()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))})
+            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".into()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))})
             .fname("test-file".to_owned())
             .content(random_body()).await.unwrap();
 
