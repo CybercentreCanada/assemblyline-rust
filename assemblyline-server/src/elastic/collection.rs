@@ -1382,14 +1382,13 @@ pub struct ScrollCursor<'a, T: CollectionType, RT> {
     finished: bool,
 }
 
-impl<T: CollectionType, RT> std::fmt::Debug for ScrollCursor<'_, T, RT> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScrollCursor").field("collection", &self.collection).field("query", &self.query).finish()
-    }
-}
+// impl<T: CollectionType, RT> std::fmt::Debug for ScrollCursor<'_, T, RT> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("ScrollCursor").field("collection", &self.collection).field("query", &self.query).finish()
+//     }
+// }
 
 impl<T: CollectionType, RT: Debug + Readable> ScrollCursor<'_, T, RT> {
-    #[instrument]
     pub async fn next(&mut self) -> Result<Option<RT>> {
         if self.finished {
             return Ok(None)

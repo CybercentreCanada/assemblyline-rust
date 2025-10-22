@@ -758,7 +758,7 @@ pub struct Dispatcher {
 
 impl std::fmt::Debug for Dispatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Dispatcher").field("instance_id", &self.instance_id).field("instance_address", &self.instance_address).field("finalizing", &self.finalizing.read()).finish()
+        f.debug_struct("Dispatcher").field("instance_id", &self.instance_id).field("instance_address", &self.instance_address).finish()
     }
 }
 
@@ -1060,7 +1060,7 @@ impl Dispatcher {
                 self.dispatchers_directory_finalize.pop(&id).await?;
             }
         }
-
+        
         // Keep a table of the last recorded status for other dispatchers
         let mut last_seen: HashMap<String, i64> = Default::default();
 
@@ -1515,10 +1515,8 @@ impl Dispatcher {
             let mut message = task.pop_internal_task();
 
             // check for submission timeout
-            if message.is_none() {
-                if submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
-                    message = Some(DispatchAction::Check(sid));
-                }
+            if message.is_none() && submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
+                message = Some(DispatchAction::Check(sid));
             }
 
             // check for service timeouts, make sure we have processed messages in the queue before checking timeouts
@@ -2337,7 +2335,7 @@ impl Dispatcher {
         Ok(())
     }
 
-    #[instrument]
+    #[instrument(skip(data))]
     async fn process_service_result(&self, task: &mut SubmissionTask, data: ServiceResult) -> Result<()> {
         // let submission: &Submission = &task.submission;
         let sid = task.submission.sid;

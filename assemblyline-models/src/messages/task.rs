@@ -302,34 +302,10 @@ pub struct ServiceResult {
     pub extra_errors: Vec<String>,
 }
 
-impl std::fmt::Debug for ServiceResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServiceResult")
-            .field("sid", &self.sid)
-            .field("sha256", &self.sha256)
-            .field("service_name", &self.service_name)
-            .field("service_version", &self.service_version)
-            .field("service_tool_version", &self.service_tool_version)
-            .finish()
-    }
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct ServiceError {
     pub sid: Sid,
     pub service_task: Task,
     pub error: crate::datastore::Error,
     pub error_key: String,
-}
-
-impl std::fmt::Debug for ServiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServiceError")
-            .field("sid", &self.sid)
-            .field("sha256", &self.service_task.fileinfo.sha256)
-            .field("service_name", &self.error.response.service_name)
-            .field("service_version", &self.error.response.service_version)
-            .field("error_key", &self.error_key)
-            .finish()
-    }
 }

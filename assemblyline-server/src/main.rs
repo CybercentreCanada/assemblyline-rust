@@ -74,6 +74,10 @@ struct Args {
     #[arg(short, long)]
     secure_connections: bool,
 
+    /// Enable APM exporting
+    #[arg(short, long)]
+    enable_apm: bool,
+
     #[command(subcommand)]
     pub command: Commands
 }
@@ -121,15 +125,19 @@ async fn main() -> ExitCode {
 
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {
-        let config = tracing_elastic_apm::config::Config::new(url.to_string())
-            .allow_invalid_certificates(true);
+        if args.enable_apm {
+            let config = tracing_elastic_apm::config::Config::new(url.to_string())
+                .allow_invalid_certificates(true);
 
-        let layer = tracing_elastic_apm::new_layer(args.command.label().to_string(), config).expect("Could not initialize APM");
+            let layer = tracing_elastic_apm::new_layer(args.command.label().to_string(), config).expect("Could not initialize APM");
 
-        tracing_subscriber::registry().with(layer).init();
-        info!("APM exporter configured");
+            tracing_subscriber::registry().with(layer).init();
+            info!("APM exporter configured and enabled");
+        } else {
+            info!("APM exporter configured but disabled");
+        }
     } else {
-        info!("APM collection disabled");
+        info!("APM collection not configured");
     }
 
     // Connect to all the supporting components
