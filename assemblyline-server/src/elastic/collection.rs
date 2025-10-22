@@ -15,6 +15,7 @@ use serde::Serialize;
 use serde_json::json;
 use struct_metadata::Described;
 use thiserror::Error;
+use tracing::instrument;
 
 use crate::common::odm::flat_fields;
 use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
@@ -44,6 +45,12 @@ pub struct Collection<T: CollectionType> {
     _data: PhantomData<T>,
 }
 
+impl<T: CollectionType> std::fmt::Debug for Collection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Collection").field("name", &self.name).finish()
+    }
+}
+
 impl<T: CollectionType> Collection<T> {
 
     pub async fn new(es: Arc<ElasticHelper>, name: String, archive_name: Option<String>, prefix: String, validate: bool) -> Result<Self> {
@@ -62,6 +69,7 @@ impl<T: CollectionType> Collection<T> {
 
     /// This function should test if the collection that you are trying to access does indeed exist
     /// and should create it if it does not.
+    #[instrument]
     pub async fn ensure_collection(&self) -> Result<()> {
         for alias in self.get_index_list(None)? {
             let index = format!("{alias}_hot");
@@ -117,6 +125,7 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// Run a section of code with a write block in place
+    #[instrument(skip(callback))]
     async fn with_write_block(&self, index: &str, callback: impl AsyncFnOnce() -> Result<()>) -> Result<()> {
         // self.with_retries(self.datastore.client.indices.put_settings, index=alias, settings=write_block_settings)
         let settings_request = Request::put_index_settings(&self.database.host, index)?;
@@ -130,6 +139,7 @@ impl<T: CollectionType> Collection<T> {
         return result;
     }
 
+    #[instrument]
     async fn check_fields(&self) -> Result<()> {
         if !self.validate {
             return Ok(())
@@ -183,6 +193,7 @@ impl<T: CollectionType> Collection<T> {
 
     ///     This function should return all the fields in the index with their types
     // include_description=False
+    #[instrument]
     pub async fn fields(&self) -> Result<HashMap<String, FieldInformation>> {
 
         fn flatten_fields(props: BTreeMap<String, FieldMapping>) -> BTreeMap<String, FieldMapping> {
@@ -245,6 +256,7 @@ impl<T: CollectionType> Collection<T> {
         return Ok(collection_data)
     }
 
+    #[instrument]
     async fn _add_fields(&self, missing_fields: HashMap<&String, &struct_metadata::Descriptor<ElasticMeta>>) -> Result<()> {
         let mut no_fix = vec![];
         let mut properties = BTreeMap::new();
@@ -290,6 +302,7 @@ impl<T: CollectionType> Collection<T> {
     ///
     /// :param index_type: Type of indices to target
     /// :return: Should return True of the commit was successful on all hosts
+    #[instrument]
     pub async fn reindex(&self, index_type: Option<Index>) -> Result<()> {
         for name in self.get_index_list(index_type)? {
             let index = format!("{name}_hot");
@@ -367,6 +380,7 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// Make an http request with no body
+    #[instrument]
     async fn make_request(&self, request: &Request) -> Result<reqwest::Response> {
         let mut attempt = 0;
         loop {
@@ -382,6 +396,7 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// Make an http request with a json body
+    #[instrument(skip(body))]
     async fn make_request_json<R: Serialize>(&self, request: &Request, body: &R) -> Result<reqwest::Response> {
         let mut attempt = 0;
         loop {
@@ -397,6 +412,7 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// Make an http request with a body
+    #[instrument(skip(body))]
     async fn make_request_data(&self, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
         let mut attempt = 0;
         loop {
@@ -483,6 +499,7 @@ impl<T: CollectionType> Collection<T> {
     /// :param index_type: Type of indices to target
     /// :param key: key of the document to get from the datastore
     /// :return: true/false depending if the document exists or not
+    #[instrument]
     pub async fn exists(&self, key: &str, index_type: Option<Index>) -> Result<bool> {
         let index_list = self.get_index_list(index_type)?;
         debug!("Checking for existance: {key} in {:?}", index_list);
@@ -519,6 +536,7 @@ impl<T: CollectionType> Collection<T> {
     /// :param as_obj: Return objects or not
     /// :param key_list: list of keys of documents to get
     /// :return: list of instances of the model class
+    #[instrument]
     pub async fn multiget<RT: Readable>(&self, ids: &[&str], error_on_missing: Option<bool>, index_type: Option<Index>) -> Result<HashMap<String, RT>> {
         if ids.is_empty() { return Ok(Default::default()) }
 
@@ -585,15 +603,18 @@ impl<T: CollectionType> Collection<T> {
     }
 
     /// fetch an object from elastic, retrying on missing
+    #[instrument]
     pub async fn get(&self, key: &str, index_type: Option<Index>) -> Result<Option<T>> {
         Ok(self._get_version(key, index_type).await?.map(|(doc, _)| doc))
     }
 
+    #[instrument]
     pub async fn get_json(&self, key: &str, index_type: Option<Index>) -> Result<Option<JsonMap>> {
         Ok(self._get_version(key, index_type).await?.map(|(doc, _)| doc))
     }
 
     /// fetch an object from elastic, retrying on missing, returning document version info
+    #[instrument]
     pub async fn get_version(&self, key: &str, index_type: Option<Index>) -> Result<Option<(T, Version)>> {
         self._get_version(key, index_type).await
     }
@@ -625,6 +646,7 @@ impl<T: CollectionType> Collection<T> {
         self._get_if_exists(key, index_type).await
     }
     
+    #[instrument]
     async fn _get_if_exists<RT: Readable>(&self, key: &str, index_type: Option<Index>) -> Result<Option<(RT, Version)>> {
         let index_list = self.get_index_list(index_type)?;
 
@@ -654,6 +676,7 @@ impl<T: CollectionType> Collection<T> {
         Ok(None)
     }
 
+    #[instrument(skip(value))]
     pub async fn save(&self, key: &str, value: &T, version: Option<Version>, index_type: Option<Index>) -> Result<()> {
         if key.contains(' ') {
             return Err(ElasticError::json("You are not allowed to use spaces in datastore keys."))
@@ -669,6 +692,7 @@ impl<T: CollectionType> Collection<T> {
         self.save_json(key, data, version, index_type).await
     }
 
+    #[instrument(skip(data))]
     pub async fn save_json(&self, key: &str, data: &mut JsonMap, version: Option<Version>, index_type: Option<Index>) -> Result<()> {
         let index_type = index_type.unwrap_or(Index::Hot);
         if key.contains(' ') {
@@ -791,7 +815,7 @@ impl<T: CollectionType> Collection<T> {
             .build().await
     }
 
-
+    #[instrument(skip(operations))]
     pub async fn update(&self, id: &str, mut operations: OperationBatch, index_type: Option<Index>, retry_on_conflict: Option<i64>) -> Result<bool> {
         let index_type = index_type.unwrap_or(Index::Hot);
         operations.validate_operations::<T>()?;
@@ -824,6 +848,7 @@ impl<T: CollectionType> Collection<T> {
     ///
     /// :param index_type: Type of indices to target
     /// :return: Should return True of the commit was successful on all hosts
+    #[instrument]
     pub async fn commit(&self, index_type: Option<Index>) -> Result<()> {
         for index in self.get_index_list(index_type)? {
             self.make_request(&Request::post_refresh_index(&self.database.host, &index)?).await?;
@@ -838,6 +863,7 @@ impl<T: CollectionType> Collection<T> {
     /// :param index_type: Type of indices to target
     /// :param key: id of the document to delete
     /// :return: True is delete successful
+    #[instrument]
     pub async fn delete(&self, key: &str, index_type: Option<Index>) -> Result<bool> {
         let index_list = self.get_index_list(index_type)?;
 
@@ -871,6 +897,7 @@ impl<T: CollectionType> Collection<T> {
     /// Receives a bulk plan and executes the plan.
     ///
     /// :return: Results of the bulk operation
+    #[instrument(skip(bulk))]
     pub async fn bulk(&self, bulk: TypedBulkPlan<T>) -> Result<responses::Bulk> {
         let request = Request::bulk(&self.database.host)?;
         Ok(self.make_request_data(&request, bulk.get_plan_data().as_bytes()).await?.json().await?)
@@ -1355,8 +1382,13 @@ pub struct ScrollCursor<'a, T: CollectionType, RT> {
     finished: bool,
 }
 
-impl<T: CollectionType, RT: Debug + Readable> ScrollCursor<'_, T, RT> {
+// impl<T: CollectionType, RT> std::fmt::Debug for ScrollCursor<'_, T, RT> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("ScrollCursor").field("collection", &self.collection).field("query", &self.query).finish()
+//     }
+// }
 
+impl<T: CollectionType, RT: Debug + Readable> ScrollCursor<'_, T, RT> {
     pub async fn next(&mut self) -> Result<Option<RT>> {
         if self.finished {
             return Ok(None)

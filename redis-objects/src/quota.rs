@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use redis::AsyncCommands;
+use tracing::instrument;
 
 use crate::{retry_call, ErrorTypes, RedisObjects};
 
@@ -52,6 +53,12 @@ pub struct UserQuotaTracker {
     timeout: Duration,
 }
 
+impl std::fmt::Debug for UserQuotaTracker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserQuotaTracker").field("store", &self.store).field("prefix", &self.prefix).finish()
+    }
+}
+
 impl UserQuotaTracker {
     pub (crate) fn new(store: Arc<RedisObjects>, prefix: String) -> Self {
         Self {
@@ -73,6 +80,7 @@ impl UserQuotaTracker {
     }
 
     /// Start a task for the given user assuming the task queue would not rise above the given maximum
+    #[instrument]
     pub async fn begin(&self, user: &str, max_quota: u32) -> Result<bool, ErrorTypes> {
         let mut call = self.begin.key(self.queue_name(user));
         let call = call.arg(max_quota).arg(self.timeout.as_secs());
@@ -80,6 +88,7 @@ impl UserQuotaTracker {
     }
 
     /// End the longest running task owned by the given user
+    #[instrument]
     pub async fn end(&self, user: &str) -> Result<(), ErrorTypes> {
         let _: () = retry_call!(self.store.pool, zpopmin, &self.queue_name(user), 1)?;
         Ok(())

@@ -30,6 +30,8 @@ use identify::Identify;
 use redis_objects::RedisObjects;
 use log::{error, info};
 use services::ServiceHelper;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::logging::configure_logging;
 
@@ -72,6 +74,10 @@ struct Args {
     #[arg(short, long)]
     secure_connections: bool,
 
+    /// Enable APM exporting
+    #[arg(short, long)]
+    enable_apm: bool,
+
     #[command(subcommand)]
     pub command: Commands
 }
@@ -92,6 +98,18 @@ enum Commands {
     }
 }
 
+impl Commands {
+    pub fn label(&self) -> &str {
+        match self {
+            Commands::Ingester { .. } => "ingester",
+            Commands::Dispatcher { .. } => "dispatcher",
+            Commands::Plumber { .. } => "plumber",
+            Commands::ServiceAPI { .. } => "service_server",
+        }
+    }
+}
+
+
 #[tokio::main]
 async fn main() -> ExitCode {
     // Load CLI
@@ -103,7 +121,24 @@ async fn main() -> ExitCode {
     // configure logging, the object returned here owns the log processing internals
     // and needs to be held until the program ends
     let _log_manager = configure_logging(&config).expect("Could not configure logging");
-    info!("Configuration loaded from: {config_path:?}");
+    info!("Configuration loaded from: {}", config_path.to_string_lossy());
+
+    // Configure APM
+    if let Some(url) = &config.core.metrics.apm_server.server_url {
+        if args.enable_apm {
+            let config = tracing_elastic_apm::config::Config::new(url.to_string())
+                .allow_invalid_certificates(true);
+
+            let layer = tracing_elastic_apm::new_layer(args.command.label().to_string(), config).expect("Could not initialize APM");
+
+            tracing_subscriber::registry().with(layer).init();
+            info!("APM exporter configured and enabled");
+        } else {
+            info!("APM exporter configured but disabled");
+        }
+    } else {
+        info!("APM collection not configured");
+    }
 
     // Connect to all the supporting components
     let core = match Core::setup(config, "", args.secure_connections).await {
