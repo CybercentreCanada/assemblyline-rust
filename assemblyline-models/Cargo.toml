@@ -35,6 +35,8 @@ assemblyline-markings = { version = "0.1.10", path = "../assemblyline-markings" 
 rand = { version = "0.9", optional = true }
 log = "0.4"
 
+internment = { version = "0.8", features = ["serde", "arc"]}
+
 # tokio = { version = "1", features = ["full"], optional = true }
 
 [dev-dependencies]

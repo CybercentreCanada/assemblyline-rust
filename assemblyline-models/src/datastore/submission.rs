@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::types::{Wildcard, ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid, Text, UpperString};
+use crate::types::{ClassificationString, ExpandingClassification, JsonMap, ServiceName, Sha256, Sid, Text, UpperString, Wildcard};
 use crate::{ElasticMeta, Readable};
 
 
@@ -20,7 +20,7 @@ pub struct TraceEvent {
     #[serde(default="default_now")]
     pub timestamp: DateTime<Utc>,
     pub event_type: String,
-    pub service: Option<String>,
+    pub service: Option<ServiceName>,
     pub file: Option<Sha256>,
     pub message: Option<String>,
 }
@@ -194,7 +194,7 @@ pub struct SubmissionParams {
     /// Service-specific parameters
     #[serde(default)]
     #[metadata(index=false, store=false)]
-    pub service_spec: HashMap<String, JsonMap>,
+    pub service_spec: HashMap<ServiceName, JsonMap>,
     /// User who submitted the file
     #[metadata(store=true, copyto="__text__")]
     pub submitter: String,
@@ -267,7 +267,7 @@ impl SubmissionParams {
     }    
 
     pub fn set_services_selected(mut self, selected: &[&str]) -> Self {
-        self.services.selected = selected.iter().map(|s|s.to_string()).collect(); self
+        self.services.selected = selected.iter().map(|s|ServiceName::from_string(s.to_string())).collect(); self
     }
 
     pub fn set_submitter(mut self, submitter: &str) -> Self {
@@ -305,7 +305,7 @@ impl SubmissionParams {
     /// 
     /// This lookup is one of the methods used to check for duplication in ingestion process,
     /// so this key is fairly sensitive.
-    pub fn create_filescore_key(&self, sha256: &Sha256, services: Option<Vec<String>>) -> String {
+    pub fn create_filescore_key(&self, sha256: &Sha256, services: Option<Vec<ServiceName>>) -> String {
         // TODO do we need this version thing still be here?
         // One up this if the cache is ever messed up and we
         // need to quickly invalidate all old cache entries.
@@ -367,16 +367,16 @@ impl SubmissionParams {
 pub struct ServiceSelection {
     /// List of excluded services
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub excluded: Vec<String>,
+    pub excluded: Vec<ServiceName>,
     /// List of services to rescan when moving between systems
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub rescan: Vec<String>,
+    pub rescan: Vec<ServiceName>,
     /// Add to service selection when resubmitting
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub resubmit: Vec<String>,
+    pub resubmit: Vec<ServiceName>,
     /// List of selected services
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub selected: Vec<String>,
+    pub selected: Vec<ServiceName>,
 }
 
 /// Submission-Relevant Times

@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
-use assemblyline_models::types::{JsonMap, Sid};
+use assemblyline_models::types::{JsonMap, ServiceName, Sid};
 use log::{debug, error, info, warn};
 use reqwest::StatusCode;
 use tokio::sync::Mutex;
@@ -202,7 +202,7 @@ impl DispatchClient {
     // :param blocking: Whether to wait for jobs to enter the queue, or if false, return immediately
     // :return: The job found, and a boolean value indicating if this is the first time this task has
     //         been returned by request_work.
-    pub async fn request_work(&self, worker_id: &str, service_name: &str, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
+    pub async fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
         let timeout = timeout.unwrap_or_else(|| Duration::from_secs(120));
         let low_priority = low_priority.unwrap_or_default();
         let start = std::time::Instant::now();
@@ -216,8 +216,8 @@ impl DispatchClient {
         return Ok(None)
     }
 
-    async fn _request_work(&self, worker_id: &str, service_name: &str, _service_version: &str,
-                      timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
+    async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: &str,
+                           timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
     {
         let start_time = std::time::Instant::now();
         debug!("request_work {worker_id}/{service_name} timeout: {timeout:?} blocking: {blocking}");
@@ -228,7 +228,7 @@ impl DispatchClient {
         }
 
         // Get work from the queue
-        let work_queue = self.redis_volatile.priority_queue::<ServiceTask>(service_queue_name(service_name));
+        let work_queue = self.redis_volatile.priority_queue::<ServiceTask>(service_queue_name(&service_name));
         let result = if blocking {
             work_queue.blocking_pop(timeout, low_priority).await?
         } else if low_priority {
@@ -255,7 +255,7 @@ impl DispatchClient {
         let message = ServiceStartMessage {
             sid: task.sid,
             sha: task.fileinfo.sha256.clone(),
-            service_name: task.service_name.clone(),
+            service_name: task.service_name,
             worker_id: worker_id.to_string(),
             dispatcher_id: task.dispatcher.clone(),
             task_id: Some(task.task_id),
@@ -394,7 +394,7 @@ impl DispatchClient {
 
         let sid = task.sid;
         let sha256 = result.sha256.clone();
-        let service_name = task.service_name.clone();
+        let service_name = task.service_name;
 
         // prepare report for the server
         let url = format!("https://{}/result", task.dispatcher_address);

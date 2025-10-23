@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
-use crate::types::NonZeroInteger;
+use crate::types::{NonZeroInteger, ServiceName};
 use crate::{ElasticMeta, Readable, types::{ClassificationString, JsonMap, Text}};
 
 use super::service::{AccessMode, ChannelKinds, EnvironmentVariable, FetchMethods, ParamKinds, RegistryType, SignatureDelimiter};
@@ -227,7 +227,7 @@ pub struct ServiceDelta {
 
     /// REF_SERVICE
     #[metadata(store=true)]
-    pub name: Option<String>, 
+    pub name: Option<ServiceName>, 
     /// REF_SERVICE
     #[metadata(store=true)]
     pub version: String,
