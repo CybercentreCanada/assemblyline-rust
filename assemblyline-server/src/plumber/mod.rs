@@ -141,7 +141,7 @@ impl Plumber {
                             expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                             response: error::Response {
                                 message: "The service was disabled while processing this task.".into(),
-                                service_name: task.service_name.clone(),
+                                service_name: task.service_name,
                                 service_version: "0".to_string(),
                                 service_tool_version: None,
                                 service_debug_info: None,
@@ -179,7 +179,7 @@ impl Plumber {
 
                         let stop = Arc::new(Flag::new(false));
                         let service_limit = Arc::new(AtomicU32::new(service.max_queue_length));
-                        self.flush_tasks.lock().insert(service_name.clone(), ServiceWorker {
+                        self.flush_tasks.lock().insert(*service_name, ServiceWorker {
                             task: tokio::spawn(self.clone().watch_service(*service_name, stop.clone(), service_limit.clone())),
                             stop,
                             service_limit,
@@ -319,7 +319,7 @@ impl Plumber {
                     expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                     response: Response {
                         message: "Task canceled due to execesive queuing.".into(),
-                        service_name: task.service_name.clone(),
+                        service_name: task.service_name,
                         service_version: "0".to_string(),
                         status: Status::FailNonrecoverable,
                         service_debug_info: None,

@@ -491,7 +491,7 @@ async fn test_prevent_result_overwrite() {
 
     // Create a result that's not "empty"
     let mut result: result::Result = rand::rng().random();
-    result.response.service_name = task.service_name.clone();
+    result.response.service_name = task.service_name;
     result.sha256 = task.fileinfo.sha256.clone();
     result.result.score = 1;
     let result_key = result.build_key(None).unwrap();

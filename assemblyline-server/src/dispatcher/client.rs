@@ -255,7 +255,7 @@ impl DispatchClient {
         let message = ServiceStartMessage {
             sid: task.sid,
             sha: task.fileinfo.sha256.clone(),
-            service_name: task.service_name.clone(),
+            service_name: task.service_name,
             worker_id: worker_id.to_string(),
             dispatcher_id: task.dispatcher.clone(),
             task_id: Some(task.task_id),
@@ -394,7 +394,7 @@ impl DispatchClient {
 
         let sid = task.sid;
         let sha256 = result.sha256.clone();
-        let service_name = task.service_name.clone();
+        let service_name = task.service_name;
 
         // prepare report for the server
         let url = format!("https://{}/result", task.dispatcher_address);

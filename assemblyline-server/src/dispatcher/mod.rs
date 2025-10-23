@@ -494,12 +494,12 @@ impl SubmissionTask {
             };
 
             if &value != dispatched_value {
-                let result = self.service_results.get(&(sha256.clone(), service.clone()));
+                let result = self.service_results.get(&(sha256.clone(), *service));
                 if result.is_some() {
                     // If there are results and there is a monitoring entry, the result was partial
                     // so redispatch it immediately (after the loop). If there are not partial results the monitoring
                     // entry will have been cleared.
-                    changed.push((sha256.clone(), service.clone()));
+                    changed.push((sha256.clone(), *service));
                 } else {
                     // If the value has changed since the last dispatch but results haven't come in yet
                     // mark this service to be disptached later. This will only happen if the service
@@ -1527,7 +1527,7 @@ impl Dispatcher {
                 let mut service_timeouts = vec![];
                 for ((sha, service_name), (start, duration, worker)) in &timeouts {
                     if start.elapsed() > *duration {
-                        let key = (sha.clone(), service_name.clone());
+                        let key = (sha.clone(), *service_name);
                         service_timeouts.push(key.clone());
 
                         let log = format!("Service timeout at {} on worker {worker}", chrono::Utc::now());
@@ -1571,7 +1571,7 @@ impl Dispatcher {
                         started.map(|socket| socket.send(message))
                     };
 
-                    let key = (message.sha, message.service_name.clone());
+                    let key = (message.sha, message.service_name);
                     if let Some((service_task, queue_key, last_queue_check)) = task.queue_keys.remove(&key) {
                         // If this task is already finished (result message processed before start
                         // message) we can skip setting a timeout
@@ -1630,10 +1630,10 @@ impl Dispatcher {
                 DispatchAction::ListOutstanding(_, channel) => {
                     let mut outstanding: HashMap<ServiceName, u64> = Default::default();
                     for (_sha, service_name) in task.queue_keys.keys() {
-                        *outstanding.entry(service_name.clone()).or_default() += 1;
+                        *outstanding.entry(*service_name).or_default() += 1;
                     }
                     for (_sha, service_name) in task.running_services.keys() {
-                        *outstanding.entry(service_name.clone()).or_default() += 1;
+                        *outstanding.entry(*service_name).or_default() += 1;
                     }
                     _ = channel.send(outstanding);
                 },
@@ -1734,7 +1734,7 @@ impl Dispatcher {
 
             for service_name in stage {
                 // If the service terminated in an error, count the error and continue
-                let key = (sha256.clone(), service_name.clone());
+                let key = (sha256.clone(), service_name);
                 if task.service_errors.contains_key(&key) {
                     continue
                 }
@@ -1768,7 +1768,7 @@ impl Dispatcher {
             for service_name in outstanding {
                 let service_queue = self.core.get_service_queue(&service_name);
 
-                let key = (sha256.clone(), service_name.clone());
+                let key = (sha256.clone(), service_name);
                 // Check if the task is already running
                 if task.running_services.contains_key(&key) {
                     running.push(service_name);
@@ -1870,7 +1870,7 @@ impl Dispatcher {
 
                     // if there are any monitored values create a monitoring entry
                     if !monitored_values.is_empty() {
-                        task.set_monitoring_entry(sha256.clone(), service.name.clone(), monitored_values);
+                        task.set_monitoring_entry(sha256.clone(), service.name, monitored_values);
                     }
                 }
 
@@ -1898,7 +1898,7 @@ impl Dispatcher {
                     dispatcher_address: self.instance_address.clone(),
                     metadata,
                     min_classification: task.submission.classification.classification.clone(),
-                    service_name: service_name.clone(),
+                    service_name,
                     service_config: config,
                     fileinfo: (*file_info).clone(),
                     filename,
@@ -2060,7 +2060,7 @@ impl Dispatcher {
                     // }
 
                     // If there is an error we are finished with this service
-                    let key = (sha256.clone(), service_name.clone());
+                    let key = (sha256.clone(), service_name);
                     if task.service_errors.contains_key(&key) {
                         continue
                     }
@@ -2364,11 +2364,11 @@ impl Dispatcher {
         let mut force_redispatch = HashSet::new();
         if summary.partial {
             info!("[{sid}/{sha256}] {service_name} returned partial results");
-            if task.partial_result(sha256.clone(), service_name.clone()) {
+            if task.partial_result(sha256.clone(), service_name) {
                 force_redispatch.insert(sha256.clone());
             }
         } else {
-            task.clear_monitoring_entry(sha256.clone(), service_name.clone());
+            task.clear_monitoring_entry(sha256.clone(), service_name);
         }
 
         // Add SHA256s of files that allowed to run regardless of Dynamic Recursion Prevention
@@ -2377,7 +2377,7 @@ impl Dispatcher {
         }
 
         // Clear logs we won't need to report
-        let key = (sha256.clone(), service_name.clone());
+        let key = (sha256.clone(), service_name);
         task.service_logs.remove(&key);
 
         // Don't process duplicates
@@ -2476,7 +2476,7 @@ impl Dispatcher {
                         expiry_ts,
                         response: error::Response {
                             message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped").into(),
-                            service_name: service_name.clone(),
+                            service_name,
                             service_tool_version: service_tool_version.clone(),
                             service_version: service_version.clone(),
                             status: error::Status::FailNonrecoverable,
@@ -2523,7 +2523,7 @@ impl Dispatcher {
                     expiry_ts,
                     response: error::Response {
                         message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits").into(),
-                        service_name: service_name.clone(),
+                        service_name,
                         service_tool_version: service_tool_version.clone(),
                         service_version: service_version.clone(),
                         status: error::Status::FailNonrecoverable,

@@ -349,7 +349,7 @@ impl TaskingClient {
             // Notify components watching for heuristic config changes
             self.redis_volatile.publish_json("heuristics", &HeuristicChange {
                 operation: Operation::Modified,
-                service_name: service.name.clone()
+                service_name: service.name
             }).await?;
         }
 
@@ -936,7 +936,7 @@ impl TaskingClient {
                 response: Response { 
                     message: format!("The following tags were rejected: {error_message}").into(), 
                     service_debug_info: result.response.service_debug_info.clone(), 
-                    service_name: result.response.service_name.clone(), 
+                    service_name: result.response.service_name, 
                     service_tool_version: result.response.service_tool_version.clone(), 
                     service_version: result.response.service_version.clone(), 
                     status: Status::FailRecoverable,

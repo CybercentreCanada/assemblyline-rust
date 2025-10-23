@@ -1,5 +1,5 @@
 // use assemblyline_markings::config::{ClassificationConfig, ClassificationGroup, ClassificationLevel, DynamicGroupType};
-use assemblyline_models::types::{ServiceName, Sid};
+use assemblyline_models::types::Sid;
 use serde::{Deserialize, Serialize};
 // use strum_macros::{Display, EnumIter};
 

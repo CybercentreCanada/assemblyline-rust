@@ -53,7 +53,7 @@ impl ServiceHelper {
         let services = datastore.list_all_services().await.context("list_all_services")?;
         let inner = Arc::new(RwLock::new( ServiceInfo {
             services: services.into_iter()
-                        .map(|service|(service.name.clone(), Arc::new(service)))
+                        .map(|service|(service.name, Arc::new(service)))
                         .collect(),
             access_cache: Default::default(),
         }));
@@ -94,7 +94,7 @@ impl ServiceHelper {
     pub fn categories(&self) -> HashMap<ServiceName, Vec<ServiceName>> {
         let mut output: HashMap<ServiceName, Vec<ServiceName>> = Default::default();
         for service in self.inner.read().services.values() {
-            output.entry(service.category.clone()).or_default().push(service.name.clone());
+            output.entry(service.category).or_default().push(service.name);
         }
         output
     }
@@ -239,7 +239,7 @@ impl ServiceHelper {
         let mut data = vec![];
         for (name, service) in &info.services {
             if self.classification.is_accessible(user_c12n, &service.classification)? {
-                data.push(name.clone());
+                data.push(*name);
             }
         }
         info.access_cache.insert(user_c12n.to_string(), data.clone());
@@ -295,7 +295,7 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
         let new_services = datastore.list_all_services().await?;
         let mut info = service_info.write();
         info.services = new_services.into_iter()
-            .map(|service|(service.name.clone(), Arc::new(service)))
+            .map(|service|(service.name, Arc::new(service)))
             .collect();
         info.access_cache.clear();
         info!("Service Watcher: Service load finished");
@@ -336,7 +336,7 @@ pub fn get_schedule_names(schedule: &Vec<Vec<Arc<Service>>>) -> Vec<Vec<ServiceN
     for row in schedule {
         let mut stage = vec![];
         for service in row {
-            stage.push(service.name.clone());
+            stage.push(service.name);
         }
         stage.sort_unstable();
         names.push(stage);
@@ -490,7 +490,7 @@ pub mod test {
         for name in services.keys() {
             core.redis_volatile.publish(&("changes.services.".to_owned() + name), &serde_json::to_vec(&ServiceChange {
                 operation: assemblyline_models::messages::changes::Operation::Added,
-                name: name.clone(),
+                name: *name,
             }).unwrap()).await.unwrap();
         }
         println!("Services added");

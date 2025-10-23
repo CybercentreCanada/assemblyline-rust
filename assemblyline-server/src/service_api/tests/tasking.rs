@@ -144,7 +144,7 @@ impl TaskResp {
 
 async fn setup_service(core: &Core) -> Service {
     let mut service = build_service();
-    let name = service.name.clone();
+    let name = service.name;
     service.timeout = 100;
     service.disable_cache = false;
     let service_delta = empty_delta(&service);
@@ -154,7 +154,7 @@ async fn setup_service(core: &Core) -> Service {
     core.datastore.service.commit(None).await.unwrap();
     core.datastore.service_delta.commit(None).await.unwrap();
     core.redis_volatile.publish_json(&format!("changes.services.{name}"), &ServiceChange {
-        name: name.clone(),
+        name,
         operation: assemblyline_models::messages::changes::Operation::Added,
     }).await.unwrap();
 
@@ -368,7 +368,7 @@ async fn test_finish_heuristic() {
 
     // create a result for that task
     let mut result: assemblyline_models::datastore::Result = rand::rng().random();
-    result.response.service_name = service.name.clone();
+    result.response.service_name = service.name;
     result.response.service_version = service.version;
     result.response.service_tool_version = Some(TOOL_VERSION.to_owned());
 
