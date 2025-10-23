@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use assemblyline_models::datastore::Submission;
 use assemblyline_models::messages::ArchiveAction;
-use assemblyline_models::types::Sid;
+use assemblyline_models::types::{ServiceName, Sid};
 use bytes::Bytes;
 use anyhow::Result;
 use rand::Rng;
@@ -222,7 +222,7 @@ impl ActionWorker {
     async fn _process(self: &Arc<Self>, submission: &MessageSubmission, data: serde_json::Value, score: i32, force_archive: bool) -> Result<bool> {
         let mut archive_submission = force_archive;
         let mut create_alert = false;
-        let mut resubmit: Option<HashSet<String>> = None;
+        let mut resubmit: Option<HashSet<ServiceName>> = None;
         let mut webhooks: HashSet<Webhook> = HashSet::new();
 
         let actions = self.actions.read().await.clone();
@@ -278,8 +278,8 @@ impl ActionWorker {
         let mut did_resubmit = false;
 
         if let Some(resubmit) = resubmit {
-            let selected: HashSet<String> = submission_msg.params.services.selected.iter().cloned().collect();
-            let resubmit_to: HashSet<String> = resubmit.union(&submission_msg.params.services.resubmit.iter().cloned().collect()).cloned().collect();
+            let selected: HashSet<ServiceName> = submission_msg.params.services.selected.iter().cloned().collect();
+            let resubmit_to: HashSet<ServiceName> = resubmit.union(&submission_msg.params.services.resubmit.iter().cloned().collect()).cloned().collect();
 
             if !selected.is_superset(&resubmit_to) {
                 let submit_to = selected.union(&resubmit_to).cloned().collect_vec();

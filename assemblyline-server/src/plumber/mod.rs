@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::datastore::Service;
-use assemblyline_models::types::JsonMap;
+use assemblyline_models::types::{JsonMap, ServiceName};
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
@@ -44,7 +44,7 @@ pub struct Plumber {
     datastore: Arc<Elastic>,
     delay: Duration,
     dispatch_client: DispatchClient,
-    flush_tasks: Mutex<HashMap<String, ServiceWorker>>
+    flush_tasks: Mutex<HashMap<ServiceName, ServiceWorker>>
 }
 
 struct ServiceWorker {
@@ -99,10 +99,10 @@ impl Plumber {
     async fn service_queue_plumbing(self: &Arc<Self>) -> Result<()> {
         info!("Starting service queue plumbing.");
         // Get an initial list of all the service queues
-        let mut service_queues: HashMap<String, Option<Service>> = Default::default();
+        let mut service_queues: HashMap<ServiceName, Option<Service>> = Default::default();
         for queue_name in self.core.redis_volatile.keys(&service_queue_name("*")).await? {
             if let Some(name) = queue_name.strip_prefix(SERVICE_QUEUE_PREFIX) {
-                service_queues.insert(name.to_string(), None);
+                service_queues.insert(name.into(), None);
             }
         }
 
@@ -117,7 +117,7 @@ impl Plumber {
 
             // Update the service queue status based on current list of services
             for service in self.datastore.list_all_services().await? {
-                service_queues.insert(service.name.to_string(), Some(service));
+                service_queues.insert(service.name, Some(service));
             }
 
             for (service_name, service) in service_queues.iter() {
@@ -127,7 +127,7 @@ impl Plumber {
                 if disabled || current_stage != ServiceStage::Running {
                     let mut proccessed_tasks = 0;
                     loop {
-                        let task = self.dispatch_client.request_work("plumber", service_name, "0", None, false, None).await?;
+                        let task = self.dispatch_client.request_work("plumber", *service_name, "0", None, false, None).await?;
                         let task = match task { 
                             Some(task) => task,
                             None => break,
@@ -141,7 +141,7 @@ impl Plumber {
                             expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                             response: error::Response {
                                 message: "The service was disabled while processing this task.".into(),
-                                service_name: task.service_name.clone(),
+                                service_name: task.service_name,
                                 service_version: "0".to_string(),
                                 service_tool_version: None,
                                 service_debug_info: None,
@@ -170,7 +170,7 @@ impl Plumber {
                 // For services that are enabled but limited
                 else if let Some(service) = service {
                      if service.enabled && service.max_queue_length > 0 {
-                        if let Some(worker) = self.flush_tasks.lock().get_mut(service_name.as_str()) {
+                        if let Some(worker) = self.flush_tasks.lock().get_mut(service_name) {
                             if !worker.task.is_finished() {
                                 worker.service_limit.store(service.max_queue_length, std::sync::atomic::Ordering::Relaxed);
                                 continue
@@ -179,8 +179,8 @@ impl Plumber {
 
                         let stop = Arc::new(Flag::new(false));
                         let service_limit = Arc::new(AtomicU32::new(service.max_queue_length));
-                        self.flush_tasks.lock().insert(service_name.clone(), ServiceWorker {
-                            task: tokio::spawn(self.clone().watch_service(service_name.clone(), stop.clone(), service_limit.clone())),
+                        self.flush_tasks.lock().insert(*service_name, ServiceWorker {
+                            task: tokio::spawn(self.clone().watch_service(*service_name, stop.clone(), service_limit.clone())),
                             stop,
                             service_limit,
                         });
@@ -295,18 +295,18 @@ impl Plumber {
         Ok(())
     }
 
-    async fn watch_service(self: Arc<Self>, service_name: String, stop_signal: Arc<Flag>, limit: Arc<AtomicU32>) {
+    async fn watch_service(self: Arc<Self>, service_name: ServiceName, stop_signal: Arc<Flag>, limit: Arc<AtomicU32>) {
         if let Err(err) = self._watch_service(service_name, stop_signal, limit).await {
             error!("service watch queue crashed with: {err}");
         }
     }
 
-    async fn _watch_service(self: Arc<Self>, service_name: String, stop_signal: Arc<Flag>, limit: Arc<AtomicU32>) -> Result<()> {
+    async fn _watch_service(self: Arc<Self>, service_name: ServiceName, stop_signal: Arc<Flag>, limit: Arc<AtomicU32>) -> Result<()> {
         info!("Watching {service_name} service queue...");
         let service_queue = self.core.get_service_queue(&service_name);
         while self.core.is_running() && !stop_signal.read() {
             while service_queue.length().await? > limit.load(std::sync::atomic::Ordering::Relaxed) as u64 {
-                let task = self.dispatch_client.request_work("plumber", &service_name, "0", None, false, Some(true)).await?;
+                let task = self.dispatch_client.request_work("plumber", service_name, "0", None, false, Some(true)).await?;
                 let task = match task {
                     Some(task) => task,
                     None => break
@@ -319,7 +319,7 @@ impl Plumber {
                     expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
                     response: Response {
                         message: "Task canceled due to execesive queuing.".into(),
-                        service_name: task.service_name.clone(),
+                        service_name: task.service_name,
                         service_version: "0".to_string(),
                         status: Status::FailNonrecoverable,
                         service_debug_info: None,

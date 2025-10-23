@@ -4,6 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::Result;
 use assemblyline_models::config::Config;
 use assemblyline_models::messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage};
+use assemblyline_models::types::ServiceName;
 use log::warn;
 use rand::Rng;
 use redis_objects::{Publisher, Queue};
@@ -43,7 +44,7 @@ impl ArchiveManager {
         let delete_after = delete_after.unwrap_or(false);
 
         let sub_selected = self.services.expand_categories(submission.params.services.selected.clone());
-        let mut sub_selected = HashSet::<String>::from_iter(sub_selected);
+        let mut sub_selected = HashSet::<ServiceName>::from_iter(sub_selected);
         let min_selected = self.services.expand_categories(self.config.core.archiver.minimum_required_services.clone());
         let min_selected = HashSet::from_iter(min_selected);
 

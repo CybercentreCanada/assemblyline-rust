@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::ServiceName;
+
 #[derive(Debug, strum::FromRepr, strum::EnumIs, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
 pub enum Operation {
@@ -30,13 +32,13 @@ impl<'de> Deserialize<'de> for Operation {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ServiceChange {
-    pub name: String,
+    pub name: ServiceName,
     pub operation: Operation,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HeuristicChange {
-    pub service_name: String,
+    pub service_name: ServiceName,
     pub operation: Operation,
 }
 

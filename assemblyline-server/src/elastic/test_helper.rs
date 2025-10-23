@@ -3,7 +3,7 @@ use std::sync::Arc;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ready_classification;
 use assemblyline_models::datastore::{File, Service};
-use assemblyline_models::types::Sha256;
+use assemblyline_models::types::{ServiceName, Sha256};
 use log::debug;
 use rand::Rng;
 
@@ -60,7 +60,7 @@ async fn list_services() {
     }
 
     // change one of the services
-    aa.category = "DOGHOUSE".to_string();
+    aa.category = "DOGHOUSE".into();
     aa.enabled = false;
     {
         debug!("update delta");
@@ -250,14 +250,14 @@ async fn test_create_empty_result() {
 
     // Set expected values
     let classification = cl_engine.unrestricted();
-    let svc_name = "TEST";
+    let svc_name: ServiceName = "TEST".into();
     let svc_version = "4";
     let sha256: Sha256 = "a123".repeat(16).parse().unwrap();
 
     // Build result key
     let result_key = assemblyline_models::datastore::Result::help_build_key(
         &sha256, 
-        svc_name, 
+        &svc_name, 
         svc_version, 
         true,
         false,
