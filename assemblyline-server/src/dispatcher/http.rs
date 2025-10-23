@@ -47,7 +47,7 @@ async fn handle_task_error (
     Json(request): Json<ServiceError>,
     Data(dispatcher): Data<&Arc<Dispatcher>>
 ) {
-    dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Result(Box::new(ServiceResponse::Error(request)))).await;
+    dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Result(Box::new(ServiceResponse::Error(Box::new(request))))).await;
 }
 
 /// API endpoint for finishing a task
@@ -63,7 +63,7 @@ async fn handle_task_result (
     Json(request): Json<ServiceResult>,
     Data(dispatcher): Data<&Arc<Dispatcher>>
 ) {
-    dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Result(Box::new(ServiceResponse::Result(request)))).await;
+    dispatcher.send_dispatch_action(crate::dispatcher::DispatchAction::Result(Box::new(ServiceResponse::Result(Box::new(request))))).await;
 }
 
 

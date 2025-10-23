@@ -424,7 +424,7 @@ async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize)
 
     let mut hasher = sha2::Sha256::default();
     hasher.update(&body);
-    let sha256 = Sha256::try_from(hasher.finalize().as_slice()).unwrap();
+    let sha256 = Sha256::try_from(&hasher.finalize()[..]).unwrap();
     core.filestore.put(&sha256, &body).await.unwrap();
 
     let temporary_file = tempfile::NamedTempFile::new().unwrap();

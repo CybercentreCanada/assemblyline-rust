@@ -209,7 +209,7 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
         let hash = hasher.finalize();
         
         // truncate it to 8 bytes and interpret it as a number
-        let number = u64::from_be_bytes(hash.as_slice()[0..8].try_into().unwrap());
+        let number = u64::from_be_bytes(hash[0..8].try_into().unwrap());
         
         // encode it as a string
         Ok(base62::encode(number))
@@ -250,8 +250,8 @@ pub struct ResultSummary {
 
 #[derive(Serialize, Deserialize)]
 pub enum ServiceResponse {
-    Result(ServiceResult),
-    Error(ServiceError),
+    Result(Box<ServiceResult>),
+    Error(Box<ServiceError>),
 }
 
 impl ServiceResponse {

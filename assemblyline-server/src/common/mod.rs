@@ -19,5 +19,5 @@ pub struct PermissionError(pub String);
 pub fn sha256_data(body: &[u8]) -> String {
     let mut hasher = sha2::Sha256::default();
     hasher.write_all(body).unwrap();
-    hex::encode(hasher.finalize().as_slice())
+    hex::encode(hasher.finalize())
 }

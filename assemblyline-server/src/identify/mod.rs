@@ -23,7 +23,6 @@ use serde::Serialize;
 use tokio::sync::mpsc;
 use zip::unstable::LittleEndianReadExt;
 
-use magic_sys as _;
 use crate::cachestore::CacheStore;
 use crate::string_utils::{dotdump, dotdump_bytes, find_subsequence};
 use crate::IBool;
@@ -761,7 +760,7 @@ impl Identify {
                 "document/office/powerpoint",
                 "document/office/unknown",
             ].contains(&data.file_type.as_str()) {
-                let output = pyo3::Python::with_gil(|py| {
+                let output = pyo3::Python::attach(|py| {
                     let locals = [("path", &path)].into_py_dict(py)?;
                     py.run(MSOFFCRYPTO_SRC, None, Some(&locals))?;
                     let value = locals.get_item(intern!(py, "file_type"))?;       

@@ -2337,7 +2337,7 @@ impl Dispatcher {
     }
 
     #[instrument(skip(data))]
-    async fn process_service_result(&self, task: &mut SubmissionTask, data: ServiceResult) -> Result<()> {
+    async fn process_service_result(&self, task: &mut SubmissionTask, data: Box<ServiceResult>) -> Result<()> {
         // let submission: &Submission = &task.submission;
         let sid = task.submission.sid;
         let ServiceResult {
@@ -2353,7 +2353,7 @@ impl Dispatcher {
             extracted_names,
             dynamic_recursion_bypass,
             extra_errors,
-        } = data;
+        } = *data;
 
         trace_event!(task, "process_result", file &sha256, service &service_name, "Processing result {}", summary.key);
 

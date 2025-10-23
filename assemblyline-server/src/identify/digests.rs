@@ -105,9 +105,9 @@ pub fn get_digests_for_file_blocking(path: &Path, blocksize: Option<usize>, calc
     debug!("entropy {:?}", entropy.as_ref().map(|calculator| calculator.entropy()));
     
     Ok(Digests {
-        md5: hex::encode(md5.finalize().as_slice()),
-        sha1: hex::encode(sha1.finalize().as_slice()),
-        sha256: hex::encode(sha256.finalize().as_slice()),
+        md5: hex::encode(md5.finalize()),
+        sha1: hex::encode(sha1.finalize()),
+        sha256: hex::encode(sha256.finalize()),
         ssdeep,
         tlsh,
         size,

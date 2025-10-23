@@ -32,6 +32,7 @@ use log::{error, info};
 use services::ServiceHelper;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use ort as _;
 
 use crate::logging::configure_logging;
 
