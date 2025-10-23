@@ -96,7 +96,7 @@ impl TransportS3 {
         let endpoint_url = format!("{scheme}://{host}:{port}");
 
         // Ok(S3BlobStore { client: bucket })
-        let mut loader = aws_config::defaults(BehaviorVersion::v2025_01_17());
+        let mut loader = aws_config::defaults(BehaviorVersion::v2025_08_07());
 
         // Override the region
         if let Some(region) = parameters.aws_region.clone() {
