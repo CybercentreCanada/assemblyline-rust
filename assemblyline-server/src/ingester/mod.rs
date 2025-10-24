@@ -106,7 +106,7 @@ impl IngestTask {
     fn file_size(&self) -> u64 {
         self.submission.files.iter().fold(0, |a, b| a + b.size.unwrap_or(0))
     }
-    
+
     fn params(&self) -> &SubmissionParams {
         &self.submission.params
     }
@@ -117,7 +117,7 @@ impl IngestTask {
 }
 
 struct GroupCache {
-    reset: i64, 
+    reset: i64,
     cache: HashMap<String, Vec<UpperString>>
 }
 
@@ -349,7 +349,7 @@ impl Ingester {
         let task = Box::new(IngestTask::new(message));
 
         // Reset to new random uuid
-        // task.submission.sid = rand::rng().random(); 
+        // task.submission.sid = rand::rng().random();
 
         self.spawn_ingest(task);
         Ok(())
@@ -379,7 +379,7 @@ impl Ingester {
     async fn handle_submit_internal(self: &Arc<Self>) -> Result<()> {
         self.handle_submit(false).await
     }
-    
+
     async fn handle_submit(self: &Arc<Self>, block_on_redis: bool) -> Result<()> {
         while self.core.is_running() {
             self.submit_once(block_on_redis).await?;
@@ -388,6 +388,7 @@ impl Ingester {
     }
 
     async fn submit_once(self: &Arc<Self>, block_on_redis: bool) -> Result<()> {
+
         // Check if there is room for more submissions
         let length = self.scanning.length().await?;
         if length >= self.core.config.core.ingester.max_inflight {
@@ -464,6 +465,7 @@ impl Ingester {
             Err(err) => err,
         };
 
+
         // For some reason (contained in err) we have failed the submission
         // The rest of this function is error handling/recovery
         increment!(self.counter, error);
@@ -492,7 +494,7 @@ impl Ingester {
                 increment!(self.counter, retries);
                 self.spawn_ingest(Box::new(task));
             }
-    
+
             if task_count == 0 {
                 self.core.sleep(Duration::from_secs(3)).await;
             }
@@ -718,7 +720,7 @@ impl Ingester {
                         pprevious = Some(previous);
                         previous = task.ingest_id;
                         task.submission.params.psid = pprevious;
-    
+
                         submission.archived = false;
                         submission.classification = ExpandingClassification::new(task.params().classification.as_str().to_owned(), &self.core.classification_parser)?;
                         submission.expiry_ts = Some(Utc::now() + chrono::Duration::days(task.params().ttl.into()));
@@ -729,8 +731,8 @@ impl Ingester {
                         submission.to_be_deleted = false;
                         submission.times.submitted = task.ingest_time;
                         submission.times.completed = Some(Utc::now());
-    
-                        self.core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await?;    
+
+                        self.core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await?;
                     },
                     Ok(None) => {
                         debug!("filescore cache requested submission that doesn't exist {previous}");
@@ -829,7 +831,7 @@ impl Ingester {
                 None => break,
                 Some(mut res) => {
                     res.submission.sid = sid;
-                    dups.push(res);        
+                    dups.push(res);
                 }
             }
         }
@@ -887,10 +889,10 @@ impl Ingester {
         let sha256 = &task.submission.files[0].sha256;
 
         self.core.datastore.save_or_freshen_file(
-            sha256, 
-            [("sha256".to_owned(), serde_json::Value::String(sha256.to_string()))].into_iter().collect(), 
-            Some(expiry), 
-            c12n.as_str().to_owned(), 
+            sha256,
+            [("sha256".to_owned(), serde_json::Value::String(sha256.to_string()))].into_iter().collect(),
+            Some(expiry),
+            c12n.as_str().to_owned(),
             &self.core.classification_parser
         ).await?;
         Ok(())
@@ -1059,7 +1061,7 @@ impl Ingester {
                 if score < threshold {
                     return Ok(())
                 }
-            }    
+            }
         };
 
         let queue = self.core.notification_queue(queue_name);
@@ -1073,17 +1075,24 @@ impl Ingester {
 
     async fn submit(&self, scan_key: String, task: Box<IngestTask>) -> Result<()> {
         let sha = task.submission.files[0].sha256.clone();
-        
+
         #[cfg(test)]
         if *self.test_hook_fail_submit.lock() > 0 {
             *self.test_hook_fail_submit.lock() -= 1;
             anyhow::bail!("Forced submit failure")
         }
 
-        self.submit_manager.submit_prepared(
-            task.submission,
-            Some(COMPLETE_QUEUE_NAME.to_owned()),
-        ).await?;
+        // if we are submitting a bundle with submission already stored in database
+        if task.submission.metadata.contains_key("bundle.source"){
+            self.submit_manager.submit_bundle(task.submission, Some(COMPLETE_QUEUE_NAME.to_owned())).await?;
+        }
+        else{
+            // else submit the prepared submission
+            self.submit_manager.submit_prepared(
+                task.submission,
+                Some(COMPLETE_QUEUE_NAME.to_owned()),
+            ).await?;
+        }
 
         self.timeout_queue.push((Utc::now() + self.timeout_delay).timestamp() as f64, &scan_key).await?;
         info!("[{} :: {}] Submitted to dispatcher for analysis", task.ingest_id, sha);
@@ -1150,7 +1159,7 @@ impl Ingester {
             }
             _ = self.core.sleep(Duration::from_secs(120)) => {}
         }
-        
+
         // if its a timeout close the collector and check for a last minute value
         recv.close();
         if let Ok(task) = recv.try_recv() {

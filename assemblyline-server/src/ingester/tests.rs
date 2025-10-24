@@ -3,12 +3,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use assemblyline_models::messages::dispatching::FileTreeData;
+use assemblyline_models::messages::task::FileInfo;
+use chrono::Utc;
 use assemblyline_markings::classification::ClassificationParser;
+use assemblyline_models::datastore::submission::{Verdict, SubmissionState, Times};
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::datastore::Submission;
+use assemblyline_models::datastore::{Result, Submission};
 use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
-use assemblyline_models::types::{ClassificationString, JsonMap, Sha256, Sid, UpperString};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid, UpperString, Wildcard};
 use itertools::Itertools;
 use rand::Rng;
 use serde_json::json;
@@ -43,12 +47,12 @@ impl MakeMessage {
             ce
         }
     }
-    
+
     fn metadata(mut self, input: serde_json::Value) -> Self {
         let serde_json::Value::Object(input) = input else { panic!() };
         self.metadata = Some(input); self
     }
-    
+
     fn params(mut self, input: serde_json::Value) -> Self {
         let serde_json::Value::Object(input) = input else { panic!() };
         self.params = Some(input); self
@@ -71,19 +75,13 @@ impl MakeMessage {
         params.submitter = "user".to_string();
         params.groups = vec!["users".parse().unwrap()];
 
-        let message = MessageSubmission {
-            sid: rand::rng().random(),
-            files: vec![File {
-                sha256: uniform_string('0', 64).parse().unwrap(),
-                size: Some(100),
-                name: "abc".to_string()
-            }],
-            metadata: Default::default(),
-            time: chrono::Utc::now(),
-            notification: Default::default(),
-            params,
-            scan_key: None,
-        };
+
+        let message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), params)
+        .set_files(vec![File {
+            sha256: uniform_string('0', 64).parse().unwrap(),
+            size: Some(100),
+            name: "abc".to_string(),
+        }]);
 
         let data = serde_json::to_value(&message).unwrap();
         let serde_json::Value::Object(mut data) = data else { panic!() };
@@ -182,7 +180,7 @@ async fn test_ingest_simple() {
             "small": "100"
         }))
         .params(json!({
-            "submitter": "user", 
+            "submitter": "user",
             "groups": custom_user_groups
         }))
         .build()
@@ -190,7 +188,7 @@ async fn test_ingest_simple() {
 
     // Process those ok message
     ingester.ingest_once().await.unwrap();
-    
+
     // The only task that makes it through though fit these parameters
     let task = ingester.unique_queue.blocking_pop(std::time::Duration::from_secs(2), false).await.unwrap().unwrap();
     assert_eq!(task.submission.files[0].sha256.to_string(), uniform_string('0', 64)); // Only the valid sha passed through
@@ -209,16 +207,16 @@ async fn test_ingest_stale_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
- 
+
     // Add a stale file score for this file
     let sha256: Sha256 = rand::rng().random();
-    let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
-        psid: Some("0".parse().unwrap()), 
-        expiry_ts: chrono::Utc::now(), 
-        score: 10, 
-        errors: 0, 
-        sid: "0".parse().unwrap(), 
-        time: 0.0 
+    let filescore_cache = assemblyline_models::datastore::filescore::FileScore {
+        psid: Some("0".parse().unwrap()),
+        expiry_ts: chrono::Utc::now(),
+        score: 10,
+        errors: 0,
+        sid: "0".parse().unwrap(),
+        time: 0.0
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);
@@ -227,7 +225,7 @@ async fn test_ingest_stale_score_exists() {
     // Process a message that hits the stale score
     ingester.ingest_queue.raw().push(&MakeMessage::new(core.classification_parser.clone()).files(json!({"sha256": sha256})).build()).await.unwrap();
     ingester.ingest_once().await.unwrap();
-    
+
     // The stale filescore was retrieved but expired
     assert_metrics(&mut metrics, &[("cache_hit", 1), ("cache_expired", 1), ("submissions_ingested", 1)]).await;
 
@@ -245,15 +243,15 @@ async fn test_ingest_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
     let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
     let mut metrics = core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await;
- 
+
     // Add a valid file score for all files
     let sha256: Sha256 = rand::rng().random();
-    let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
-        psid: Some("0".parse().unwrap()), 
-        expiry_ts: chrono::Utc::now(), 
-        score: 10, 
-        errors: 0, 
-        sid: "0".parse().unwrap(), 
+    let filescore_cache = assemblyline_models::datastore::filescore::FileScore {
+        psid: Some("0".parse().unwrap()),
+        expiry_ts: chrono::Utc::now(),
+        score: 10,
+        errors: 0,
+        sid: "0".parse().unwrap(),
         time: chrono::Utc::now().timestamp() as f32,
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
@@ -284,7 +282,7 @@ async fn test_ingest_groups_custom() {
     user.uname = "test_ingest_groups_custom".to_string();
     user.groups.extend(custom_user_groups.iter().map(|i|i.parse().unwrap()));
     core.datastore.user.save("test_ingest_groups_custom", &user, None, None).await.unwrap();
-    
+
     // process a message
     ingester.ingest_queue.raw().push(&MakeMessage::new(core.classification_parser.clone())
         .params(json!({"submitter": "test_ingest_groups_custom", "groups": ["group_b"]})).build()
@@ -350,14 +348,14 @@ async fn test_ingest_always_create_submission() {
     let sid_1: Sid = "001".parse().unwrap();
     let sid_2: Sid = "002".parse().unwrap();
 
-    // Add a valid file score 
+    // Add a valid file score
     let sha256: Sha256 = rand::rng().random();
-    let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
-        psid: Some(sid_0), 
-        expiry_ts: chrono::Utc::now(), 
-        score: 10, 
-        errors: 0, 
-        sid: sid_1, 
+    let filescore_cache = assemblyline_models::datastore::filescore::FileScore {
+        psid: Some(sid_0),
+        expiry_ts: chrono::Utc::now(),
+        score: 10,
+        errors: 0,
+        sid: sid_1,
         time: chrono::Utc::now().timestamp() as f32
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
@@ -421,23 +419,18 @@ async fn test_ingest_always_create_submission() {
         assert!(value.is_null() || !value.as_bool().unwrap(), "{attr} => {value:?}");
     }
 }
-        
+
 fn create_ingest_task(ce: &Arc<ClassificationParser>) -> IngestTask {
     let classification = ClassificationString::new(ce.unrestricted().to_string(), ce).unwrap();
     let params = SubmissionParams::new(classification);
-    let submission = MessageSubmission {
-        params,
-        files: vec![File {
+
+    let submission = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), params)
+    .set_files(vec![File {
             sha256: uniform_string('0', 64).parse().unwrap(),
             size: Some(100),
             name: "abc".to_string(),
-        }],
-        metadata: Default::default(),
-        sid: rand::rng().random(),
-        time: chrono::Utc::now(),
-        notification: Default::default(),
-        scan_key: Default::default(),
-    };
+        }]);
+
     IngestTask::new(submission)
 }
 
@@ -456,6 +449,145 @@ async fn test_submit_simple() {
     ingester.submit_manager.dispatch_submission_queue.pop().await.unwrap();
     assert_eq!(ingester.unique_queue.length().await.unwrap(), 0);
 }
+
+
+// MARK: tag filter
+#[tokio::test(flavor = "multi_thread")]
+async fn test_submit_bundle() {
+    // When a ingester received a bundle, it should send the entire bundle with file_info, file_tree etc.
+    // to the dispatcher
+    // Step 1:
+    // 1. Create bundle
+    // 2. The submission in the bundle should be store in the database
+    // 3. The submission bundle is sent to the ingester for rescan services
+
+    // set up background processes
+    let (core, _redis_lock) = Core::test_setup().await;
+    let ingester = Arc::new(Ingester::new(core.clone()).await.unwrap());
+
+    // setup information for the submission bundle data
+    let mut metadata: HashMap<String, Wildcard> = HashMap::new();
+    metadata.insert(String::from("bundle.source"), Wildcard::from("test_bundle"));
+
+    let errors : Vec<String> = vec!["error1".to_string(), "error2".to_string()];
+
+    let shas : Vec<Sha256> = vec![uniform_string('0', 64).parse().unwrap(), uniform_string('1', 64).parse().unwrap(), uniform_string('2', 64).parse().unwrap()];
+
+    let files =  vec![
+        File {
+        sha256: shas[0].clone(),
+        size: Some(100),
+        name: "root1".to_string()
+        },
+        File {
+        sha256: shas[1].clone(),
+        size: Some(100),
+        name: "child1".to_string()
+        },
+        File {
+        sha256: shas[2].clone(),
+        size: Some(100),
+        name: "child2".to_string()
+        }];
+
+    let results: HashMap<String, Result>  = HashMap::from([("result_key_1".to_string(), rand::rng().random())]);
+
+    let file_infos: HashMap<Sha256, FileInfo> = HashMap::from([
+        (shas[0].clone(), rand::rng().random()),
+        (shas[1].clone(), rand::rng().random()),
+        (shas[2].clone(), rand::rng().random())
+
+    ]);
+
+    let file_tree =
+        HashMap::from([
+            (files[0].sha256.clone(),
+                FileTreeData{
+                    name: vec![files[0].name.clone()],
+                    children:
+                    HashMap::from([
+                        (   files[1].sha256.clone(),
+                            FileTreeData {
+                            name: vec![files[1].name.clone()],
+                            children: Default::default()
+                        }),
+                        (   files[2].sha256.clone(),
+                            FileTreeData {
+                            name: vec![files[2].name.clone()],
+                            children: Default::default()
+                        })
+                    ])
+                }
+            )
+    ]);
+
+    // set up submission object to be stored in the database
+    // the submission object of the bundle should be stored in the database first before submitting to ingester
+    let submission = Submission {
+        archive_ts: Default::default(),
+        archived: false,
+        classification: ExpandingClassification::try_unrestricted().unwrap(),
+        tracing_events: Default::default(),
+        error_count: 0,
+        expiry_ts: Default::default(),
+        file_count: 1,
+        files: files.clone(),
+        max_score: 500,
+        metadata: metadata,
+        params: SubmissionParams::new(ClassificationString::unrestricted(&core.classification_parser)),
+        results: Default::default(),
+        sid: rand::rng().random(),
+        state: SubmissionState::Submitted,
+        to_be_deleted: false,
+        times:  Times {
+                    completed: None,
+                    submitted: Utc::now(),
+                },
+        verdict:  Verdict {
+                    malicious: vec![],
+                    non_malicious: vec![],
+                },
+        from_archive: false,
+        scan_key: None,
+        errors: errors.clone()
+    };
+
+    // The ingester message create from bundle should have all the other information about the submission including
+    // file_info, file tree, error keys, result data
+    let sub_message = MessageSubmission::from(&submission).set_errors(errors.clone()).set_file_infos(file_infos.clone()).set_results(results.clone()).set_file_tree(file_tree.clone());
+
+    // store the original submission to datastore
+    core.datastore.submission.save(&submission.sid.to_string(), &submission, None, None).await.unwrap();
+
+    // submit this bundle to ingester
+    ingester.unique_queue.push(0.0, &IngestTask::new(sub_message)).await.unwrap();
+    ingester.submit_once(true).await.unwrap();
+
+
+    // The task has been passed to the submit tool and there are no other submissions
+    let dispatcher_message = ingester.submit_manager.dispatch_submission_queue.pop().await.unwrap();
+
+
+    // The dispatch message should have error, metadata, file, file_tree
+    match dispatcher_message {
+        None => panic!("No dispatcher message."),
+        Some(message) => {
+            assert_eq!(errors, message.errors);
+            assert_eq!(file_infos, message.file_infos);
+            assert_eq!(results, message.results);
+
+            assert!( message.file_tree.contains_key(&shas[0]));
+            let temp_tree = message.file_tree.get(&shas[0]).expect("File tree data should not be None for root");
+            assert_eq!(files[0].name, temp_tree.name[0]);
+            assert!(temp_tree.children.contains_key(&shas[1]));
+            assert!(temp_tree.children.contains_key(&shas[2]));
+            assert_eq!(temp_tree.children.get(&shas[1]).expect("File tree data should not be None for child1").name[0], files[1].name);
+            assert_eq!(temp_tree.children.get(&shas[2]).expect("File tree data should not be None for child2").name[0], files[2].name);
+
+        }
+    }
+}
+
 
 #[tokio::test]
 async fn test_submit_duplicate() {
@@ -492,18 +624,18 @@ async fn test_existing_score() {
 
     // Set everything to have an existing filestore
     let sha256: Sha256 = rand::rng().random();
-    let filescore_cache = assemblyline_models::datastore::filescore::FileScore { 
-        psid: Some("0".parse().unwrap()), 
-        expiry_ts: chrono::Utc::now(), 
-        score: 10, 
-        errors: 0, 
-        sid: "0".parse().unwrap(), 
-        time: chrono::Utc::now().timestamp() as f32 
+    let filescore_cache = assemblyline_models::datastore::filescore::FileScore {
+        psid: Some("0".parse().unwrap()),
+        expiry_ts: chrono::Utc::now(),
+        score: 10,
+        errors: 0,
+        sid: "0".parse().unwrap(),
+        time: chrono::Utc::now().timestamp() as f32
     };
     let classification = ClassificationString::new(core.classification_parser.unrestricted().to_string(), &core.classification_parser).unwrap();
     let key = SubmissionParams::new(classification).create_filescore_key(&sha256, None);
     core.datastore.filescore.save(&key, &filescore_cache, None, None).await.unwrap();
-    
+
     // add task to internal queue
     let mut task = create_ingest_task(&core.classification_parser);
     task.submission.files[0].sha256 = sha256;

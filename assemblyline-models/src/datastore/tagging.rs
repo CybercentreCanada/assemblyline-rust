@@ -143,34 +143,34 @@ impl TagInformation {
         use struct_metadata::{Kind, Descriptor};
         let metadata = ElasticMeta{copyto: Some("__text__"), ..Default::default()};
         let mut desc = match self.processor {
-            TagProcessor::RuleMapping => struct_metadata::Descriptor { 
-                docs: None, 
-                metadata, 
+            TagProcessor::RuleMapping => struct_metadata::Descriptor {
+                docs: None,
+                metadata,
                 kind: Kind::Mapping(
-                    Box::new(Descriptor { docs: None, metadata: Default::default(), kind: Kind::String }), 
+                    Box::new(Descriptor { docs: None, metadata: Default::default(), kind: Kind::String }),
                     Box::new(Descriptor { docs: None, metadata: Default::default(), kind: Kind::Sequence(
-                        Box::new(Descriptor { docs: None, metadata: ElasticMeta{copyto: Some("__text__"), ..Default::default()}, kind: Kind::String }),    
+                        Box::new(Descriptor { docs: None, metadata: ElasticMeta{copyto: Some("__text__"), ..Default::default()}, kind: Kind::String }),
                     )})
                 )
             },
             // TagProcessor::I64 => struct_metadata::Descriptor { docs: None, metadata: Default::default(), kind: Kind::I64},
             TagProcessor::U16 => struct_metadata::Descriptor { docs: None, metadata: Default::default(), kind: Kind::U16},
             TagProcessor::I32 => struct_metadata::Descriptor { docs: None, metadata: Default::default(), kind: Kind::I32},
-            TagProcessor::IpAddress => struct_metadata::Descriptor { 
-                docs: None, 
-                metadata: ElasticMeta { mapping: Some("ip"), ..metadata }, 
+            TagProcessor::IpAddress => struct_metadata::Descriptor {
+                docs: None,
+                metadata: ElasticMeta { mapping: Some("ip"), ..metadata },
                 kind: Kind::String
             },
-            TagProcessor::SSDeepHash => struct_metadata::Descriptor { 
-                docs: None, 
-                metadata: ElasticMeta{mapping: Some("text"), analyzer: Some("text_fuzzy"), ..metadata}, 
+            TagProcessor::SSDeepHash => struct_metadata::Descriptor {
+                docs: None,
+                metadata: ElasticMeta{mapping: Some("text"), analyzer: Some("text_fuzzy"), ..metadata},
                 kind: Kind::String
             },
-            TagProcessor::Lowercase | TagProcessor::Sha1 | TagProcessor::MD5 | TagProcessor::Sha256 => struct_metadata::Descriptor { 
-                docs: None, 
-                metadata: ElasticMeta { normalizer: Some("lowercase_normalizer"), ..metadata }, 
-                kind: Kind::String 
-            },            
+            TagProcessor::Lowercase | TagProcessor::Sha1 | TagProcessor::MD5 | TagProcessor::Sha256 => struct_metadata::Descriptor {
+                docs: None,
+                metadata: ElasticMeta { normalizer: Some("lowercase_normalizer"), ..metadata },
+                kind: Kind::String
+            },
             _ => struct_metadata::Descriptor { docs: None, metadata, kind: Kind::String }
         };
 
@@ -185,7 +185,7 @@ impl TagInformation {
 
 
 // MARK: Tag List
-/// The list of all tags we are willing to accept. 
+/// The list of all tags we are willing to accept.
 /// This includes their path within a tagging dict, a textual description and how they should be processed for validation or normalization
 static ALL_VALID_TAGS: [TagInformation; 211] = [
     TagInformation::new(&["attribution", "actor"], "Attribution Actor", TagProcessor::Uppercase),
@@ -363,7 +363,7 @@ static ALL_VALID_TAGS: [TagInformation; 211] = [
     TagInformation::new(&["file", "swf", "header", "frame", "size"], "SWF File Properties: Header Information: Header Frame Information: Size of Frame", TagProcessor::String),
     TagInformation::new(&["file", "swf", "header", "version"], "SWF File Properties: Header Information: Version", TagProcessor::String),
     TagInformation::new(&["file", "swf", "tags_ssdeep"], "SWF File Properties: Tags SSDeep", TagProcessor::SSDeepHash),
-    
+
     TagInformation::new(&["network", "attack"], "Network: Attack", TagProcessor::String),
     TagInformation::new(&["network", "dynamic", "domain"], "Network: Dynamic IOCs: Domain", TagProcessor::Domain),
     TagInformation::new(&["network", "dynamic", "ip"], "Network: Dynamic IOCs: IP", TagProcessor::IpAddress),
@@ -427,7 +427,7 @@ pub fn get_tag_information(label: &str) -> Option<&'static TagInformation> {
 
 // MARK: Nested Tag Container
 /// Container for a dictionary set of tags
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct Tagging(JsonMap);
 
@@ -467,9 +467,9 @@ impl Described<ElasticMeta> for Tagging {
                 let type_info = struct_metadata::Descriptor {
                     docs: None,
                     metadata,
-                    kind: struct_metadata::Kind::Struct { 
-                        name: label, 
-                        children, 
+                    kind: struct_metadata::Kind::Struct {
+                        name: label,
+                        children,
                     },
                 };
 
@@ -495,9 +495,9 @@ impl Described<ElasticMeta> for Tagging {
         struct_metadata::Descriptor {
             docs: None,
             metadata,
-            kind: struct_metadata::Kind::Struct { 
-                name: "Tagging", 
-                children, 
+            kind: struct_metadata::Kind::Struct {
+                name: "Tagging",
+                children,
             },
         }
     }
@@ -531,10 +531,10 @@ impl Tagging {
                     serde_json::Value::Array(values) => {
                         let path = path.join(".");
                         for value in values {
-                            output.push(TagEntry { 
-                                score: 0, 
+                            output.push(TagEntry {
+                                score: 0,
                                 tag_type: path.clone(),
-                                value: TagValue(value.clone()) 
+                                value: TagValue(value.clone())
                             })
                             // {'safelisted': safelisted, 'type': k, 'value': t, 'short_type': k.rsplit(".", 1)[-1]})
                         }
@@ -654,7 +654,7 @@ pub fn load_tags_from_object(data: JsonMap) -> (FlatTags, Vec<(String, String)>)
 
     fn process(accepted: &mut FlatTags, rejected: &mut Vec<(String, String)>, path: &[&str], data: JsonMap) {
         for (key, value) in data {
-            // build the label for the tag if it exists at this level of recursion 
+            // build the label for the tag if it exists at this level of recursion
             let mut path = Vec::from(path);
             path.push(&key);
             let label = path.join(".");
@@ -875,7 +875,7 @@ fn string_tag_parsing() {
 #[test]
 fn hash_tag_parsing() {
     use serde_json::json;
-    
+
     let proc = TagProcessor::MD5;
     assert_eq!(proc.apply(json!("00000000000000000000000000000000")), Ok(json!("00000000000000000000000000000000")));
     assert_eq!(proc.apply(json!("0000000000000000000000000000000000000000")), Err(json!("0000000000000000000000000000000000000000")));
@@ -883,7 +883,7 @@ fn hash_tag_parsing() {
     assert_eq!(proc.apply(json!("24576:c+bnyhC57zhu0Nbs2p/ojPgZmAnShaLOZHzYX20:zwQB3bN/MkNbOZS20")), Err(json!("24576:c+bnyhC57zhu0Nbs2p/ojPgZmAnShaLOZHzYX20:zwQB3bN/MkNbOZS20")));
     assert_eq!(proc.apply(json!("t13d1517h2_8daaf6152771_b0da82dd1658")), Err(json!("t13d1517h2_8daaf6152771_b0da82dd1658")));
     assert_eq!(proc.apply(json!(999)), Err(json!(999)));
-    
+
     let proc = TagProcessor::Sha1;
     assert_eq!(proc.apply(json!("00000000000000000000000000000000")), Err(json!("00000000000000000000000000000000")));
     assert_eq!(proc.apply(json!("0000000000000000000000000000000000000000")), Ok(json!("0000000000000000000000000000000000000000")));
@@ -933,7 +933,7 @@ fn network_tag_parsing() {
     assert_eq!(proc.apply(json!("www.GooGle.com")), Err(json!("www.GooGle.com")));
     assert_eq!(proc.apply(json!("172.0.0.1")), Ok(json!("172.0.0.1")));
     assert_eq!(proc.apply(json!("1234:5678:9ABC:0000:0000:1234:5678:9abc")), Ok(json!("1234:5678:9ABC:0000:0000:1234:5678:9ABC")));
-    
+
     let proc = TagProcessor::UNCPath;
     assert_eq!(proc.apply(json!("www.google.com")), Err(json!("www.google.com")));
     assert_eq!(proc.apply(json!("www.GooGle.com")), Err(json!("www.GooGle.com")));
@@ -941,7 +941,7 @@ fn network_tag_parsing() {
     assert_eq!(proc.apply(json!("1234:5678:9ABC:0000:0000:1234:5678:9ABC")), Err(json!("1234:5678:9ABC:0000:0000:1234:5678:9ABC")));
     assert_eq!(proc.apply(json!(r"\\ComputerName\SharedFolder\Resource")), Ok(json!(r"\\ComputerName\SharedFolder\Resource")));
     assert_eq!(proc.apply(json!(r"\\hostname@SSL@100\SharedFolder\Resource")), Ok(json!(r"\\hostname@SSL@100\SharedFolder\Resource")));
- 
+
     let proc = TagProcessor::Uri;
     assert_eq!(proc.apply(json!("www.GooGle.com")), Err(json!("www.GooGle.com")));
     assert_eq!(proc.apply(json!("172.0.0.1")), Err(json!("172.0.0.1")));
@@ -972,7 +972,7 @@ fn network_tag_parsing() {
     assert_eq!(proc.apply(json!("user@www.GooGle.com")), Ok(json!("user@www.google.com")));
     assert_eq!(proc.apply(json!("user@172.0.0.1")), Err(json!("user@172.0.0.1")));
     assert_eq!(proc.apply(json!("john.doe@cyber.gc.ca")), Ok(json!("john.doe@cyber.gc.ca")));
-    
+
 
     let proc = TagProcessor::Mac;
     assert_eq!(proc.apply(json!("172.0.0.1")), Err(json!("172.0.0.1")));
