@@ -8,6 +8,7 @@ use std::time::Duration;
 use redis::{cmd, AsyncCommands};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use tracing::instrument;
 
 use crate::{RedisObjects, ErrorTypes, retry_call};
 
@@ -42,6 +43,12 @@ pub struct Set<T> {
     _data: PhantomData<T>
 }
 
+impl<T> std::fmt::Debug for Set<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Set").field("name", &self.name).field("store", &self.store).finish()
+    }
+}
+
 impl<T: Serialize + DeserializeOwned> Set<T> {
     pub (crate) fn new(name: String, store: Arc<RedisObjects>, ttl: Option<Duration>) -> Self {
         Self {
@@ -70,6 +77,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
 
     /// Insert an item into the set. 
     /// Return whether the item is new to the set.
+    #[instrument(skip(value))]
     pub async fn add(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         let result = retry_call!(self.store.pool, sadd, &self.name, &data)?;
@@ -79,6 +87,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
 
     /// Insert a batch of items to the set.
     /// Return how many items were new to the set.
+    #[instrument(skip(values))]
     pub async fn add_batch(&self, values: &[T]) -> Result<usize, ErrorTypes> {
         let mut data = vec![];
         for item in values {
@@ -90,6 +99,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Add a single value to the set, but only if that wouldn't make the set grow past a given size.
+    #[instrument(skip(value))]
     pub async fn limited_add(&self, value: &T, size_limit: usize) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         let result = retry_call!(method, self.store.pool, 
@@ -99,17 +109,20 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Check if an item is in the set
+    #[instrument(skip(value))]
     pub async fn exist(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         retry_call!(self.store.pool, sismember, &self.name, &data)
     }
 
     /// Read the number of items in the set
+    #[instrument]
     pub async fn length(&self) -> Result<u64, ErrorTypes> {
         retry_call!(self.store.pool, scard, &self.name)
     }
 
     /// Read the entire content of the set
+    #[instrument]
     pub async fn members(&self) -> Result<Vec<T>, ErrorTypes> {
         let data: Vec<Vec<u8>> = retry_call!(self.store.pool, smembers, &self.name)?;
         Ok(data.into_iter()
@@ -118,6 +131,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Try to remove a given value from the set and return if any change has been made.
+    #[instrument(skip(value))]
     pub async fn remove(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         retry_call!(self.store.pool, srem, &self.name, &data)
@@ -125,6 +139,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
 
     /// Try to remove multiple items from the set.
     /// Return how many items were removed.
+    #[instrument(skip(values))]
     pub async fn remove_batch(&self, values: &[T]) -> Result<usize, ErrorTypes> {
         let mut data = vec![];
         for item in values {
@@ -134,6 +149,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Remove a given value from the set and return the new size of the set.
+    #[instrument(skip(value))]
     pub async fn drop(&self, value: &T) -> Result<usize, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
         let size: Option<usize> = retry_call!(method, self.store.pool, 
@@ -142,6 +158,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Remove and return a random item from the set.
+    #[instrument]
     pub async fn random(&self) -> Result<Option<T>, ErrorTypes>{
         let ret_val: Option<Vec<u8>> = retry_call!(self.store.pool, srandmember, &self.name)?;
         match ret_val {
@@ -159,6 +176,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     // }
 
     /// Remove and return a single value from the set.
+    #[instrument]
     pub async fn pop(&self) -> Result<Option<T>, ErrorTypes> {
         let data: Option<Vec<u8>> = retry_call!(self.store.pool, spop, &self.name)?;
         match data {
@@ -168,6 +186,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Remove and return all values from the set.
+    #[instrument]
     pub async fn pop_all(&self) -> Result<Vec<T>, ErrorTypes> {
         let length = self.length().await?;
         let mut command = cmd("SPOP");
@@ -179,6 +198,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     }
 
     /// Remove and drop all values from the set.
+    #[instrument]
     pub async fn delete(&self) -> Result<(), ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }

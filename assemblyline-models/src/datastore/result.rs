@@ -19,7 +19,7 @@ use crate::datastore::tagging::LayoutError;
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
 use crate::types::strings::Keyword;
 use crate::{random_word, ElasticMeta, Readable};
-use crate::types::{ClassificationString, ExpandingClassification, Sha256, Text};
+use crate::types::{ClassificationString, ExpandingClassification, ServiceName, Sha256, Text};
 
 use super::tagging::Tagging;
 
@@ -246,7 +246,7 @@ pub struct ResponseBody {
     pub service_version: String,
     /// Name of the service that scanned the file
     #[metadata(copyto="__text__")]
-    pub service_name: String,
+    pub service_name: ServiceName,
     /// Tool version of the service
     #[serde(default)]
     #[metadata(copyto="__text__")]
@@ -267,13 +267,14 @@ pub struct ResponseBody {
     pub service_debug_info: Option<String>,
 }
 
+
 #[cfg(feature = "rand")]
 impl rand::distr::Distribution<ResponseBody> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ResponseBody {
         ResponseBody {
             milestones: rng.random(),
             service_version: random_word(rng),
-            service_name: random_word(rng),
+            service_name: ServiceName::from_string(random_word(rng)),
             service_tool_version: None,
             supplementary: Default::default(),
             extracted: Default::default(),

@@ -88,7 +88,7 @@ async fn test_register_bad_service() {
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
-    service.name = "".to_owned();
+    service.name = "".into();
 
     let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
     assert_eq!(result.status().as_u16(), 400);

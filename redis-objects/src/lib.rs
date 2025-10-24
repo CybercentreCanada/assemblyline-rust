@@ -19,6 +19,7 @@ pub use redis::Msg;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
+use tracing::instrument;
 
 pub use self::queue::PriorityQueue;
 pub use self::queue::Queue;
@@ -39,6 +40,13 @@ pub mod set;
 pub struct RedisObjects {
     pool: deadpool_redis::Pool,
     client: redis::Client,
+    hostname: String,
+}
+
+impl std::fmt::Debug for RedisObjects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Redis").field("host", &self.hostname).finish()
+    }
 }
 
 impl RedisObjects {
@@ -73,6 +81,7 @@ impl RedisObjects {
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");
         // configuration for the pool manager itself
+        let hostname = config.addr.to_string();
         let mut pool_cfg = deadpool_redis::PoolConfig::new(1024);
         pool_cfg.timeouts.wait = Some(Duration::from_secs(5));
 
@@ -84,6 +93,7 @@ impl RedisObjects {
         Ok(Arc::new(Self{ 
             pool,
             client,
+            hostname
         }))
     }
 
@@ -113,11 +123,13 @@ impl RedisObjects {
     }
 
     /// Write a message directly to the channel given
+    #[instrument]
     pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
         retry_call!(self.pool, publish, channel, data)
     }
 
     /// Write a json message directly to the channel given
+    #[instrument(skip(value))]
     pub async fn publish_json<T: Serialize>(&self, channel: &str, value: &T) -> Result<u32, ErrorTypes> {
         self.publish(channel, &serde_json::to_vec(value)?).await
     }
@@ -133,6 +145,7 @@ impl RedisObjects {
     }
 
     /// Build a json listener that produces a stream of events using the default configuration
+    #[instrument]
     pub async fn subscribe_json<T: DeserializeOwned + Send + 'static>(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<T>> {
         self.pubsub_json_listener()
             .subscribe(channel)
@@ -145,6 +158,7 @@ impl RedisObjects {
     }
 
     /// Build a raw data listener that produces a stream of events using the default configuration
+    #[instrument]
     pub async fn subscribe(self: &Arc<Self>, channel: String) -> mpsc::Receiver<Option<Msg>> {
         self.pubsub_listener()
             .subscribe(channel)
@@ -175,6 +189,7 @@ impl RedisObjects {
     }
 
     /// List all keys on the redis server that satisfies the given pattern
+    #[instrument]
     pub async fn keys(&self, pattern: &str) -> Result<Vec<String>, ErrorTypes> {
         Ok(retry_call!(self.pool, keys, pattern)?)
     }

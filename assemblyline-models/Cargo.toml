@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-models"
-version = "0.6.5"
+version = "0.7.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -34,6 +34,8 @@ assemblyline-markings = { version = "0.1.10", path = "../assemblyline-markings" 
 
 rand = { version = "0.9", optional = true }
 log = "0.4"
+
+internment = { version = "0.8", features = ["serde", "arc"]}
 
 # tokio = { version = "1", features = ["full"], optional = true }
 

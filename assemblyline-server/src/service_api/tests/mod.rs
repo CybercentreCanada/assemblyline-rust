@@ -78,7 +78,7 @@ fn build_service() -> Service {
     Service {
         accepts: Default::default(),
         rejects: Some("empty|metadata/.*".to_owned()),
-        category: Default::default(),
+        category: "core".into(),
         classification: Default::default(),
         config: Default::default(),
         description: "A service".into(),
@@ -93,7 +93,7 @@ fn build_service() -> Service {
         uses_temp_submission_data: Default::default(),
         uses_metadata: Default::default(),
         monitored_keys: Default::default(),
-        name: "TestSvice".to_string(),
+        name: "TestSvice".into(),
         version: "100".to_string(),
         privileged: Default::default(),
         disable_cache: Default::default(),

@@ -4,6 +4,7 @@ use std::{marker::PhantomData, sync::Arc, collections::HashMap, time::Duration};
 use parking_lot::Mutex;
 use redis::AsyncCommands;
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::instrument;
 
 use crate::{RedisObjects, ErrorTypes, retry_call};
 
@@ -50,6 +51,12 @@ pub struct Hashmap<T> {
     ttl: Option<Duration>,
     last_expire_time: Arc<Mutex<Option<std::time::Instant>>>,
     _data: PhantomData<T>
+}
+
+impl<T> std::fmt::Debug for Hashmap<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Hashmp").field("store", &self.store).field("name", &self.name).finish()
+    }
 }
 
 impl<T: Serialize + DeserializeOwned> Hashmap<T> {
@@ -106,6 +113,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     /// Add the (key, value) pair to the hash for new keys.
     /// If a key already exists this operation doesn't add it.
     /// Returns true if key has been added to the table, False otherwise.
+    #[instrument(skip(value))]
     pub async fn add(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {    
         let data = serde_json::to_vec(value)?;
         let result = retry_call!(self.store.pool, hset_nx, &self.name, &key, &data)?;
@@ -114,6 +122,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     }
 
     /// Increment a key within a hash by the given delta
+    #[instrument]
     pub async fn increment(&self, key: &str, increment: i64) -> Result<i64, ErrorTypes> {
         let result = retry_call!(self.store.pool, hincr, &self.name, key, increment)?;
         self.conditional_expire().await?;
@@ -130,11 +139,13 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     //     return retry_call(self._limited_add, keys=[self.name], args=[key, json.dumps(value), size_limit])
 
     /// Test if a given key is defind within this hash
+    #[instrument]
     pub async fn exists(&self, key: &str) -> Result<bool, ErrorTypes> {
         retry_call!(self.store.pool, hexists, &self.name, key)
     }
 
     /// Read the value stored at the given key
+    #[instrument]
     pub async fn get(&self, key: &str) -> Result<Option<T>, ErrorTypes> {
         let item: Option<Vec<u8>> = retry_call!(self.store.pool, hget, &self.name, key)?;
         Ok(match item {
@@ -144,21 +155,25 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     }
 
     /// Read the value stored at the given key
+    #[instrument]
     pub async fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>, ErrorTypes> {
         Ok(retry_call!(self.store.pool, hget, &self.name, key)?)
     }
 
     /// Load all keys from the hash
+    #[instrument]
     pub async fn keys(&self) -> Result<Vec<String>, ErrorTypes> {
         retry_call!(self.store.pool, hkeys, &self.name)
     }
 
     /// Read the number of items in the hash
+    #[instrument]
     pub async fn length(&self) -> Result<u64, ErrorTypes> {
         retry_call!(self.store.pool, hlen, &self.name)
     }
 
     /// Download the entire hash into memory
+    #[instrument]
     pub async fn items(&self) -> Result<HashMap<String, T>, ErrorTypes> {
         let items: Vec<(String, Vec<u8>)> = retry_call!(self.store.pool, hgetall, &self.name)?;
         let mut out = HashMap::new();
@@ -169,12 +184,14 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     }
 
     /// Remove an item, but only if its value is as given
+    #[instrument(skip(value))]
     pub async fn conditional_remove(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(value)?;
         retry_call!(method, self.store.pool, self.conditional_remove_script.key(&self.name).arg(key).arg(&data), invoke_async)
     }
 
     /// Remove and return the item in the hash if found
+    #[instrument]
     pub async fn pop(&self, key: &str) -> Result<Option<T>, ErrorTypes> {
         let item: Option<Vec<u8>>  = retry_call!(method, self.store.pool, self.pop_script.arg(&self.name).arg(key), invoke_async)?;
         Ok(match item {
@@ -184,6 +201,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     }
 
     /// Unconditionally overwrite the value stored at a given key
+    #[instrument(skip(value))]
     pub async fn set(&self, key: &str, value: &T) -> Result<i64, ErrorTypes> {
         let data = serde_json::to_vec(value)?;
         let result = retry_call!(self.store.pool, hset, &self.name, key, &data)?;
@@ -199,6 +217,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     //     return retry_call(self.c.hset, self.name, mapping=encoded)
 
     /// Clear the content of this hash
+    #[instrument]
     pub async fn delete(&self) -> Result<(), ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }

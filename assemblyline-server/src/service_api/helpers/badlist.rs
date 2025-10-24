@@ -82,7 +82,7 @@ impl BadlistClient {
                 let mut hasher = sha2::Sha256::new();
                 hasher.write_all(format!("{}: {}", tag.tag_type, tag.value).as_bytes())?;
                 let hashes = badlist::Hashes {
-                    sha256: Some(hasher.finalize().as_slice().try_into()?),
+                    sha256: Some((&hasher.finalize()[..]).try_into()?),
                     ..Default::default()
                 };
                 Badlist {
@@ -213,7 +213,7 @@ impl BadlistClient {
             for tag_value in tag_values {
                 let mut hasher = Sha256::new();
                 hasher.update(format!("{tag_type}: {tag_value}").as_bytes());
-                lookup_keys.push(hex::encode(hasher.finalize().as_slice()));
+                lookup_keys.push(hex::encode(hasher.finalize()));
             }
         }
 

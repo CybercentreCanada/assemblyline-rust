@@ -8,6 +8,7 @@ use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
 use log::{debug, error, warn};
+use tracing::instrument;
 
 pub mod responses;
 pub mod collection;
@@ -27,7 +28,7 @@ mod test_helper;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, ServiceName, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, Result as ResultModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
@@ -116,7 +117,7 @@ pub fn create_empty_result_from_key(key: &str, dtl: i64, cl_engine: &Classificat
         expiry_ts: Some(Utc::now() + TimeDelta::days(dtl)),
         classification: ExpandingClassification::new(cl_engine.unrestricted().to_owned(), cl_engine)?,
         response: assemblyline_models::datastore::result::ResponseBody {
-            service_name: svc_name.to_owned(),
+            service_name: ServiceName::from(svc_name),
             service_version: svc_version.to_owned(),
             milestones: Default::default(),
             service_tool_version: Default::default(),
@@ -438,6 +439,12 @@ pub struct ElasticHelper {
     pub archive_access: bool,
 }
 
+impl std::fmt::Debug for ElasticHelper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ElasticHelper").finish()
+    }
+}
+
 impl ElasticHelper {
     async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool) -> Result<Self> {
         let host: url::Url = url.parse()?;
@@ -747,6 +754,7 @@ impl ElasticHelper {
     }
 
     /// start an http request with a json body
+    #[instrument(skip(body))]
     async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<reqwest::Response> {
         loop {
             *attempt += 1;
@@ -765,6 +773,7 @@ impl ElasticHelper {
     }
 
     /// start an http request with a binary body
+    #[instrument(skip(body))]
     async fn make_request_data(&self, attempt: &mut u64, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
         // TODO: body can probably be a boxed stream of some sort which will be faster to clone
         loop {
@@ -785,6 +794,7 @@ impl ElasticHelper {
     }
 
     /// checking if an index of the given name exists
+    #[instrument]
     pub async fn does_index_exist(&self, name: &str) -> Result<bool> {
         match self.make_request(&mut 0, &Request::head_index(&self.host, name)?).await {
             Ok(result) => {
@@ -799,6 +809,7 @@ impl ElasticHelper {
     }
 
     /// Check if an alias with the given name is defined
+    #[instrument]
     pub async fn does_alias_exist(&self, name: &str) -> Result<bool> {
         // self.with_retries(self.datastore.client.indices.exists_alias, name=alias)
         let request = Request::head_alias(&self.host, name)?;
@@ -807,6 +818,7 @@ impl ElasticHelper {
     }
 
     /// Create an index alias
+    #[instrument]
     pub async fn put_alias(&self, index: &str, name: &str) -> Result<()> {
         // self.with_retries(self.datastore.client.indices.put_alias, index=index, name=alias)
         let request = Request::put_alias(&self.host, index, name)?;
@@ -827,6 +839,7 @@ impl ElasticHelper {
         vec![format!("{}:{}", self.host.host_str().unwrap_or_default(), self.host.port_or_known_default().unwrap_or(80))]
     }
 
+    #[instrument]
     pub async fn remove_index(&self, name: &str) -> Result<()> {
         debug!("Removing index: {name}");
         let request = Request::delete_index(&self.host, name)?;
@@ -841,6 +854,7 @@ impl ElasticHelper {
     } 
 
     // retry_function=None
+    #[instrument]
     async fn get_task_results(&self, task: &str) -> Result<responses::TaskResponse> {
         // This function is only used to wait for a asynchronous task to finish in a graceful manner without
         //  timing out the elastic client. You can create an async task for long running operation like:
@@ -864,6 +878,7 @@ impl ElasticHelper {
         Ok(res.response)
     }
 
+    #[instrument]
     pub async fn list_indices(&self, prefix: &str) -> Result<Vec<String>> {
         let request = Request::get_indices(&self.host, prefix)?;
         let response = self.make_request(&mut 0, &request).await?;
@@ -987,6 +1002,12 @@ pub struct Elastic {
     pub service_delta: Collection<ServiceDelta>,
 }
 
+impl std::fmt::Debug for Elastic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Elastic").finish()
+    }
+}
+
 impl Elastic {
     pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
         let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
@@ -1021,6 +1042,7 @@ impl Elastic {
         }))
     }
 
+    #[instrument]
     pub async fn list_indices(&self) -> Result<Vec<String>> {
         self.es.list_indices(&self.prefix).await
     } 
@@ -1101,6 +1123,7 @@ impl Elastic {
     //     todo!();
     // }
 
+    #[instrument]
     pub async fn get_service_with_delta(&self, service_name: &str, version: Option<String>) -> Result<Option<Service>> {
         let svc = self.service_delta.get_json(service_name, None).await?;
         let mut svc = match svc {
@@ -1136,6 +1159,7 @@ impl Elastic {
         Ok(serde_json::from_value(svc_version_data)?)
     }
 
+    #[instrument]
     pub async fn list_all_services(&self) -> Result<Vec<Service>> {
         // List all services from service delta (Return all fields if full is true)
         // // service_delta = list(self.service_delta.stream_search("id:*", fl="*" if full else None))
@@ -1179,12 +1203,14 @@ impl Elastic {
         return Ok(services);
     }
 
+    #[instrument]
     pub async fn list_enabled_services(&self) -> Result<Vec<Service>> {
         let mut services = self.list_all_services().await?;
         services.retain(|service|service.enabled);
         Ok(services)
     }
 
+    #[instrument]
     pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> Result<usize> {
         let mut attempts = 0;
 
@@ -1299,6 +1325,7 @@ impl Elastic {
         }
     }
 
+    #[instrument]
     pub async fn list_service_heuristics(&self, service_name: &str) -> Result<Vec<Heuristic>> {
         let mut heuristics = vec![];
         let mut cursor = self.heuristic.stream_search(&format!("id:{}.*", service_name.to_uppercase()), "*".to_string(), vec![], None, None, None).await?;
@@ -1308,6 +1335,7 @@ impl Elastic {
         Ok(heuristics)
     }
 
+    #[instrument]
     pub async fn list_all_heuristics(&self) -> Result<Vec<Heuristic>> {
         let mut heuristics = vec![];
         let mut cursor = self.heuristic.stream_search("id:*", "*".to_string(), vec![], None, None, None).await?;
@@ -1317,6 +1345,7 @@ impl Elastic {
         Ok(heuristics)
     }
 
+    #[instrument]
     pub async fn ping(&self) -> bool {
         match self.es.client.head(self.es.host.clone()).send().await {
             Ok(res) => res.status().is_success(),
@@ -1335,6 +1364,7 @@ impl Elastic {
         Ok(())
     }
 
+    #[instrument(skip(cl_engine))]
     pub async fn get_single_result(&self, key: &str, dtl: i64, cl_engine: &ClassificationParser) -> anyhow::Result<Option<ResultModel>> {
         if key.ends_with(".e") {
             Ok(Some(create_empty_result_from_key(key, dtl, cl_engine)?))

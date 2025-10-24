@@ -13,7 +13,6 @@ use crate::common::version::get_version;
 pub mod auth;
 pub mod badlist;
 pub mod tasking;
-pub mod metrics;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct APIResponse<'a, B: Send> {

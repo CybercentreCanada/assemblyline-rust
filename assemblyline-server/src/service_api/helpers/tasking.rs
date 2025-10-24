@@ -10,15 +10,16 @@ use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
+use assemblyline_models::messages::service_heartbeat::Metrics;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::strings::Keyword;
-use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, ServiceName, Sha256};
 use assemblyline_filestore::FileStore;
 use chrono::{TimeDelta, Utc};
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
-use redis_objects::{increment, Hashmap, RedisObjects};
+use redis_objects::{increment, AutoExportingMetrics, Hashmap, RedisObjects};
 use serde_json::{json, Value};
 use thiserror::Error;
 
@@ -26,7 +27,7 @@ use crate::service_api::v1::task::models::Result as ApiResult;
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
 use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
-use crate::constants::{ServiceStatus, SERVICE_STATE_HASH};
+use crate::constants::{ServiceStatus, METRICS_CHANNEL, SERVICE_STATE_HASH};
 use crate::dispatcher::client::DispatchClient;
 use crate::elastic::bulk::TypedBulkPlan;
 use crate::elastic::responses::BulkResult;
@@ -37,7 +38,19 @@ use crate::service_api::v1::task::FinishedBody;
 use crate::services::ServiceHelper;
 use crate::Core;
 
-use super::metrics::get_metrics_factory;
+// {
+//     use std::collections::HashMap;
+//     use std::sync::{Arc, LazyLock};
+
+//     ;
+//     use parking_lot::Mutex;
+//     use redis_objects::{AutoExportingMetrics, RedisObjects};
+
+//     use crate::constants::METRICS_CHANNEL;
+
+
+ 
+// }
 
 
 /// A helper class to simplify tasking for privileged services and service-server.
@@ -53,11 +66,12 @@ pub struct TaskingClient {
     filestore: Arc<FileStore>,
     classification_engine: Arc<ClassificationParser>,
     dispatch_client: DispatchClient,
-    status_table: Hashmap<(String, ServiceStatus, f64)>,
+    status_table: Hashmap<(ServiceName, ServiceStatus, f64)>,
     services: ServiceHelper,
     heuristic_handler: HeuristicHandler,
     heuristics: Arc<Mutex<HashMap<String, Heuristic>>>,
     tag_safelister: Arc<Mutex<Arc<TagSafelister>>>,
+    metrics_exporters: Mutex<HashMap<ServiceName, AutoExportingMetrics<Metrics>>>
 }
 
 impl TaskingClient {
@@ -143,6 +157,7 @@ impl TaskingClient {
             heuristic_handler: HeuristicHandler::new(core.datastore.clone()).await?,
             heuristics,
             tag_safelister: tag_safelist_watcher(core.config.clone(), core.datastore.clone(), None).await?,
+            metrics_exporters: Mutex::new(Default::default()),
         })
     }
 
@@ -334,7 +349,7 @@ impl TaskingClient {
             // Notify components watching for heuristic config changes
             self.redis_volatile.publish_json("heuristics", &HeuristicChange {
                 operation: Operation::Modified,
-                service_name: service.name.clone()
+                service_name: service.name
             }).await?;
         }
 
@@ -354,6 +369,21 @@ impl TaskingClient {
             new_heuristics, 
             service_config
         })
+    }
+
+    pub fn get_metrics_factory(&self, service_name: ServiceName) -> AutoExportingMetrics<Metrics> {
+        let mut exporters = self.metrics_exporters.lock();
+        if let Some(metrics) = exporters.get(&service_name) {
+            return metrics.clone()
+        }
+
+        let metrics = self.redis_metrics.auto_exporting_metrics(METRICS_CHANNEL.to_owned(), "service".to_owned())
+            .counter_name(service_name.to_string())
+            .export_zero(false)
+            .start();
+
+        exporters.insert(service_name.to_owned(), metrics.clone());
+        return metrics;
     }
 
 }
@@ -439,8 +469,8 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 } 
 
 impl TaskingClient {
-    pub async fn get_task(&self, client_id: &str, service_name: &str, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
-        let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
+    pub async fn get_task(&self, client_id: &str, service_name: ServiceName, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
+        let metric_factory = self.get_metrics_factory(service_name);
         let start_time = std::time::Instant::now();
 
         let status_expiry = match status_expiry {
@@ -454,7 +484,7 @@ impl TaskingClient {
         };
 
         // Set the service status to Idle since we will be waiting for a task
-        self.status_table.set(client_id, &(service_name.into(), ServiceStatus::Idle, status_expiry)).await?;
+        self.status_table.set(client_id, &(service_name, ServiceStatus::Idle, status_expiry)).await?;
 
         // Getting a new task
         let task = self.dispatch_client.request_work(
@@ -489,7 +519,7 @@ impl TaskingClient {
         // get the cache key for if a result exists for this task already
         let result_key = assemblyline_models::datastore::Result::help_build_key(
             &task.fileinfo.sha256,
-            service_name,
+            &service_name,
             service_version,
             false,
             false,
@@ -620,7 +650,7 @@ fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
 
 impl TaskingClient {
 
-    pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: &str) -> Result<Value> {
+    pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: ServiceName) -> Result<Value> {
         match service_task {
             FinishedBody::Success { task, exec_time, freshen, result } => {
                 let task = finish_parsing_task(task)?;
@@ -661,7 +691,7 @@ impl TaskingClient {
         task: Task, 
         mut result: ApiResult,
         client_id: &str, 
-        service_name: &str,
+        service_name: ServiceName,
         freshen: bool
     ) -> Result<Vec<Sha256>> {
         let sid = task.sid;
@@ -906,7 +936,7 @@ impl TaskingClient {
                 response: Response { 
                     message: format!("The following tags were rejected: {error_message}").into(), 
                     service_debug_info: result.response.service_debug_info.clone(), 
-                    service_name: result.response.service_name.clone(), 
+                    service_name: result.response.service_name, 
                     service_tool_version: result.response.service_tool_version.clone(), 
                     service_version: result.response.service_version.clone(), 
                     status: Status::FailRecoverable,
@@ -938,7 +968,7 @@ impl TaskingClient {
         self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, tagging_error).await.context("service_finished")?;
 
         // Metrics
-        let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
+        let metric_factory = self.get_metrics_factory(service_name);
         if score > 0 {
             increment!(metric_factory, scored);
         } else {
@@ -958,7 +988,7 @@ impl TaskingClient {
         task: Task, 
         mut error: assemblyline_models::datastore::error::Error,
         client_id: &str, 
-        service_name: &str,
+        service_name: ServiceName,
     ) -> Result<()> {
         info!("[{}] {client_id} - {service_name} failed to complete task in {exec_time}ms", task.sid);
 
@@ -975,7 +1005,7 @@ impl TaskingClient {
         self.dispatch_client.service_failed(task, &error_key, error).await?;
 
         // Metrics
-        let metric_factory = get_metrics_factory(&self.redis_metrics, service_name);
+        let metric_factory = self.get_metrics_factory(service_name);
         if status.is_recoverable() {
             increment!(metric_factory, fail_recoverable);
         } else {

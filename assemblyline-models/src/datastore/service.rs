@@ -5,7 +5,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
-use crate::types::{ClassificationString, JsonMap, Text, NonZeroInteger};
+use crate::types::{ClassificationString, JsonMap, NonZeroInteger, ServiceName, Text};
 use crate::{ElasticMeta, Readable};
 
 /// Environment Variable Model
@@ -311,7 +311,7 @@ pub struct Service {
     /// Which category does this service belong to?
     #[metadata(store=true, copyto="__text__")]
     #[serde(default="default_category")]
-    pub category: String,
+    pub category: ServiceName,
     /// Classification of the service
     #[serde(default="unrestricted_classification")]
     pub classification: String,
@@ -364,7 +364,7 @@ pub struct Service {
 
     /// Name of service
     #[metadata(store=true, copyto="__text__")]
-    pub name: String,
+    pub name: ServiceName,
     /// Version of service
     #[metadata(store=true)]
     pub version: String,
@@ -402,10 +402,10 @@ pub struct Service {
     
     /// List of service names/categories where recursion is prevented.
     #[serde(default)]
-    pub recursion_prevention: Vec<String>,
+    pub recursion_prevention: Vec<ServiceName>,
 }
 
-fn default_category() -> String { "Static Analysis".to_owned() }
+fn default_category() -> ServiceName { ServiceName::from_string("Static Analysis".to_owned()) }
 fn default_description() -> Text { Text("NA".to_owned()) }
 fn default_stage() -> String { "CORE".to_owned() }
 fn default_timeout() -> i32 { 60 }

@@ -7,6 +7,7 @@ use redis::{AsyncCommands, Msg};
 use serde::Serialize;
 use tokio::sync::mpsc;
 use serde::de::DeserializeOwned;
+use tracing::instrument;
 
 use crate::{retry_call, ErrorTypes, RedisObjects};
 
@@ -167,17 +168,25 @@ pub struct Publisher {
     channel: String,
 }
 
+impl std::fmt::Debug for Publisher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Publisher").field("store", &self.store).field("channel", &self.channel).finish()
+    }
+}
+
 impl Publisher {
     pub (crate) fn new(store: Arc<RedisObjects>, channel: String) -> Self {
         Publisher { store, channel }
     }
 
     /// Publish a message in a serializable type
+    #[instrument(skip(data))]
     pub async fn publish<T: Serialize>(&self, data: &T) -> Result<(), ErrorTypes> {
         self.publish_data(&serde_json::to_vec(data)?).await
     }
 
     /// Publish raw data as a pubsub message
+    #[instrument(skip(data))]
     pub async fn publish_data(&self, data: &[u8]) -> Result<(), ErrorTypes> {
         retry_call!(self.store.pool, publish, &self.channel, data)
     }

@@ -7,13 +7,12 @@ use assemblyline_models::config::{Config, TemporaryKeyType};
 use assemblyline_models::datastore::result::{ResponseBody, File as ResponseFile};
 use assemblyline_models::datastore::submission::SubmissionState;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::datastore::{result, submission, Error, File, Service, Submission,};
+use assemblyline_models::datastore::{result, submission, Error, File, Service, Submission};
 
 use assemblyline_models::messages::dispatching::{FileTreeData, SubmissionDispatchMessage};
 use assemblyline_models::messages::submission::{File as MessageFile, SubmissionParams};
 use assemblyline_models::messages::task::{DataItem, FileInfo, ServiceResult, Task};
-use assemblyline_models::types::{ClassificationString, ExpandingClassification,  Sha256, Text, Wildcard};
-use itertools::Itertools;
+use assemblyline_models::types::{ClassificationString, ServiceName, Sha256, ExpandingClassification,  Text, Wildcard};
 use log::{debug, info};
 use poem::listener::Acceptor;
 use poem::EndpointExt;
@@ -28,12 +27,12 @@ use crate::{Core, TestGuard};
 
 
 
-fn test_services() -> HashMap<String, Service> {
+fn test_services() -> HashMap<ServiceName, Service> {
     let mut bonus = dummy_service("bonus", "pre", None, None, Some("unknown"), Some(true));
     bonus.enabled = false;
 
     let mut sandbox = dummy_service("sandbox", "core", Some("Dynamic Analysis"), None, Some("unknown"), Some(true));
-    sandbox.recursion_prevention.push("Dynamic Analysis".to_string());
+    sandbox.recursion_prevention.push("Dynamic Analysis".into());
     return [
         ("bonus", bonus),
         ("extract", dummy_service("extract", "pre", None, None, None, Some(true))),
@@ -43,7 +42,7 @@ fn test_services() -> HashMap<String, Service> {
         ("av-b", dummy_service("av-b", "core", None, None, None, None)),
         ("frankenstrings", dummy_service("frankenstrings", "core", None, None, None, None)),
         ("xerox", dummy_service("xerox", "post", None, None, None, None)),
-    ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
+    ].into_iter().map(|(key, value)|(key.into(), value)).collect()
 }
 
 pub async fn setup() -> (Core, TestGuard) {
@@ -64,7 +63,7 @@ fn uniform_string(value: char, length: usize) -> String {
     out
 }
 
-fn make_result(file_hash: Sha256, service: String) -> result::Result {
+fn make_result(file_hash: Sha256, service: ServiceName) -> result::Result {
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
     new_result.response.service_name = service;
@@ -72,10 +71,10 @@ fn make_result(file_hash: Sha256, service: String) -> result::Result {
 }
 
 // recoverable=true
-fn make_error(file_hash: Sha256, service: &str, recoverable: bool) -> Error {
+fn make_error(file_hash: Sha256, service: ServiceName, recoverable: bool) -> Error {
     use assemblyline_models::datastore::error::Status;
     let mut new_error: Error = rand::rng().random();
-    new_error.response.service_name = service.to_string();
+    new_error.response.service_name = service;
     new_error.sha256 = file_hash;
     if recoverable {
         new_error.response.status = Status::FailRecoverable;
@@ -144,8 +143,8 @@ async fn test_simple() {
     // disp.pull_submissions();
     let task = disp.get_test_report(sid).await.unwrap();
 
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".into())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".into())));
     assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
     assert_eq!(core.get_service_queue("wrench").length().await.unwrap(), 1);
 
@@ -154,59 +153,60 @@ async fn test_simple() {
     disp.send_dispatch_action(crate::dispatcher::DispatchAction::DispatchFile(sid, file_hash.clone())).await;
     let task = disp.get_test_report(sid).await.unwrap();
 
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".into())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".into())));
     // note that the queue doesn't pile up
     assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
     assert_eq!(core.get_service_queue("wrench").length().await.unwrap(), 1);
 
     info!("==== third dispatch");
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.temporary_submission_data, &[
         DataItem{ name: "cats".to_string(), value: json!("big") },
         DataItem{ name: "ancestry".to_string(), value: json!([[{"type": "unknown", "parent_relation": "ROOT", "sha256": file.sha256}]]) }
     ]);
-    let service_task = task.queue_keys.get(&(file_hash.clone(), "extract".to_string())).unwrap().0.clone();
-    client.service_failed(service_task, "abc123", make_error(file_hash.clone(), "extract", true)).await.unwrap();
+
+    let service_task = task.queue_keys.get(&(file_hash.clone(), "extract".into())).unwrap().0.clone();
+    client.service_failed(service_task, "abc123", make_error(file_hash.clone(), "extract".into(), true)).await.unwrap();
 
     let task = disp.get_test_report(sid).await.unwrap();
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".to_owned())));
-    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".to_owned())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "extract".into())));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), "wrench".into())));
     assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
 
     // Mark extract as finished, wrench as failed
     info!("==== fourth dispatch");
-    let task_extract = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
-    let task_wrench = client.request_work("0", "wrench", "0", None, true, None).await.unwrap().unwrap();
-    client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".to_owned()), None, None, vec![]).await.unwrap();
-    client.service_failed(task_wrench, "wrench-error", make_error(file_hash.clone(), "wrench", false)).await.unwrap();
+    let task_extract = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
+    let task_wrench = client.request_work("0", "wrench".into(), "0", None, true, None).await.unwrap().unwrap();
+    client.service_finished(task_extract, "extract-result".to_string(), make_result(file_hash.clone(), "extract".into()), None, None, vec![]).await.unwrap();
+    client.service_failed(task_wrench, "wrench-error", make_error(file_hash.clone(), "wrench".into(), false)).await.unwrap();
 
     let task = disp.get_test_report(sid).await.unwrap();
-    assert!(task.service_errors.contains_key(&(file_hash.clone(), "wrench".to_string())));
-    assert!(task.service_results.contains_key(&(file_hash.clone(), "extract".to_string())));
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "wrench".into())));
+    assert!(task.service_results.contains_key(&(file_hash.clone(), "extract".into())));
     assert_eq!(core.get_service_queue("av-a").length().await.unwrap(), 1);
     assert_eq!(core.get_service_queue("av-b").length().await.unwrap(), 1);
     assert_eq!(core.get_service_queue("frankenstrings").length().await.unwrap(), 1);
 
     // Have the AVs fail, frankenstrings finishes
     info!("==== fifth dispatch");
-    let task_av_a = client.request_work("0", "av-a", "0", None, true, None).await.unwrap().unwrap();
-    let task_av_b = client.request_work("0", "av-b", "0", None, true, None).await.unwrap().unwrap();
-    let task_frankenstrings = client.request_work("0", "frankenstrings", "0", None, true, None).await.unwrap().unwrap();
-    client.service_failed(task_av_a, "av-a-error", make_error(file_hash.clone(), "av-a", false)).await.unwrap();
-    client.service_failed(task_av_b, "av-b-error", make_error(file_hash.clone(), "av-b", false)).await.unwrap();
-    client.service_finished(task_frankenstrings, "f-result".to_owned(), make_result(file_hash.clone(), "frankenstrings".to_owned()), None, None, vec![]).await.unwrap();
+    let task_av_a = client.request_work("0", "av-a".into(), "0", None, true, None).await.unwrap().unwrap();
+    let task_av_b = client.request_work("0", "av-b".into(), "0", None, true, None).await.unwrap().unwrap();
+    let task_frankenstrings = client.request_work("0", "frankenstrings".into(), "0", None, true, None).await.unwrap().unwrap();
+    client.service_failed(task_av_a, "av-a-error", make_error(file_hash.clone(), "av-a".into(), false)).await.unwrap();
+    client.service_failed(task_av_b, "av-b-error", make_error(file_hash.clone(), "av-b".into(), false)).await.unwrap();
+    client.service_finished(task_frankenstrings, "f-result".to_owned(), make_result(file_hash.clone(), "frankenstrings".into()), None, None, vec![]).await.unwrap();
 
     let task = disp.get_test_report(sid).await.unwrap();
-    assert!(task.service_results.contains_key(&(file_hash.clone(), "frankenstrings".to_owned())));
-    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-a".to_owned())));
-    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-b".to_owned())));
+    assert!(task.service_results.contains_key(&(file_hash.clone(), "frankenstrings".into())));
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-a".into())));
+    assert!(task.service_errors.contains_key(&(file_hash.clone(), "av-b".into())));
     assert_eq!(core.get_service_queue("xerox").length().await.unwrap(), 1);
 
     // Finish the xerox service and check if the submission completion got checked
     info!("==== sixth dispatch");
-    let task_xerox = client.request_work("0", "xerox", "0", None, true, None).await.unwrap().unwrap();
-    client.service_finished(task_xerox, "xerox-result-key".to_owned(), make_result(file_hash, "xerox".to_owned()), None, None, vec![]).await.unwrap();
+    let task_xerox = client.request_work("0", "xerox".into(), "0", None, true, None).await.unwrap().unwrap();
+    client.service_finished(task_xerox, "xerox-result-key".to_owned(), make_result(file_hash, "xerox".into()), None, None, vec![]).await.unwrap();
     // disp.pull_service_results()
     // disp.service_worker(disp.process_queue_index(sid))
     // disp.save_submission()
@@ -245,7 +245,7 @@ async fn test_dispatch_extracted() {
     sub.params.max_extracted = 5;
     sub.params.ignore_recursion_prevention = false;
     sub.to_be_deleted = false;
-    sub.params.services.selected = vec!["extract".to_string(), "sandbox".to_string()];
+    sub.params.services.selected = vec!["extract".into(), "sandbox".into()];
     sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
     // sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
     sub.params.submitter = user.uname.clone();
@@ -262,12 +262,12 @@ async fn test_dispatch_extracted() {
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services, &core.config)).await.unwrap();
 
     // Finish one service extracting a file
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash.clone();
-    new_result.response.service_name = "extract".to_string();
+    new_result.response.service_name = "extract".into();
     new_result.response.extracted = vec![result::File{
         sha256: second_file_hash.clone(),
         name: "second-*".to_owned(),
@@ -280,25 +280,27 @@ async fn test_dispatch_extracted() {
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job has reached
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
+
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
-    new_result.response.service_name = "sandbox".to_string();
+    new_result.response.service_name = "sandbox".into();
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     //
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
+
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash;
-    new_result.response.service_name = "extract".to_string();
+    new_result.response.service_name = "extract".into();
     client.service_finished(job, "extracted-done-2".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // see that the job doesn't reach sandbox
-    assert!(client.request_work("0", "sandbox", "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
+    assert!(client.request_work("0", "sandbox".into(), "0", Some(Duration::from_secs(20)), true, None).await.unwrap().is_none());
 }
 
 // MARK: extracted bypass drp
@@ -334,7 +336,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
     // let sid = sub.sid;
     sub.params.ignore_cache = false;
     sub.params.ignore_recursion_prevention = true;
-    sub.params.services.selected = vec!["extract".to_string(), "sandbox".to_string()];
+    sub.params.services.selected = vec!["extract".into(), "sandbox".into()];
     sub.params.max_extracted = 5;
     sub.to_be_deleted = false;
     sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
@@ -354,12 +356,12 @@ async fn test_dispatch_extracted_bypass_drp()  {
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services, &core.config)).await.unwrap();
 
     // Finish one service extracting a file
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash.clone();
-    new_result.response.service_name = "extract".to_string();
+    new_result.response.service_name = "extract".into();
     // This extracted file should be able to bypass Dynamic Recursion Prevention
     new_result.response.extracted = vec![result::File{
         sha256: second_file_hash.clone(),
@@ -373,26 +375,26 @@ async fn test_dispatch_extracted_bypass_drp()  {
     client.service_finished(job, "extracted-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // Then 'sandbox' service will analyze the same file, give result
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "./file");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = file_hash;
-    new_result.response.service_name = "sandbox".to_string();
+    new_result.response.service_name = "sandbox".into();
     client.service_finished(job, "sandbox-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // "extract" service should have a task for the extracted file, give results to move onto next stage
-    let job = client.request_work("0", "extract", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
     let mut new_result: result::Result = rand::rng().random();
     new_result.sha256 = second_file_hash.clone();
-    new_result.response.service_name = "extract".to_string();
+    new_result.response.service_name = "extract".into();
     client.service_finished(job, "extract-done".to_string(), new_result, None, None, vec![]).await.unwrap();
 
     // "sandbox" should have a task for the extracted file
     // disp.dispatch_file(disp.tasks.get(sid), second_file_hash)
-    let job = client.request_work("0", "sandbox", "0", None, true, None).await.unwrap().unwrap();
+    let job = client.request_work("0", "sandbox".into(), "0", None, true, None).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, second_file_hash);
     assert_eq!(job.filename, "second-*");
 }
@@ -442,19 +444,19 @@ async fn test_timeout() {
     let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
     disp.dispatch_submission(SubmissionTask::new(task, None, &core.services, &core.config)).await.unwrap();
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 
-    let job = client.request_work("0", "extract", "0", None, true, Some(false)).await.unwrap().unwrap();
+    let job = client.request_work("0", "extract".into(), "0", None, true, Some(false)).await.unwrap().unwrap();
     assert_eq!(job.fileinfo.sha256, file_hash);
     assert_eq!(job.filename, "file");
 
-    let key = (file_hash, "extract".to_string());
+    let key = (file_hash, "extract".into());
     for _ in 0..10 {
         let task = disp.get_test_report(sid).await.unwrap();
         if task.service_errors.contains_key(&key) {
@@ -511,7 +513,7 @@ async fn test_prevent_result_overwrite() {
 
     // Create a result that's not "empty"
     let mut result: result::Result = rand::rng().random();
-    result.response.service_name = task.service_name.clone();
+    result.response.service_name = task.service_name;
     result.sha256 = task.fileinfo.sha256.clone();
     result.result.score = 1;
     let result_key = result.build_key(None).unwrap();
@@ -553,7 +555,7 @@ async fn test_create_submission_task() {
 
     let shas : Vec<Sha256> = vec![uniform_string('0', 64).parse().unwrap(), uniform_string('1', 64).parse().unwrap(), uniform_string('2', 64).parse().unwrap(), uniform_string('3', 64).parse().unwrap()];
 
-    let mut errors = shas.iter().map(|s| format!("{}.serviceName.v0_0_0.c0.e0", s)).collect_vec();
+    let errors :Vec<String> = shas.iter().map(|s| format!("{}.serviceName.v0_0_0.c0.e0", s)).collect();
 
     //  create files and results with file tree:
     //      root1
@@ -589,14 +591,14 @@ async fn test_create_submission_task() {
     let mut results : HashMap<String, result::Result> = HashMap::new();
 
     // root file result extracted one child
-    let mut root_file_result = make_result(shas[0].clone(), test_service_name1.clone());
+    let mut root_file_result = make_result(shas[0].clone(), ServiceName::from_string(test_service_name1.clone()));
     root_file_result.response = {
         let mut res = rand::random::<ResponseBody>();
         res.extracted = vec![ResponseFile::new(files[1].sha256.clone(), files[1].name.clone())];
         res
     };
 
-    let mut middle_file_result = make_result(shas[1].clone(), test_service_name1.clone());
+    let mut middle_file_result = make_result(shas[1].clone(), ServiceName::from_string(test_service_name1.clone()));
     middle_file_result.response = {
         let mut res = rand::random::<ResponseBody>();
         res.extracted = vec![ResponseFile::new(files[2].sha256.clone(), files[2].name.clone()),
@@ -728,13 +730,13 @@ async fn test_create_submission_task() {
     // check service results
     let task_results = task.service_results.clone();
     for k in results.keys() {
-        if let [sha, service, _] = k.splitn(3, ".").collect_vec()[..] {
+        if let [sha, service, _] = k.splitn(3, ".").collect::<Vec<_>>()[..] {
             let sha256: Sha256 = match sha.parse() {
                             Ok(sha) => sha,
                             Err(_) => continue,
             };
 
-            let res_summary = task_results.get(&(sha256.clone(), service.to_string())).expect(format!("Cannot find sha {sha256} and service {service} in task.service_results.").as_str());
+            let res_summary = task_results.get(&(sha256.clone(), ServiceName::from(service))).expect(format!("Cannot find sha {sha256} and service {service} in task.service_results.").as_str());
 
             assert_eq!(res_summary.key, *k);
 
@@ -744,12 +746,12 @@ async fn test_create_submission_task() {
     let task_errors = task.service_errors.clone();
 
     for e in errors {
-        if let [sha, service, _] = e.splitn(3, ".").collect_vec()[..] {
+        if let [sha, service, _] = e.splitn(3, ".").collect::<Vec<_>>()[..] {
             let sha256: Sha256 = match sha.parse() {
                             Ok(sha) => sha,
                             Err(_) => continue,
             };
-            let error = task_errors.get(&(sha256.clone(), service.to_string())).expect(format!("Cannot find sha {sha256} and service {service} in task.service_errors.").as_str());
+            let error = task_errors.get(&(sha256.clone(), ServiceName::from(service))).expect(format!("Cannot find sha {sha256} and service {service} in task.service_errors.").as_str());
             assert_eq!(*error, *error);
         };
     }

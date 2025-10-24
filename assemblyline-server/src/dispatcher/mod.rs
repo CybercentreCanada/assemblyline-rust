@@ -4,7 +4,6 @@ mod tests;
 pub mod client;
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
-use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,7 +20,7 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
-use assemblyline_models::types::{Wildcard, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::types::{Wildcard, ExpandingClassification, JsonMap, Sha256, Sid, ServiceName};
 use assemblyline_models::Readable;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
@@ -33,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
+use tracing::instrument;
 
 
 use crate::common::metrics::CPUTracker;
@@ -116,16 +116,16 @@ enum DispatchAction {
     Check(Sid),
     BadSid(Sid),
     DescribeStatus(Sid, redis_objects::Queue<WatchQueueMessage>),
-    ListOutstanding(Sid, oneshot::Sender<HashMap<String, u64>>),
+    ListOutstanding(Sid, oneshot::Sender<HashMap<ServiceName, u64>>),
     Terminate(Sid, oneshot::Sender<()>),
     DispatchFile(Sid, Sha256),
     TestReport(Sid, oneshot::Sender<TestReport>),
 }
 
 pub struct TestReport {
-    pub queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>, Instant)>,
-    pub service_results: HashMap<(Sha256, String), ResultSummary>,
-    pub service_errors: HashMap<(Sha256, String), String>,
+    pub queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
+    pub service_results: HashMap<(Sha256, ServiceName), ResultSummary>,
+    pub service_errors: HashMap<(Sha256, ServiceName), String>,
 }
 
 impl DispatchAction {
@@ -149,11 +149,12 @@ impl DispatchAction {
 struct ServiceStartMessage {
     sid: Sid,
     sha: Sha256,
-    service_name: String,
+    service_name: ServiceName,
     worker_id: String,
     dispatcher_id: String,
     task_id: Option<u64>,
 }
+
 
 #[derive(Serialize, Deserialize, Clone)]
 struct AncestoryEntry {
@@ -167,7 +168,7 @@ struct AncestoryEntry {
 #[derive(Debug)]
 struct MonitorTask {
     /// Service name
-    service: String,
+    service: ServiceName,
     /// sha256 of file in question
     sha: Sha256,
     /// The temporary values this task was last dispatached with
@@ -196,7 +197,7 @@ struct SubmissionTask {
 
     file_info: HashMap<Sha256, Option<Arc<FileInfo>>>,
     file_names: HashMap<Sha256, String>,
-    file_schedules: HashMap<Sha256, Vec<Vec<String>>>,
+    file_schedules: HashMap<Sha256, Vec<Vec<ServiceName>>>,
     file_tags: HashMap<Sha256, HashMap<String, TagEntry>>, // = defaultdict(dict),
     file_depth: HashMap<Sha256, u32>,
     //
@@ -210,33 +211,30 @@ struct SubmissionTask {
     /// files that are exempt from recursion prevention
     dynamic_recursion_bypass: HashSet<Sha256>,
     /// services that may want to be retried with more information from the shared temporary data
-    monitoring: HashMap<(Sha256, String), MonitorTask>,
+    monitoring: HashMap<(Sha256, ServiceName), MonitorTask>,
 
     // log and error information that may be passed through to the user
-    service_logs: HashMap<(Sha256, String), Vec<String>>, // = defaultdict(list),
+    service_logs: HashMap<(Sha256, ServiceName), Vec<String>>, // = defaultdict(list),
     extra_errors: Vec<String>,
 
-    service_results: HashMap<(Sha256, String), ResultSummary>,
-    service_errors: HashMap<(Sha256, String), String>,
-    service_attempts: HashMap<(Sha256, String), u32>, //] = defaultdict(int),
-    running_services: HashMap<(Sha256, String), ServiceTask>,
-    queue_keys: HashMap<(Sha256, String), (ServiceTask, Vec<u8>, Instant)>,
+    service_results: HashMap<(Sha256, ServiceName), ResultSummary>,
+    service_errors: HashMap<(Sha256, ServiceName), String>,
+    service_attempts: HashMap<(Sha256, ServiceName), u32>, //] = defaultdict(int),
+    running_services: HashMap<(Sha256, ServiceName), ServiceTask>,
+    queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
 
     // mapping from file hash to a set of services that shouldn't be run on
     // any children (recursively) of that file
-    _forbidden_services: HashMap<Sha256, HashSet<String>>,
-    // children : Set(parents)
+    _forbidden_services: HashMap<Sha256, HashSet<ServiceName>>,
     _parent_map: HashMap<Sha256, HashSet<Sha256>>,
 }
 
 impl std::fmt::Debug for SubmissionTask {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SubmissionTask")
-        .field("sid", &self.submission.sid)
-        .field("file_names", &self.file_names)
-        .finish()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SubmissionTask").field("sid", &self.submission.sid).field("active_files", &self.active_files.len()).field("dropped_files", &self.dropped_files.len()).finish()
     }
 }
+
 
 impl SubmissionTask {
 
@@ -341,6 +339,7 @@ impl SubmissionTask {
                         Err(_) => continue,
                     };
 
+                    let service = ServiceName::from(service);
                     let service = match scheduler.get(service) {
                         Some(service) => service,
                         None => continue,
@@ -380,9 +379,9 @@ impl SubmissionTask {
                         }
                     }
 
-                    let service = service.to_owned();
-
                     // stored all the child - parent file information from service results if the file is not getting rescanned by the service
+                    let service = ServiceName::from_string(service.to_owned());
+
                     if !rescan.contains(&service) {
                         let extracted = result.response.extracted.to_owned();
                         out.register_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
@@ -407,7 +406,7 @@ impl SubmissionTask {
         for e in args.errors {
             if let [sha256, service, ..] = e.splitn(3, ".").collect_vec()[..] {
                 if let Ok(sha256) = sha256.parse() {
-                    let service = service.to_owned();
+                    let service = ServiceName::from(service);
                     out.service_errors.insert((sha256, service), e);
                 }
             }
@@ -447,7 +446,7 @@ impl SubmissionTask {
     // }
 
     /// Mark that children of a given file should not be routed to a service.
-    fn forbid_for_children(&mut self, sha256: Sha256, service_name: String) {
+    fn forbid_for_children(&mut self, sha256: Sha256, service_name: ServiceName) {
         self._forbidden_services.entry(sha256).or_default().insert(service_name);
     }
 
@@ -492,7 +491,7 @@ impl SubmissionTask {
     // Note that this is computed dynamically from the parent map every time it is
     // called. This is to account for out of order result collection in unusual
     // circumstances like replay.
-    fn find_recursion_excluded_services(&self, sha256: &Sha256) -> Vec<String> {
+    fn find_recursion_excluded_services(&self, sha256: &Sha256) -> Vec<ServiceName> {
         let mut output = vec![];
         for parent in self.all_ancestors(sha256) {
             if let Some(forbidden) = self._forbidden_services.get(parent) {
@@ -504,8 +503,8 @@ impl SubmissionTask {
     }
 
     /// A service with monitoring has dispatched, keep track of the conditions.
-    fn set_monitoring_entry(&mut self, sha256: Sha256, service_name: String, values: HashMap<String, Option<serde_json::Value>>) {
-        self.monitoring.insert((sha256.clone(), service_name.clone()), MonitorTask {
+    fn set_monitoring_entry(&mut self, sha256: Sha256, service_name: ServiceName, values: HashMap<String, Option<serde_json::Value>>) {
+        self.monitoring.insert((sha256.clone(), service_name), MonitorTask {
             service: service_name,
             sha: sha256,
             values,
@@ -514,8 +513,8 @@ impl SubmissionTask {
     }
 
     /// Note that a partial result has been recieved. If a dispatch was requested process that now.
-    fn partial_result(&mut self, sha256: Sha256, service_name: String) -> bool {
-        let monitoring_entry = match self.monitoring.get(&(sha256.clone(), service_name.clone())) {
+    fn partial_result(&mut self, sha256: Sha256, service_name: ServiceName) -> bool {
+        let monitoring_entry = match self.monitoring.get(&(sha256.clone(), service_name)) {
             Some(entry) => entry,
             None => return false
         };
@@ -529,7 +528,7 @@ impl SubmissionTask {
     }
 
     /// A service has completed normally. If the service is monitoring clear out the record.
-    fn clear_monitoring_entry(&mut self, sha256: Sha256, service_name: String) {
+    fn clear_monitoring_entry(&mut self, sha256: Sha256, service_name: ServiceName) {
         let key = (sha256, service_name);
         // We have an incoming non-partial result, flush out any partial monitoring
         self.monitoring.remove(&key);
@@ -557,12 +556,12 @@ impl SubmissionTask {
             };
 
             if &value != dispatched_value {
-                let result = self.service_results.get(&(sha256.clone(), service.clone()));
+                let result = self.service_results.get(&(sha256.clone(), *service));
                 if result.is_some() {
                     // If there are results and there is a monitoring entry, the result was partial
                     // so redispatch it immediately (after the loop). If there are not partial results the monitoring
                     // entry will have been cleared.
-                    changed.push((sha256.clone(), service.clone()));
+                    changed.push((sha256.clone(), *service));
                 } else {
                     // If the value has changed since the last dispatch but results haven't come in yet
                     // mark this service to be disptached later. This will only happen if the service
@@ -581,7 +580,7 @@ impl SubmissionTask {
         return output
     }
 
-    fn redispatch_service(&mut self, sha256: Sha256, service_name: String) {
+    fn redispatch_service(&mut self, sha256: Sha256, service_name: ServiceName) {
         // Clear the result if its partial or an error
         let key = (sha256.clone(), service_name);
         if let Some(result) = self.service_results.get(&key) {
@@ -627,7 +626,7 @@ macro_rules! trace_event {
         if $task.submission.params.trace {
 
             let mut __file: Option<Sha256> = option!($($file)?);
-            let mut __service: Option<String> = option!($($service)?);
+            let mut __service: Option<ServiceName> = option!($($service)?);
             let __message = optional_format!($($message $(,$arg)*)?);
 
 
@@ -820,20 +819,11 @@ pub struct Dispatcher {
     pub postprocess_worker: Arc<ActionWorker>,
 }
 
-//     def __init__(self, datastore=None, redis=None, redis_persist=None, logger=None,
-//                  config=None, counter_name='dispatcher'):
-//         super().__init__('assemblyline.dispatcher', config=config, datastore=datastore,
-//                          redis=redis, redis_persist=redis_persist, logger=logger)
-
-//         # Load the datastore collections that we are going to be using
-//         self.instance_id = uuid.uuid4().hex
-//         self.tasks: dict[str, SubmissionTask] = {}
-//         self.finalizing = threading.Event()
-//         self.finalizing_start = 0.0
-
-//         # Submissions that should have alerts generated
-//         self.alert_queue = NamedQueue(ALERT_QUEUE_NAME, self.redis_persist)
-
+impl std::fmt::Debug for Dispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dispatcher").field("instance_id", &self.instance_id).field("instance_address", &self.instance_address).finish()
+    }
+}
 
 impl Dispatcher {
     pub async fn new(core: Core, tcp: TlsAcceptor) -> Result<Arc<Self>> {
@@ -1002,6 +992,7 @@ impl Dispatcher {
                 self.core.sleep(std::time::Duration::from_millis(100)).await;
             }
 
+
             if self.finalizing.read() {
                 let finalizing_time = self.get_finalizing_start();
                 if self.active_submissions.length().await? > 0 && finalizing_time < self.get_finalizing_window() {
@@ -1010,40 +1001,45 @@ impl Dispatcher {
                     self.core.running.set(false);
                 }
             } else {
-                // Check if we are at the submission limit globally
-                if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
-                    self.core.sleep(ONE_SECOND).await;
-                    continue
-                }
-
-                // Check if we are maxing out our share of the submission limit
-                let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
-                let max_tasks = self.core.config.core.dispatcher.max_inflight / running;
-                if self.active_submissions.length().await? >= max_tasks {
-                    self.core.sleep(ONE_SECOND).await;
-                    continue
-                }
-
-                // Grab a submission message
-                let message = match self.submission_queue.pop_timeout(ONE_SECOND).await? {
-                    Some(message) => message,
-                    None => continue
-                };
-
-                // Fetch the access level of the submitter and attach it to the task.
-                // This is for performance rather than security reasons.
-                let mut access_control = None;
-                if let Some(submitter) = self.user_cache.get(&message.submission.params.submitter).await? {
-                    access_control = Some(submitter.classification.classification.clone())
-                }
-
-
-                // This is probably a complete task
-                let task = SubmissionTask::new(message, access_control, &self.core.services, &self.core.config);
-                self.dispatch_submission(task).await.context("dispatch_submission")?;
+                self.pull_one_submission().await?;
             }
         }
         Ok(())
+    }
+
+    #[instrument]
+    async fn pull_one_submission(self: &Arc<Self>) -> Result<()> {
+        // Check if we are at the submission limit globally
+        if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
+            self.core.sleep(ONE_SECOND).await;
+            return Ok(())
+        }
+
+        // Check if we are maxing out our share of the submission limit
+        let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
+        let max_tasks = self.core.config.core.dispatcher.max_inflight / running;
+        if self.active_submissions.length().await? >= max_tasks {
+            self.core.sleep(ONE_SECOND).await;
+            return Ok(())
+        }
+
+        // Grab a submission message
+        let message = match self.submission_queue.pop_timeout(ONE_SECOND).await? {
+            Some(message) => message,
+            None => return Ok(())
+        };
+
+        // Fetch the access level of the submitter and attach it to the task.
+        // This is for performance rather than security reasons.
+        let mut access_control = None;
+        if let Some(submitter) = self.user_cache.get(&message.submission.params.submitter).await? {
+            access_control = Some(submitter.classification.classification.clone())
+        }
+
+        // This is probably a complete task
+        let task = SubmissionTask::new(message, access_control, &self.core.services, &self.core.config);
+        self.dispatch_submission(task).await.context("dispatch_submission")?;
+        return Ok(())
     }
 
     async fn pull_service_starts(self: &Arc<Self>) -> Result<()> {
@@ -1259,7 +1255,7 @@ impl Dispatcher {
     }
 
     async fn list_outstanding(&self, sid: Sid, queue_name: String) -> Result<()> {
-        let response_queue = self.core.redis_volatile.queue::<HashMap<String, u64>>(queue_name, Some(Duration::from_secs(30)));
+        let response_queue = self.core.redis_volatile.queue::<HashMap<ServiceName, u64>>(queue_name, Some(Duration::from_secs(30)));
 
         let response = {
             let (send, recv) = oneshot::channel();
@@ -1457,6 +1453,7 @@ impl Dispatcher {
     // Preconditions:
     //     - File exists in the filestore and file collection in the datastore
     //     - Submission is stored in the datastore
+    #[instrument]
     async fn dispatch_submission(self: &Arc<Self>, mut task: SubmissionTask) -> Result<()> {
         // let submission = &task.submission;
         let sid = task.submission.sid.to_string();
@@ -1484,29 +1481,6 @@ impl Dispatcher {
             trace_event!(task, "submission_start", "Received a pre-existing submission");
             warn!("[{sid}] Received a pre-existing submission, check if it is complete");
         }
-
-        // Apply initial data parameter
-        // let mut temp_data_config = self.core.config.submission.default_temporary_keys.clone();
-        // temp_data_config.extend(&mut self.core.config.submission.temporary_keys.clone().into_iter());
-        // let mut temporary_data = TemporaryFileData::new(temp_data_config);
-        // let max_temp_data_length = self.core.config.submission.max_temp_data_length as usize;
-        // if let Some(initial) = &task.submission.params.initial_data {
-        //     match serde_json::from_str::<JsonMap>(&initial.0) {
-        //         Ok(init) => {
-        //             for (key, value) in init {
-        //                 let encoded = serde_json::to_string(&value)?;
-        //                 if encoded.len() <= max_temp_data_length {
-        //                     temporary_data.set_value(&key, value);
-        //                 }
-        //             }
-        //         },
-        //         Err(err) => {
-        //             warn!("[{sid}] could not process initialization data: {err}")
-        //         }
-        //     }
-        // }
-        // task.file_temporary_data.insert(sha256.clone(), temporary_data);
-
 
         // // setup file parameters for root
         // task.file_depth.insert(sha256.clone(), 0);
@@ -1576,7 +1550,7 @@ impl Dispatcher {
         let mut submission_timeout = Instant::now();
 
         // timers to detect when a service is late and needs to be timed out
-        let mut timeouts: HashMap<(Sha256, String), (Instant, Duration, String)> = Default::default();
+        let mut timeouts: HashMap<(Sha256, ServiceName), (Instant, Duration, String)> = Default::default();
 
         // process the root file
         let mut finished = false;
@@ -1586,7 +1560,7 @@ impl Dispatcher {
             let mut message = task.pop_internal_task();
 
             // check for submission timeout
-            if submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
+            if message.is_none() && submission_timeout.elapsed() > SUBMISSION_TOTAL_TIMEOUT {
                 message = Some(DispatchAction::Check(sid));
             }
 
@@ -1597,7 +1571,7 @@ impl Dispatcher {
                 let mut service_timeouts = vec![];
                 for ((sha, service_name), (start, duration, worker)) in &timeouts {
                     if start.elapsed() > *duration {
-                        let key = (sha.clone(), service_name.clone());
+                        let key = (sha.clone(), *service_name);
                         service_timeouts.push(key.clone());
 
                         let log = format!("Service timeout at {} on worker {worker}", chrono::Utc::now());
@@ -1605,7 +1579,7 @@ impl Dispatcher {
                         let logs = task.service_logs.entry(key).or_default();
                         logs.push(log);
 
-                        self.timeout_service(task, sha, service_name, worker).await?;
+                        self.timeout_service(task, sha, *service_name, worker).await?;
 
                     }
                 }
@@ -1641,7 +1615,7 @@ impl Dispatcher {
                         started.map(|socket| socket.send(message))
                     };
 
-                    let key = (message.sha, message.service_name.clone());
+                    let key = (message.sha, message.service_name);
                     if let Some((service_task, queue_key, last_queue_check)) = task.queue_keys.remove(&key) {
                         // If this task is already finished (result message processed before start
                         // message) we can skip setting a timeout
@@ -1660,7 +1634,7 @@ impl Dispatcher {
                             }
                         }
 
-                        if let Some(service) = self.core.services.get(&message.service_name) {
+                        if let Some(service) = self.core.services.get(message.service_name) {
                             timeouts.insert(key.clone(), (Instant::now(), Duration::from_secs(service.timeout as u64) + TIMEOUT_GRACE, message.worker_id.clone()));
                             task.service_logs.entry(key.clone()).or_default().push(format!("Popped from queue and running at {} on worker {}", chrono::Utc::now(), message.worker_id));
                             task.running_services.insert(key, service_task);
@@ -1698,12 +1672,12 @@ impl Dispatcher {
                     }
                 },
                 DispatchAction::ListOutstanding(_, channel) => {
-                    let mut outstanding: HashMap<String, u64> = Default::default();
+                    let mut outstanding: HashMap<ServiceName, u64> = Default::default();
                     for (_sha, service_name) in task.queue_keys.keys() {
-                        *outstanding.entry(service_name.clone()).or_default() += 1;
+                        *outstanding.entry(*service_name).or_default() += 1;
                     }
                     for (_sha, service_name) in task.running_services.keys() {
-                        *outstanding.entry(service_name.clone()).or_default() += 1;
+                        *outstanding.entry(*service_name).or_default() += 1;
                     }
                     _ = channel.send(outstanding);
                 },
@@ -1748,6 +1722,7 @@ impl Dispatcher {
     // :param sha256: hash of the file to check.
     // :param timed_out_host: Name of the host that timed out after maximum service attempts.
     // :return: true if submission is finished.
+    #[instrument]
     async fn dispatch_file(&self, task: &mut SubmissionTask, sha256: &Sha256) -> Result<()> {
         // let submission = &task.submission;
         // let params = &submission.params;
@@ -1795,7 +1770,7 @@ impl Dispatcher {
 
         // Go through each round of the schedule removing complete/failed services
         // Break when we find a stage that still needs processing
-        let mut outstanding: Vec<String> = Default::default();
+        let mut outstanding: Vec<ServiceName> = vec![];
         let mut started_stages = vec![];
         while !schedule.is_empty() && outstanding.is_empty() {
             let stage = schedule.remove(0);
@@ -1803,7 +1778,7 @@ impl Dispatcher {
 
             for service_name in stage {
                 // If the service terminated in an error, count the error and continue
-                let key = (sha256.clone(), service_name.clone());
+                let key = (sha256.clone(), service_name);
                 if task.service_errors.contains_key(&key) {
                     continue
                 }
@@ -1837,7 +1812,7 @@ impl Dispatcher {
             for service_name in outstanding {
                 let service_queue = self.core.get_service_queue(&service_name);
 
-                let key = (sha256.clone(), service_name.clone());
+                let key = (sha256.clone(), service_name);
                 // Check if the task is already running
                 if task.running_services.contains_key(&key) {
                     running.push(service_name);
@@ -1867,12 +1842,12 @@ impl Dispatcher {
                 let attempts = task.service_attempts.entry(key.clone()).or_default();
                 *attempts += 1;
                 if *attempts > 3 {
-                    self.retry_error(task, sha256, &service_name).await?;
+                    self.retry_error(task, sha256, service_name).await?;
                     continue
                 }
 
                 // check if the service is still enabled
-                let service = match self.core.services.get(&service_name) {
+                let service = match self.core.services.get(service_name) {
                     Some(service) if service.enabled => service,
                     _ => continue
                 };
@@ -1939,7 +1914,7 @@ impl Dispatcher {
 
                     // if there are any monitored values create a monitoring entry
                     if !monitored_values.is_empty() {
-                        task.set_monitoring_entry(sha256.clone(), service.name.clone(), monitored_values);
+                        task.set_monitoring_entry(sha256.clone(), service.name, monitored_values);
                     }
                 }
 
@@ -1967,7 +1942,7 @@ impl Dispatcher {
                     dispatcher_address: self.instance_address.clone(),
                     metadata,
                     min_classification: task.submission.classification.classification.clone(),
-                    service_name: service_name.clone(),
+                    service_name,
                     service_config: config,
                     fileinfo: (*file_info).clone(),
                     filename,
@@ -2028,6 +2003,7 @@ impl Dispatcher {
         Ok(())
     }
 
+    #[instrument]
     async fn get_fileinfo(&self, task: &mut SubmissionTask, sha256: &Sha256) -> Result<Option<Arc<FileInfo>>> {
         // First try to get the info from local cache
         if let Some(file_info) = task.file_info.get(sha256) {
@@ -2047,7 +2023,7 @@ impl Dispatcher {
                     expiry_ts: task.submission.expiry_ts,
                     response: error::Response {
                         message: format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid).into(),
-                        service_name: "Dispatcher".to_string(),
+                        service_name: "Dispatcher".into(),
                         service_tool_version: None,
                         service_version: "4.0".to_string(),
                         status: error::Status::FailNonrecoverable,
@@ -2084,6 +2060,7 @@ impl Dispatcher {
     //
     // :param task: Task object for the submission in question.
     // :return: true if submission has been finished.
+    #[instrument]
     async fn check_submission(&self, task: &mut SubmissionTask) -> Result<bool> {
         let sid = task.submission.sid;
 
@@ -2127,7 +2104,7 @@ impl Dispatcher {
                     // }
 
                     // If there is an error we are finished with this service
-                    let key = (sha256.clone(), service_name.clone());
+                    let key = (sha256.clone(), service_name);
                     if task.service_errors.contains_key(&key) {
                         continue
                     }
@@ -2180,7 +2157,7 @@ impl Dispatcher {
                     // We check if it has already been dispatched before checking if its enabled
                     // to let us catch any trailing results coming in. But we don't count the file as pending
                     // because we aren't going to _start_ processing on enabled. Plumber will handle the corner cases.
-                    match self.core.services.get(&service_name) {
+                    match self.core.services.get(service_name) {
                         Some(service) if service.enabled => {},
                         _ => continue
                     };
@@ -2243,6 +2220,7 @@ impl Dispatcher {
     /// All of the services for all of the files in this submission have finished or failed.
     ///
     /// Update the records in the datastore, and flush the working data from redis.
+    #[instrument]
     async fn finalize_submission(&self, task: &mut SubmissionTask, max_score: i32, file_list: HashSet<Sha256>) -> Result<()> {
         let submission = &mut task.submission;
         let sid = submission.sid;
@@ -2272,6 +2250,7 @@ impl Dispatcher {
     }
 
     /// Clean up code that is the same for canceled and finished submissions
+    #[instrument]
     async fn _cleanup_submission(&self, task: &SubmissionTask) -> Result<()> {
         let submission = &task.submission;
         let sid = submission.sid;
@@ -2343,13 +2322,14 @@ impl Dispatcher {
         Ok(())
     }
 
-    async fn retry_error(&self, task: &mut SubmissionTask, sha256: &Sha256, service_name: &str) -> Result<()> {
+    #[instrument]
+    async fn retry_error(&self, task: &mut SubmissionTask, sha256: &Sha256, service_name: ServiceName) -> Result<()> {
         let sid = task.submission.sid;
         warn!("[{sid}/{sha256}] {service_name} marking task failed: TASK PREEMPTED ");
 
         // Pull out any details to include in error message
         let mut error_details = "The number of retries has passed the limit.".to_string();
-        let key = (sha256.clone(), service_name.to_string());
+        let key = (sha256.clone(), service_name);
         if let Some(logs) = task.service_logs.get(&key) {
             error_details.push_str("\n\n");
             error_details.push_str(&logs.join("\n"));
@@ -2368,7 +2348,7 @@ impl Dispatcher {
             expiry_ts,
             response: error::Response {
                 message: error_details.into(),
-                service_name: service_name.to_string(),
+                service_name,
                 service_version: "0".to_string(),
                 status: error::Status::FailNonrecoverable,
                 service_debug_info: None,
@@ -2386,7 +2366,7 @@ impl Dispatcher {
         task.service_errors.insert(key, error_key.clone());
 
         self.core.export_metrics_once(
-            service_name,
+            &service_name,
             &ServiceMetrics{ fail_nonrecoverable: 1, ..Default::default()},
             Some("dispatcher"),
             Some("service")
@@ -2400,8 +2380,8 @@ impl Dispatcher {
         Ok(())
     }
 
-
-    async fn process_service_result(&self, task: &mut SubmissionTask, data: ServiceResult) -> Result<()> {
+    #[instrument(skip(data))]
+    async fn process_service_result(&self, task: &mut SubmissionTask, data: Box<ServiceResult>) -> Result<()> {
         // let submission: &Submission = &task.submission;
         let sid = task.submission.sid;
         let ServiceResult {
@@ -2417,7 +2397,7 @@ impl Dispatcher {
             extracted_names,
             dynamic_recursion_bypass,
             extra_errors,
-        } = data;
+        } = *data;
 
         trace_event!(task, "process_result", file &sha256, service &service_name, "Processing result {}", summary.key);
 
@@ -2428,11 +2408,11 @@ impl Dispatcher {
         let mut force_redispatch = HashSet::new();
         if summary.partial {
             info!("[{sid}/{sha256}] {service_name} returned partial results");
-            if task.partial_result(sha256.clone(), service_name.clone()) {
+            if task.partial_result(sha256.clone(), service_name) {
                 force_redispatch.insert(sha256.clone());
             }
         } else {
-            task.clear_monitoring_entry(sha256.clone(), service_name.clone());
+            task.clear_monitoring_entry(sha256.clone(), service_name);
         }
 
         // Add SHA256s of files that allowed to run regardless of Dynamic Recursion Prevention
@@ -2441,7 +2421,7 @@ impl Dispatcher {
         }
 
         // Clear logs we won't need to report
-        let key = (sha256.clone(), service_name.clone());
+        let key = (sha256.clone(), service_name);
         task.service_logs.remove(&key);
 
         // Don't process duplicates
@@ -2488,8 +2468,7 @@ impl Dispatcher {
         let mut changed_keys = vec![];
         if let Some(existing) = task.file_temporary_data.get_mut(&sha256) {
             for (key, value) in temporary_data {
-                let encoded = serde_json::to_string(&value)?;
-                if encoded.len() <= max_temp_data_length && existing.set_value(&key, value) {
+                if estimate_size(&value) <= max_temp_data_length && existing.set_value(&key, value) {
                     changed_keys.push(key);
                 }
             }
@@ -2541,7 +2520,7 @@ impl Dispatcher {
                         expiry_ts,
                         response: error::Response {
                             message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped").into(),
-                            service_name: service_name.clone(),
+                            service_name,
                             service_tool_version: service_tool_version.clone(),
                             service_version: service_version.clone(),
                             status: error::Status::FailNonrecoverable,
@@ -2588,7 +2567,7 @@ impl Dispatcher {
                     expiry_ts,
                     response: error::Response {
                         message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits").into(),
-                        service_name: service_name.clone(),
+                        service_name,
                         service_tool_version: service_tool_version.clone(),
                         service_version: service_version.clone(),
                         status: error::Status::FailNonrecoverable,
@@ -2603,13 +2582,13 @@ impl Dispatcher {
         // Check if its worth trying to run the next stage
         // Not worth running if we know we are waiting for another service
         if task.running_services.keys().any(|(_s, _)| *_s == sha256) {
-            let services: Vec<&String> = task.running_services.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
+            let services: Vec<ServiceName> = task.running_services.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|*_s).collect();
             debug!("[{sid} :: {sha256}] Delaying dispatching, already being processed by {}", FormattedList(&services));
             return Ok(())
         }
         // Not worth running if we know we have services in queue
         if task.queue_keys.keys().any(|(_s, _)| *_s == sha256) {
-            let services: Vec<&String> = task.queue_keys.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|_s).collect();
+            let services: Vec<ServiceName> = task.queue_keys.keys().filter(|(_s, _)| *_s == sha256).map(|(_, _s)|*_s).collect();
             debug!("[{sid} :: {sha256}] Delaying dispatching, already queued for {}", FormattedList(&services));
             return Ok(())
         }
@@ -2661,11 +2640,11 @@ impl Dispatcher {
         Ok(())
     }
 
-    async fn timeout_service(&self, task: &mut SubmissionTask, sha256: &Sha256, service_name: &str, worker_id: &str) -> Result<()> {
+    async fn timeout_service(&self, task: &mut SubmissionTask, sha256: &Sha256, service_name: ServiceName, worker_id: &str) -> Result<()> {
         // We believe a service task has timed out, try and read it from running tasks
         // If we can't find the task in running tasks, it finished JUST before timing out, let it go
         let sid = task.submission.sid;
-        let key = (sha256.clone(), service_name.to_string());
+        let key = (sha256.clone(), service_name);
         let mut service_task = None;
         if let Some((_t, _, _)) = task.queue_keys.remove(&key) {
             service_task = Some(_t);
@@ -2698,7 +2677,7 @@ impl Dispatcher {
 
         // Report to the metrics system that a recoverable error has occurred for that service
         self.core.export_metrics_once(
-            service_name,
+            &service_name,
             &ServiceMetrics {fail_recoverable: 1, ..Default::default()},
             Some(worker_id),
             Some("service")
@@ -2777,5 +2756,40 @@ impl UserCache {
             return Ok(Some(user))
         }
         return Ok(None)
+    }
+}
+
+
+/// Estimate the size an object would take in json
+/// this is for enforcing size limits and can undercount a little bit if it needs to
+/// should never be used when the accurate size of the data is important
+pub fn estimate_size(value: &serde_json::Value) -> usize {
+    match value {
+        // keywords have a fixed length
+        serde_json::Value::Null => 4,
+        serde_json::Value::Bool(true) => 4,
+        serde_json::Value::Bool(false) => 5,
+        // if a number can fit in an i64 use log to figure out its written size, otherwise fallback to generating the string
+        serde_json::Value::Number(number) => {
+            if let Some(num) = number.as_i64() {
+                if num < 0 {
+                    2 + (-num).ilog10() as usize
+                } else {
+                    1 + num.checked_ilog10().unwrap_or_default() as usize
+                }
+            } else {
+                number.to_string().len()
+            }
+        },
+        // strings are their own length plus 2 (if we ignore escaping)
+        serde_json::Value::String(value) => value.len() + 2,
+        // array is 2 (open close brackets) + the sum of (item lengths + 1 each (commas)) - 1 for extra comma
+        serde_json::Value::Array(values) => {
+            values.iter().map(estimate_size).fold(1 + values.len(), |a, b| a + b)
+        },
+        // similar to array but add in key size same as string + 1 for the :
+        serde_json::Value::Object(map) => {
+            map.iter().map(|(k, v)| 3 + k.len() + estimate_size(v)).fold(1 + map.len(), |a, b| a + b)
+        },
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-client"
-version = "0.1.14"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -27,7 +27,7 @@ url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
-assemblyline-models = { version="0.6", path = "../assemblyline-models" }
+assemblyline-models = { version="0.7", path = "../assemblyline-models" }
 
 # Libraryies used for the ingest binary
 clap = { version = "4.5", features = ["derive"], optional = true }

@@ -13,7 +13,7 @@ use assemblyline_models::datastore::user::User;
 use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid};
+use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, ServiceName, Sha256, Sid};
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -271,13 +271,13 @@ impl MockService {
 
 }
 
-fn test_services() -> HashMap<String, Service> {
+fn test_services() -> HashMap<ServiceName, Service> {
     return [
         ("pre", dummy_service("pre", "pre", None, None, None, Some(true))),
         ("core-a", dummy_service("core-a", "core", None, None, None, None)),
         ("core-b", dummy_service("core-b", "core", None, None, None, Some(true))),
         ("finish", dummy_service("finish", "post", None, None, None, None)),
-    ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
+    ].into_iter().map(|(key, value)|(key.into(), value)).collect()
 }
 
 struct TestContext {
@@ -339,13 +339,20 @@ async fn setup() -> TestContext {
 }
 
 async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
+    tokio::time::timeout(std::time::Duration::from_secs(30), _setup_inner(ingest_op)).await
+        .expect("initalization timeout. testing parallelism likely too high for environment.")
+}
+
+async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
     std::env::set_var("BIND_ADDRESS", "0.0.0.0:0");
 
     // Configure the services
     let mut service_configurations = test_services();
-    service_configurations.get_mut("core-a").unwrap().timeout = 100;
-    service_configurations.get_mut("core-b").unwrap().timeout = 100;
+
+    service_configurations.get_mut(&"core-a".into()).unwrap().timeout = 100;
+    service_configurations.get_mut(&"core-b".into()).unwrap().timeout = 100;
     let (core, guard) = setup_services_and_core(service_configurations).await;
+
 
     // launch the api Server
     let (service_server, api_address) = start_api_server(core.clone()).await;
@@ -356,7 +363,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     let mut services = vec![];
     let stages = core.services.get_service_stage_hash();
     for (name, service) in test_services() {
-        let count = if name == "core-a" { 2 } else { 1 };
+        let count = if *name == *"core-a" { 2 } else { 1 };
 
         core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
         core.datastore.service_delta.save_json(&name, json!({
@@ -420,7 +427,7 @@ async fn ready_body(core: &Core, mut body: serde_json::Value) -> (Sha256, usize)
 
     let mut hasher = sha2::Sha256::default();
     hasher.update(&body);
-    let sha256 = Sha256::try_from(hasher.finalize().as_slice()).unwrap();
+    let sha256 = Sha256::try_from(&hasher.finalize()[..]).unwrap();
     core.filestore.put(&sha256, &body).await.unwrap();
 
     let temporary_file = tempfile::NamedTempFile::new().unwrap();
@@ -651,32 +658,7 @@ async fn test_ingest_retry() {
         // let failures = failures.clone();
         |mut ingester| {
             ingester.set_retry_delay(chrono::Duration::seconds(1));
-
             *ingester.test_hook_fail_submit.lock() = 1;
-
-            // let redis = ingester.submit_manager.dispatch_submission_queue.host();
-            // let queue = redis.queue("replacement-dispatch-queue-".to_string() + &rand::rng().random::<u64>().to_string(), None);
-            // let mut original_queue = queue.clone();
-            // std::mem::swap(&mut original_queue, &mut ingester.submit_manager.dispatch_submission_queue);
-
-            // tokio::spawn(async move {
-            //     loop {
-            //         let item = queue.pop_timeout(Duration::from_secs(60)).await.unwrap();
-            //         if let Some(item) = item {
-            //             println!("dispatcher proxy saw item {} + 1", attempts.lock().len());
-            //             attempts.lock().push(item.clone());
-            //             if attempts.lock().len() > 1 {
-            //                 original_queue.push(&item).await.unwrap();
-            //             } else {
-            //                 println!("dispatcher proxy dropped message");
-            //                 failures.lock().push(item);
-            //             }
-            //         } else {
-            //             println!("dispatcher proxy empty message?");
-            //         }
-            //     }
-            // });
-
             ingester
         }
     }).await;
@@ -1223,7 +1205,7 @@ async fn test_plumber_clearing() {
     // context.core.services.get_service_stage_hash().set("core-b", )
     context.core.datastore.service_delta.commit(None).await.unwrap();
     context.core.redis_volatile.publish("changes.services.core-b", &serde_json::to_vec(&ServiceChange {
-        name: "core-b".to_owned(),
+        name: ServiceName::from_string("core-b".to_owned()),
         operation: assemblyline_models::messages::changes::Operation::Modified
     }).unwrap()).await.unwrap();
 
