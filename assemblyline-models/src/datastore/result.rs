@@ -217,6 +217,20 @@ impl PartialEq for File {
     }
 }
 
+impl File {
+    pub fn new(sha256: Sha256, name: String) -> Self {
+        File {
+            name: name,
+            sha256: sha256,
+            description: Default::default(),
+            classification: ClassificationString::default_unrestricted(),
+            is_section_image: false,
+            parent_relation: Default::default(),
+            allow_dynamic_recursion: false
+        }
+    }
+}
+
 fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
 
 /// Response Body of Result

@@ -89,7 +89,6 @@ impl SubmitManager {
     }
 
     pub async fn submit_bundle(&self, submission_obj: MessageSubmission, completed_queue: Option<String>) -> Result<()> {
-        println!("In submit bundle");
         let sid : Sid = submission_obj.sid;
         let sub_data = self.datastore.submission.get(&sid.to_string(), None).await?;
 

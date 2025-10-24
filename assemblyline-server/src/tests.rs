@@ -31,14 +31,14 @@ use crate::plumber::Plumber;
 use crate::postprocessing::SubmissionFilter;
 use crate::service_api::helpers::APIResponse;
 use crate::service_api::tests::tasking::TaskResp;
-use crate::services::test::{dummy_service, setup_services};
+use crate::services::test::{dummy_service, setup_services_and_core};
 use crate::{Core, Flag, TestGuard};
 
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 
-/// A fake service that works through the service server to do different test scenarios 
+/// A fake service that works through the service server to do different test scenarios
 /// based on configuration stored in the target file
 /// MARK: MockService
 struct MockService {
@@ -345,7 +345,7 @@ async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     let mut service_configurations = test_services();
     service_configurations.get_mut("core-a").unwrap().timeout = 100;
     service_configurations.get_mut("core-b").unwrap().timeout = 100;
-    let (core, guard) = setup_services(service_configurations).await;
+    let (core, guard) = setup_services_and_core(service_configurations).await;
 
     // launch the api Server
     let (service_server, api_address) = start_api_server(core.clone()).await;

@@ -1,5 +1,5 @@
 //! A daemon that keeps an up to date local cache of service information.
-//! 
+//!
 //! Nearly every core component needs service information so this is set up
 //! at the level of the Core module.
 
@@ -61,12 +61,12 @@ impl ServiceHelper {
         tokio::spawn(service_daemon(datastore, changes, inner.clone()));
 
         // return shared reference
-        Ok(Self { 
-            inner, 
-            classification, 
+        Ok(Self {
+            inner,
+            classification,
             service_stage_hash: redis_volatile.hashmap(SERVICE_STAGE_KEY.to_owned(), None),
-            regex_cache: RegexCache::new(), 
-            config: Arc::new(config.clone()) 
+            regex_cache: RegexCache::new(),
+            config: Arc::new(config.clone())
         })
     }
 
@@ -139,10 +139,10 @@ impl ServiceHelper {
         found_services
     }
 
-    /// Build the expected sequence of 
-    pub fn build_schedule(&self, 
-        params: &SubmissionParams, 
-        file_type: &str, 
+    /// Build the expected sequence of
+    pub fn build_schedule(&self,
+        params: &SubmissionParams,
+        file_type: &str,
         file_depth: u32, //int = 0,
         runtime_excluded: Option<Vec<String>>, // Optional[list[str]] = None,
         submitter_c12n: Option<String> // = Classification.UNRESTRICTED
@@ -180,7 +180,7 @@ impl ServiceHelper {
             // Alter schedule to remove Safelist, if scheduled to run
             selected.retain(|item| item != &safelist);
         }
-        
+
         // Add all selected, accepted, and not rejected services to the schedule
         let mut schedule = vec![vec![]; self.config.stages.len()];
         selected.sort_unstable();
@@ -195,7 +195,7 @@ impl ServiceHelper {
                 Some(service) => service,
                 None => {
                     warn!("Service configuration not found: {name}");
-                    continue    
+                    continue
                 }
             };
 
@@ -213,12 +213,12 @@ impl ServiceHelper {
 
             if accepted && !rejected {
                 schedule[self.stage_index(&service.stage)].push(service.clone());
-            } 
+            }
         }
 
         return Ok(schedule)
     }
-    
+
     fn stage_index(&self, stage: &str) -> usize {
         if let Some((index, _)) = self.config.stages.iter().find_position(|item| *item == stage) {
             index
@@ -254,7 +254,7 @@ async fn service_daemon(datastore: Arc<Elastic>, mut changes: ChangeChannel, inf
 }
 
 async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, service_info: Arc<RwLock<ServiceInfo>>) -> Result<()> {
-    // 
+    //
     let mut refresh_interval = tokio::time::interval(REFRESH_INTERVAL);
     debug!("Service info daemon starting.");
 
@@ -377,6 +377,7 @@ pub mod test {
     use crate::constants::ServiceStage;
     use crate::services::get_schedule_names;
     use crate::{Core, TestGuard};
+    use assemblyline_models::config::Config;
     use assemblyline_models::datastore::service::Service;
     use assemblyline_models::datastore::submission::SubmissionParams;
     use assemblyline_models::messages::changes::ServiceChange;
@@ -464,15 +465,16 @@ pub mod test {
         ].into_iter().map(|(key, value)|(key.to_string(), value)).collect()
     }
 
-    pub async fn setup_services(services: HashMap<String, Service>) -> (Core, TestGuard) {
+    pub async fn setup_core_with_config(callback: impl Fn(&mut Config)) -> (Core, TestGuard) {
         println!("start setup");
-        let (core, redis) = Core::test_custom_setup(|config| {
-            config.services.stages = vec!["pre".to_string(), "core".to_string(), "post".to_string()];
-        }).await;
-        let mut enabled_services = 0;
-
+        let (core, redis) = Core::test_custom_setup(callback).await;
         println!("setup core");
 
+        return (core, redis)
+    }
+
+    pub async fn setup_services(core: Core, test_guard: TestGuard, services: HashMap<String, Service>) -> (Core, TestGuard) {
+        let mut enabled_services = 0;
         for (name, service) in &services {
             core.datastore.service.save(&service.key(), service, None, None).await.unwrap();
             core.datastore.service_delta.save_json(name, &mut[("version".to_owned(), json!(service.version))].into_iter().collect(), None, None).await.unwrap();
@@ -493,7 +495,7 @@ pub mod test {
             }).unwrap()).await.unwrap();
         }
         println!("Services added");
-                
+
         'outer: for step in 0..1000 {
             tokio::time::sleep(Duration::from_millis(step)).await;
             for name in services.keys() {
@@ -506,12 +508,22 @@ pub mod test {
             println!("{}", core.services.list_enabled().len());
         }
         println!("Services confirmed");
-        (core, redis)
+        (core, test_guard)
+    }
+
+    pub async fn setup_services_and_core(services: HashMap<String, Service>) -> (Core, TestGuard) {
+
+        let (core, redis) = setup_core_with_config(|config: &mut Config| {
+            config.services.stages = vec!["pre".to_string(), "core".to_string(), "post".to_string()];
+        }).await;
+
+        return setup_services(core, redis, services).await;
     }
 
     async fn setup() -> (Core, TestGuard) {
-        setup_services(test_services()).await
+        setup_services_and_core(test_services()).await
     }
+
 
     fn make_params(core: &Core, accept: &[&str], reject: &[&str]) -> SubmissionParams {
         let mut params = SubmissionParams::new(ClassificationString::new(core.classification_parser.unrestricted().to_owned(), &core.classification_parser).unwrap());
@@ -524,9 +536,9 @@ pub mod test {
     async fn test_schedule_simple() {
         let (core, _redis) = setup().await;
 
-        let schedule = core.services.build_schedule(&make_params(&core, 
+        let schedule = core.services.build_schedule(&make_params(&core,
             &["static", "av"], &["dynamic"]), "document/word", 0, None, None).unwrap();
-        
+
         assert_eq!(get_schedule_names(&schedule), vec![
             vec!["Safelist"],
             vec!["AnAV"],
@@ -537,9 +549,9 @@ pub mod test {
     #[tokio::test]
     async fn test_schedule_no_excludes() {
         let (core, _redis) = setup().await;
-        let schedule = core.services.build_schedule(&make_params(&core, 
+        let schedule = core.services.build_schedule(&make_params(&core,
             &["static", "av", "dynamic"], &[]), "document/word", 0, None, None).unwrap();
-        
+
         assert_eq!(get_schedule_names(&schedule), vec![
             vec!["Safelist"],
             vec!["AnAV", "cuckoo"],
@@ -550,9 +562,9 @@ pub mod test {
     #[tokio::test]
     async fn test_schedule_all_defaults_word() {
         let (core, _redis) = setup().await;
-        let schedule = core.services.build_schedule(&make_params(&core, 
+        let schedule = core.services.build_schedule(&make_params(&core,
             &[], &[]), "document/word", 0, None, None).unwrap();
-        
+
         assert_eq!(get_schedule_names(&schedule), vec![
             vec!["Safelist"],
             vec!["AnAV", "cuckoo"],
@@ -563,9 +575,9 @@ pub mod test {
     #[tokio::test]
     async fn test_schedule_all_defaults_zip() {
         let (core, _redis) = setup().await;
-        let schedule = core.services.build_schedule(&make_params(&core, 
+        let schedule = core.services.build_schedule(&make_params(&core,
             &[], &[]), "archive/zip", 0, None, None).unwrap();
-        
+
         assert_eq!(get_schedule_names(&schedule), vec![
             vec!["Safelist", "extract"],
             vec!["AnAV"],
@@ -584,7 +596,7 @@ pub mod test {
             vec![],
             vec![]
         ]);
-    
+
         // Safelist service should NOT still be scheduled because we're not enforcing Safelist service by default
         // and deep_scan and ignore_filtering is OFF for this submission
         params.deep_scan = false;
@@ -595,7 +607,7 @@ pub mod test {
             vec![],
             vec![]
         ]);
-    
+
         // Safelist service should be scheduled because we're enabling deep_scan
         params.deep_scan = true;
         params.ignore_filtering = false;

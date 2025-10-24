@@ -57,7 +57,7 @@ pub struct Submission {
     /// Total number of files in the submission
     pub file_count: i32,
     /// List of files that were originally submitted
-    pub files: Vec<File>, 
+    pub files: Vec<File>,
     // pub file: File,
     /// Maximum score of all the files in the scan
     pub max_score: i32,
@@ -264,7 +264,7 @@ impl SubmissionParams {
 
     pub fn set_description(mut self, text: &str) -> Self {
         self.description = Some(text.into()); self
-    }    
+    }
 
     pub fn set_services_selected(mut self, selected: &[&str]) -> Self {
         self.services.selected = selected.iter().map(|s|s.to_string()).collect(); self
@@ -286,6 +286,10 @@ impl SubmissionParams {
         self.generate_alert = alert; self
     }
 
+    pub fn set_initial_data(mut self, initial_data: Option<Text>) -> Self {
+        self.initial_data = initial_data; self
+    }
+
     /// Get the sections of the submission parameters that should be used in result hashes.
     fn get_hashing_keys(&self) -> Vec<(String, serde_json::Value)> {
         [
@@ -302,7 +306,7 @@ impl SubmissionParams {
 
 
     /// This is the key used to store the final score of a submission for fast lookup.
-    /// 
+    ///
     /// This lookup is one of the methods used to check for duplication in ingestion process,
     /// so this key is fairly sensitive.
     pub fn create_filescore_key(&self, sha256: &Sha256, services: Option<Vec<String>>) -> String {
@@ -393,9 +397,9 @@ pub struct Times {
 
 impl Default for Times {
     fn default() -> Self {
-        Self { 
-            completed: None, 
-            submitted: Utc::now() 
+        Self {
+            completed: None,
+            submitted: Utc::now()
         }
     }
 }

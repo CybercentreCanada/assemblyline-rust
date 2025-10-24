@@ -4,6 +4,7 @@ mod tests;
 pub mod client;
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,6 +34,7 @@ use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use rand::Rng;
 
+
 use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
 use crate::elastic::Elastic;
@@ -54,9 +56,9 @@ const USER_CACHE_TIME: Duration = Duration::from_secs(30);
 
 /// How long to wait after verifying that a task is enqueued before checking again.
 /// This prevents the dispatcher from:
-/// a) repeatedly pushing the same task into queue when service instances 
-///    are available causing a fast turn around 
-/// b) repeatedly polling redis about the state of a queue in quick sucession 
+/// a) repeatedly pushing the same task into queue when service instances
+///    are available causing a fast turn around
+/// b) repeatedly polling redis about the state of a queue in quick sucession
 ///    when the queue is unlikely to have changed that quickly without
 ///    us getting notified via a task start query
 const QUEUE_CHECK_INTERVAL: Duration = Duration::from_millis(500);
@@ -227,6 +229,14 @@ struct SubmissionTask {
     _parent_map: HashMap<Sha256, HashSet<Sha256>>,
 }
 
+impl std::fmt::Debug for SubmissionTask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubmissionTask")
+        .field("sid", &self.submission.sid)
+        .field("file_names", &self.file_names)
+        .finish()
+    }
+}
 
 impl SubmissionTask {
 
@@ -273,7 +283,6 @@ impl SubmissionTask {
         let root_sha = out.submission.files[0].sha256.clone();
         let sid = &out.submission.sid;
 
-        // initialize initial temporary data
         if let Some(initial) = &out.submission.params.initial_data {
             match serde_json::from_str::<JsonMap>(&initial.0) {
                 Ok(init) => {
@@ -301,6 +310,9 @@ impl SubmissionTask {
         }
 
         // read information about file tree constructed by results
+
+        let mut sorted_file_depth: Vec<(Sha256, u32)> = vec![];
+
         if !args.file_tree.is_empty() {
             fn recurse_tree(out: &mut SubmissionTask, tree: HashMap<Sha256, FileTreeData>, depth: u32) {
                 for (sha256, file_data) in tree {
@@ -314,6 +326,8 @@ impl SubmissionTask {
             }
 
             recurse_tree(&mut out, args.file_tree, 0);
+
+            sorted_file_depth = out.file_depth.clone().into_iter().sorted_by(|a, b| a.1.cmp(&b.1)).collect_vec();
         }
 
         if !args.results.is_empty() {
@@ -340,12 +354,17 @@ impl SubmissionTask {
             }
 
             // Replay the process of receiving results for dispatcher internal state
-            for (k, result) in args.results {
-                if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
-                    let sha256: Sha256 = match sha256.parse() {
-                        Ok(sha) => sha,
-                        Err(_) => continue,
-                    };
+            // iterate through results based on the depth of the file tree
+            for (sha, _) in sorted_file_depth {
+                let results_to_process = args.results.iter().filter(|(k, _)| k.as_str().contains(sha.to_string().as_str())).collect_vec();
+
+                for (k, result) in results_to_process {
+                    if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
+                        let sha256: Sha256 = match sha256.parse() {
+                            Ok(sha) => sha,
+                            Err(_) => continue,
+                        };
+
 
                     if let Ok(tags) = result.scored_tag_dict() {
                         for (key, tag) in tags {
@@ -362,12 +381,15 @@ impl SubmissionTask {
                     }
 
                     let service = service.to_owned();
+
+                    // stored all the child - parent file information from service results if the file is not getting rescanned by the service
                     if !rescan.contains(&service) {
-                        let extracted = result.response.extracted;
+                        let extracted = result.response.extracted.to_owned();
                         out.register_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
+                        out.propagate_temp_data_to_children(&sha256, extracted.iter().map(|file| file.sha256.clone()));
                         let children_detail: Vec<(Sha256, String)> = extracted.into_iter().map(|file| (file.sha256, file.parent_relation.into())).collect();
                         out.service_results.insert((sha256, service), ResultSummary {
-                            key: k,
+                            key: k.to_owned(),
                             drop: result.drop_file,
                             score: result.result.score,
                             children: children_detail,
@@ -376,6 +398,9 @@ impl SubmissionTask {
                     }
                 }
             }
+
+            }
+
         }
 
         // store errors that are already part of this submission
@@ -431,6 +456,19 @@ impl SubmissionTask {
         for child in children {
             self._parent_map.entry(child).or_default().insert(parent.clone());
         }
+    }
+
+    fn propagate_temp_data_to_children(&mut self, parent: &Sha256, children: impl Iterator<Item=Sha256>){
+
+        match self.file_temporary_data.get(parent).cloned() {
+            Some(file) => {
+                for child in children {
+                    self.file_temporary_data.insert(child, file.child());
+                }
+            },
+            None => {}
+        }
+
     }
 
     fn all_ancestors(&self, sha256: &Sha256) -> Vec<&Sha256> {
@@ -604,7 +642,7 @@ macro_rules! trace_event {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TemporaryFileData {
     config: Arc<HashMap<String, TemporaryKeyType>>,
     shared: Arc<Mutex<JsonMap>>,

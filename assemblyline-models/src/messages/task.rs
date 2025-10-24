@@ -250,7 +250,7 @@ pub struct TaskToken {
 // ============================================================================
 //MARK: Responses
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResultSummary {
     pub key: String,
     pub drop: bool,
