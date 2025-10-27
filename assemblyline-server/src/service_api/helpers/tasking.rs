@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
+use assemblyline_models::datastore::error::ErrorSeverity;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
@@ -23,7 +24,7 @@ use redis_objects::{increment, AutoExportingMetrics, Hashmap, RedisObjects};
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use crate::service_api::v1::task::models::Result as ApiResult;
+use crate::service_api::v1::task::models::{Result as ApiResult};
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
 use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
@@ -34,7 +35,7 @@ use crate::elastic::responses::BulkResult;
 use crate::elastic::{create_empty_result_from_key, Elastic};
 use crate::identify::Identify;
 use crate::service_api::v1::service::RegisterResponse;
-use crate::service_api::v1::task::FinishedBody;
+use crate::service_api::v1::task::{FinishedBody, TaskSuccess};
 use crate::services::ServiceHelper;
 use crate::Core;
 
@@ -652,9 +653,11 @@ impl TaskingClient {
 
     pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: ServiceName) -> Result<Value> {
         match service_task {
-            FinishedBody::Success { task, exec_time, freshen, result } => {
-                let task = finish_parsing_task(task)?;
-                let missing_files = self._handle_task_result(exec_time, task, result, client_id, service_name, freshen).await.context("_handle_task_result")?;
+            FinishedBody::Success(mut success) => {
+                let task = finish_parsing_task(success.task)?;
+                success.task = Default::default();
+
+                let missing_files = self._handle_task_result(task, success, client_id, service_name).await.context("_handle_task_result")?;
                 if !missing_files.is_empty() {
                     return Ok(json!({"success": false, "missing_files": missing_files}))
                 }
@@ -687,14 +690,20 @@ impl TaskingClient {
     }
 
     async fn _handle_task_result(&self, 
-        exec_time: u64, 
         task: Task, 
-        mut result: ApiResult,
+        success: Box<TaskSuccess>,
         client_id: &str, 
         service_name: ServiceName,
-        freshen: bool
     ) -> Result<Vec<Sha256>> {
         let sid = task.sid;
+        let TaskSuccess {
+            task: _,
+            exec_time,
+            freshen,
+            mut result,
+            errors: extra_errors,
+            warnings: extra_warnings,
+        } = *success;
 
         let expiry_ts = if task.ttl != 0 {
             Some(Utc::now() + TimeDelta::days(task.ttl.into()))
@@ -918,34 +927,6 @@ impl TaskingClient {
             })
         }
 
-        let mut tagging_error = vec![];
-        if !all_dropped_tags.is_empty() {
-
-            let error_message = all_dropped_tags
-                .into_iter()
-                .map(|(key, value)| key + "=" + &value)
-                .join(" | ");
-
-            warn!("[{sid}] Invalid tag data from {service_name}: {error_message}");
-            use assemblyline_models::datastore::error::{Error, Response, ErrorTypes, Status};
-
-            tagging_error.push(Error {
-                archive_ts: None,
-                created: Utc::now(),
-                expiry_ts,
-                response: Response { 
-                    message: format!("The following tags were rejected: {error_message}").into(), 
-                    service_debug_info: result.response.service_debug_info.clone(), 
-                    service_name: result.response.service_name, 
-                    service_tool_version: result.response.service_tool_version.clone(), 
-                    service_version: result.response.service_version.clone(), 
-                    status: Status::FailRecoverable,
-                },
-                sha256: result.sha256.clone(),
-                error_type: ErrorTypes::Exception,
-            })
-        }
-
         let result = assemblyline_models::datastore::result::Result{
             archive_ts: None,
             classification: ExpandingClassification::new(result.classification.as_str().to_string(), &self.classification_engine)?,
@@ -963,9 +944,44 @@ impl TaskingClient {
             partial: result.partial,
             from_archive: false,
         };
+
+        let mut all_extra_errors = vec![];
+        use assemblyline_models::datastore::error::{Error, Status};
+        if !all_dropped_tags.is_empty() {
+
+            let error_message = all_dropped_tags
+                .into_iter()
+                .map(|(key, value)| key + "=" + &value)
+                .join(" | ");
+
+            warn!("[{sid}] Invalid tag data from {service_name}: {error_message}");
+
+            let error = Error::from_result(&result)
+                .status(Status::FailRecoverable)
+                .severity(ErrorSeverity::Warning)
+                .message(format!("The following tags were rejected: {error_message}"));
+            all_extra_errors.push(error);
+        }
+        for error in extra_errors {
+            let error = Error::from_result(&result)
+                .status(Status::FailRecoverable)
+                .severity(ErrorSeverity::Error)
+                .error_type(error.error_type)
+                .message(error.message);
+            all_extra_errors.push(error);
+        }
+        for warning in extra_warnings {
+            let error = Error::from_result(&result)
+                .status(Status::FailRecoverable)
+                .severity(ErrorSeverity::Warning)
+                .error_type(warning.error_type)
+                .message(warning.message);
+            all_extra_errors.push(error);
+        }
+
         let score = result.result.score;
         let result_key = result.build_key(Some(&task))?;
-        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, tagging_error).await.context("service_finished")?;
+        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, all_extra_errors).await.context("service_finished")?;
 
         // Metrics
         let metric_factory = self.get_metrics_factory(service_name);

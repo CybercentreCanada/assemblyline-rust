@@ -1973,21 +1973,14 @@ impl Dispatcher {
             None => {
                 // Store an error and mark this file as unprocessable
                 task.dropped_files.insert(sha256.clone());
-                self._dispatching_error(task, &error::Error {
-                    archive_ts: None,
-                    created: chrono::Utc::now(),
-                    expiry_ts: task.submission.expiry_ts,
-                    response: error::Response {
-                        message: format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid).into(),
-                        service_name: "Dispatcher".into(),
-                        service_tool_version: None,
-                        service_version: "4.0".to_string(),
-                        status: error::Status::FailNonrecoverable,
-                        service_debug_info: None,
-                    },
-                    sha256: sha256.clone(),
-                    error_type: error::ErrorTypes::Unknown
-                }).await?;
+
+                let error = error::Error::from_submission(&task.submission)
+                    .service("Dispatcher".into(), "4.7".to_owned())
+                    .sha256(sha256.clone())
+                    .error_type(error::ErrorTypes::Unknown)
+                    .message(format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid));
+
+                self._dispatching_error(task, &error).await?;
                 task.file_info.insert(sha256.clone(), None);
                 task.file_schedules.insert(sha256.clone(), vec![]);
                 Ok(None)
@@ -2291,28 +2284,11 @@ impl Dispatcher {
             error_details.push_str(&logs.join("\n"));
         }
 
-        let ttl = task.submission.params.ttl;
-        let expiry_ts = if ttl != 0 {
-            Some(chrono::Utc::now() + chrono::Duration::days(ttl as i64))
-        } else {
-            None
-        };
-
-        let error = error::Error {
-            archive_ts: None,
-            created: chrono::Utc::now(),
-            expiry_ts,
-            response: error::Response {
-                message: error_details.into(),
-                service_name,
-                service_version: "0".to_string(),
-                status: error::Status::FailNonrecoverable,
-                service_debug_info: None,
-                service_tool_version: None
-            },
-            sha256: sha256.clone(),
-            error_type: error::ErrorTypes::TaskPreempted,
-        };
+        let error = error::Error::from_submission(&task.submission)
+            .service(service_name, "0".to_string())
+            .sha256(sha256.clone())
+            .error_type(error::ErrorTypes::TaskPreempted)
+            .message(error_details);
 
         let error_key = error.build_key(None, None)?;
         self.core.datastore.error.save(&error_key, &error, None, None).await?;
@@ -2345,7 +2321,7 @@ impl Dispatcher {
             service_name,
             service_version,
             service_tool_version,
-            expiry_ts,
+            expiry_ts: _,
             sha256,
             result_summary: summary,
             tags,
@@ -2470,21 +2446,16 @@ impl Dispatcher {
                 if task.active_files.len() as i32 > task.submission.params.max_extracted {
                     info!("[{sid}] hit extraction limit, dropping {extracted_sha256}");
                     task.dropped_files.insert(extracted_sha256.clone());
-                    self._dispatching_error(task, &error::Error {
-                        archive_ts: None,
-                        created: chrono::Utc::now(),
-                        expiry_ts,
-                        response: error::Response {
-                            message: format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped").into(),
-                            service_name,
-                            service_tool_version: service_tool_version.clone(),
-                            service_version: service_version.clone(),
-                            status: error::Status::FailNonrecoverable,
-                            service_debug_info: None
-                        },
-                        sha256: extracted_sha256,
-                        error_type: error::ErrorTypes::MaxFilesReached
-                    }).await?;
+
+                    let error_message = format!("Too many files extracted for submission {sid} {extracted_sha256} extracted by {service_name} will be dropped");
+                    let error = error::Error::from_submission(&task.submission)
+                        .service(service_name, service_version.clone())
+                        .maybe_tool_version(service_tool_version.clone())
+                        .sha256(extracted_sha256)
+                        .error_type(error::ErrorTypes::MaxFilesReached)
+                        .message(error_message);
+
+                    self._dispatching_error(task, &error).await?;
                     continue
                 }
 
@@ -2517,21 +2488,14 @@ impl Dispatcher {
         } else {
             for (extracted_sha256, _) in summary.children {
                 task.dropped_files.insert(extracted_sha256.clone());
-                self._dispatching_error(task, &error::Error {
-                    archive_ts: None,
-                    created: chrono::Utc::now(),
-                    expiry_ts,
-                    response: error::Response {
-                        message: format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits").into(),
-                        service_name,
-                        service_tool_version: service_tool_version.clone(),
-                        service_version: service_version.clone(),
-                        status: error::Status::FailNonrecoverable,
-                        service_debug_info: None,
-                    },
-                    sha256: extracted_sha256,
-                    error_type: error::ErrorTypes::MaxDepthReached,
-                }).await?;
+                let error_message = format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits");
+                let error = error::Error::from_submission(&task.submission)
+                    .service(service_name, service_version.clone())
+                    .maybe_tool_version(service_tool_version.clone())
+                    .sha256(extracted_sha256)
+                    .error_type(error::ErrorTypes::MaxDepthReached)
+                    .message(error_message);
+                self._dispatching_error(task, &error).await?;
             }
         }
 

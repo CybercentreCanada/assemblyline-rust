@@ -1,10 +1,11 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use rand::seq::IteratorRandom;
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
+use crate::datastore::Submission;
 use crate::messages::task::{generate_conf_key, Task};
 use crate::{random_word, random_words, ElasticMeta, Readable};
 use crate::types::{ServiceName, Sha256, Text};
@@ -39,6 +40,29 @@ impl Status {
     }
 }
 
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
+#[strum(serialize_all="lowercase")]
+#[metadata_type(ElasticMeta)]
+pub enum ErrorSeverity {
+    Error,
+    Warning,
+}
+
+impl Default for ErrorSeverity {
+    fn default() -> Self {
+        Self::Error
+    }
+}
+
+#[cfg(feature = "rand")]
+impl rand::distr::Distribution<ErrorSeverity> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ErrorSeverity {
+        match ErrorSeverity::iter().choose(rng) {
+            Some(value) => value,
+            None => ErrorSeverity::Error,
+        }
+    }
+}
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
@@ -131,6 +155,9 @@ pub struct Error {
     /// Type of error
     #[serde(rename="type", default="default_error_type")]
     pub error_type: ErrorTypes,
+    /// The severity of an error
+    #[serde(default)]
+    pub severity: ErrorSeverity
 }
 
 #[cfg(feature = "rand")]
@@ -143,6 +170,7 @@ impl rand::distr::Distribution<Error> for rand::distr::StandardUniform {
             response: rng.random(),
             sha256: rng.random(),
             error_type: rng.random(),
+            severity: rng.random(),
         }
     }
 }
@@ -163,10 +191,121 @@ impl Error {
     pub fn build_unique_key(&self, service_tool_version: Option<&str>, task: Option<&Task>) -> Result<String, serde_json::Error> {
         Ok(self.build_key(service_tool_version, task)? + "." + &rand::random::<u64>().to_string())
     }
+
+    pub fn from_submission(context: &Submission) -> builder::NeedsService {
+        builder::NeedsService { error: Self {
+            archive_ts: None,
+            created: chrono::Utc::now(),
+            expiry_ts: context.expiry_ts,
+            response: Response { 
+                message: Text("".to_owned()), 
+                service_debug_info: None, 
+                service_name: "".into(), 
+                service_tool_version: None, 
+                service_version: "".to_owned(), 
+                status: Status::FailNonrecoverable 
+            },
+            sha256: context.files[0].sha256.clone(),
+            error_type: ErrorTypes::Exception,
+            severity: ErrorSeverity::Error,
+        } }
+    }
+
+    pub fn from_task(context: &crate::messages::task::Task) -> builder::NeedsMessage {
+        builder::NeedsMessage { error: Self {
+            archive_ts: None,
+            created: chrono::Utc::now(),
+            expiry_ts: if context.ttl > 0 { Some(Utc::now() + TimeDelta::days(context.ttl as i64)) } else { None },
+            response: Response { 
+                message: Text("".to_owned()), 
+                service_debug_info: None, 
+                service_name: context.service_name, 
+                service_tool_version: None, 
+                service_version: "0".to_owned(), 
+                status: Status::FailNonrecoverable 
+            },
+            sha256: context.fileinfo.sha256.clone(),
+            error_type: ErrorTypes::Exception,
+            severity: ErrorSeverity::Error,
+        } }
+    }
+
+    pub fn from_result(context: &crate::datastore::result::Result) -> builder::NeedsMessage {
+        builder::NeedsMessage { error: Self {
+            archive_ts: None,
+            created: chrono::Utc::now(),
+            expiry_ts: context.expiry_ts,
+            response: Response { 
+                message: Text("".to_owned()), 
+                service_debug_info: context.response.service_debug_info.clone(), 
+                service_name: context.response.service_name, 
+                service_tool_version: context.response.service_tool_version.clone(), 
+                service_version: context.response.service_version.clone(), 
+                status: Status::FailNonrecoverable 
+            },
+            sha256: context.sha256.clone(),
+            error_type: ErrorTypes::Exception,
+            severity: ErrorSeverity::Error,
+        } }
+    }
 }
 
 fn default_error_type() -> ErrorTypes { ErrorTypes::Exception }
 
 impl Readable for Error {
     fn set_from_archive(&mut self, _from_archive: bool) {}
+}
+
+pub mod builder {
+    use super::ErrorTypes;
+    use crate::datastore::error::{ErrorSeverity, Status};
+    use crate::types::{ServiceName, Sha256, Text};
+
+
+    pub struct NeedsService {
+        pub (crate) error: super::Error,
+    }
+
+    impl NeedsService {
+        pub fn service(mut self, name: ServiceName, version: String) -> NeedsMessage {
+            self.error.response.service_name = name;
+            self.error.response.service_version = version;
+            NeedsMessage { error: self.error }
+        }
+    }
+
+    pub struct NeedsMessage {
+        pub (crate) error: super::Error,
+    }
+
+    impl NeedsMessage {
+        pub fn sha256(mut self, hash: Sha256) -> Self {
+            self.error.sha256 = hash; self
+        }
+
+        pub fn error_type(mut self, error_type: ErrorTypes) -> Self {
+            self.error.error_type = error_type; self
+        }
+
+        pub fn status(mut self, status: Status) -> Self {
+            self.error.response.status = status; self
+        }
+
+        pub fn severity(mut self, severity: ErrorSeverity) -> Self {
+            self.error.severity = severity; self
+        }
+
+        pub fn maybe_tool_version(mut self, version: Option<String>) -> Self {
+            self.error.response.service_tool_version = version; self
+        }
+
+        pub fn tool_version(mut self, version: String) -> Self {
+            self.error.response.service_tool_version = Some(version); self
+        }
+
+        pub fn message(mut self, message: String) -> super::Error {
+            self.error.response.message = Text(message); self.error
+        }
+    }
+
 }

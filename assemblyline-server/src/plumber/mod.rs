@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::datastore::Service;
+use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::types::{JsonMap, ServiceName};
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
@@ -20,6 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::constants::{service_queue_name, ServiceStage, SERVICE_QUEUE_PREFIX};
 use crate::dispatcher::client::DispatchClient;
+use crate::elastic::collection::OperationBatch;
 use crate::elastic::Elastic;
 use crate::{Core, Flag};
 
@@ -134,22 +136,9 @@ impl Plumber {
                         };
 
                         use assemblyline_models::datastore::error;
-
-                        let error = error::Error {
-                            archive_ts: None,
-                            created: Utc::now(),
-                            expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
-                            response: error::Response {
-                                message: "The service was disabled while processing this task.".into(),
-                                service_name: task.service_name,
-                                service_version: "0".to_string(),
-                                service_tool_version: None,
-                                service_debug_info: None,
-                                status: error::Status::FailNonrecoverable,
-                            },
-                            sha256: task.fileinfo.sha256.clone(),
-                            error_type: error::ErrorTypes::TaskPreempted,
-                        };
+                        let error = error::Error::from_task(&task)
+                            .error_type(error::ErrorTypes::TaskPreempted)
+                            .message("The service was disabled while processing this task.".into());
 
                         let error_key = error.build_key(None, Some(&task))?;
                         self.dispatch_client.service_failed(task, &error_key, error).await?;
@@ -312,22 +301,10 @@ impl Plumber {
                     None => break
                 };
 
-                use assemblyline_models::datastore::error::{Error, Status, ErrorTypes, Response};
-                let error = Error {
-                    archive_ts: None,
-                    created: Utc::now(),
-                    expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
-                    response: Response {
-                        message: "Task canceled due to execesive queuing.".into(),
-                        service_name: task.service_name,
-                        service_version: "0".to_string(),
-                        status: Status::FailNonrecoverable,
-                        service_debug_info: None,
-                        service_tool_version: None,
-                    },
-                    sha256: task.fileinfo.sha256.clone(),
-                    error_type: ErrorTypes::TaskPreempted,
-                };
+                use assemblyline_models::datastore::error::{Error, ErrorTypes};
+                let error = Error::from_task(&task)
+                    .error_type(ErrorTypes::TaskPreempted)
+                    .message("Task canceled due to execesive queuing.".into());
 
                 let error_key = error.build_key(None, Some(&task))?;
                 self.dispatch_client.service_failed(task, &error_key, error).await?;
