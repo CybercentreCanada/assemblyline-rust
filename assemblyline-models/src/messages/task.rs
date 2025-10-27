@@ -239,7 +239,7 @@ pub struct TaskToken {
 // ============================================================================
 //MARK: Responses 
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResultSummary {
     pub key: String,
     pub drop: bool,
@@ -252,6 +252,12 @@ pub struct ResultSummary {
 pub enum ServiceResponse {
     Result(Box<ServiceResult>),
     Error(Box<ServiceError>),
+}
+
+impl std::fmt::Debug for ServiceResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceResponse").field("result", &matches!(self, ServiceResponse::Result(..))).finish()
+    }
 }
 
 impl ServiceResponse {

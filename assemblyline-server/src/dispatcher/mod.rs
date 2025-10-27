@@ -109,6 +109,7 @@ macro_rules! retry {
     };
 }
 
+#[derive(Debug)]
 enum DispatchAction {
     Start(ServiceStartMessage, Option<oneshot::Sender<Result<()>>>),
     Result(Box<ServiceResponse>),
@@ -121,6 +122,7 @@ enum DispatchAction {
     TestReport(Sid, oneshot::Sender<TestReport>),
 }
 
+#[derive(Debug)]
 pub struct TestReport {
     pub queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
     pub service_results: HashMap<(Sha256, ServiceName), ResultSummary>,
@@ -893,7 +895,9 @@ impl Dispatcher {
     #[cfg(test)]
     pub async fn get_test_report(&self, sid: Sid) -> Result<TestReport> {
         let (send, resp) = oneshot::channel();
-        self.send_dispatch_action(DispatchAction::TestReport(sid, send)).await;
+        if !self.send_dispatch_action(DispatchAction::TestReport(sid, send)).await {
+            bail!("could not send dispatch action");
+        }
         Ok(resp.await?)
     }
 
@@ -913,13 +917,18 @@ impl Dispatcher {
         return self.core.redis_volatile.expiring_set(make_watcher_list_name(sid), None)
     }
 
-    async fn send_dispatch_action(&self, action: DispatchAction) {
+    async fn send_dispatch_action(&self, action: DispatchAction) -> bool {
         let sid = action.sid();
         let queue_table = self.process_queues.read().await;
         if let Some(queue) = queue_table.get(&sid) {
             if queue.send(action).is_err() {
                 warn!("Message for non-active submission: {sid}");
+                false
+            } else {
+                true
             }
+        } else {
+            false
         }
     }
 
