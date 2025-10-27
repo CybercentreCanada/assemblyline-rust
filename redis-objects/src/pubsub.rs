@@ -72,7 +72,7 @@ impl ListenerBuilder {
                         continue 'reconnect;
                     }
                 }
-                notify_started.notify_waiters();
+                notify_started.notify_one();
 
                 let mut stream = pubsub.on_message();
                 while let Some(message) = stream.next().await {
