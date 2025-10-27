@@ -251,8 +251,6 @@ impl DispatchClient {
 
         task.metadata.insert("worker__".to_string(), worker_id.into());
 
-        println!("WE ARE SENDING MESSAGE START");
-
         let url = format!("https://{}/start", task.dispatcher_address);
         let message = ServiceStartMessage {
             sid: task.sid,
@@ -262,8 +260,6 @@ impl DispatchClient {
             dispatcher_id: task.dispatcher.clone(),
             task_id: Some(task.task_id),
         };
-
-        println!("{message:?}");
 
         loop {
             // Let the dispatcher know we want to start this task

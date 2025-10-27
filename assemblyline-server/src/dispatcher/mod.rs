@@ -324,8 +324,7 @@ impl SubmissionTask {
             }
 
             recurse_tree(&mut out, args.file_tree, 0);
-
-            sorted_file_depth = out.file_depth.clone().into_iter().sorted_by(|a, b| a.1.cmp(&b.1)).collect_vec();
+            sorted_file_depth = out.file_depth.clone().into_iter().sorted_by_key(|x| x.1).collect_vec();
         }
 
         if !args.results.is_empty() {
@@ -1052,15 +1051,11 @@ impl Dispatcher {
             if messages.is_empty() {
                 let message = self.start_queue.pop_timeout(ONE_SECOND).await?;
                 if let Some(message) = message {
-                    println!("message: {} {} {} {}", &message.sid, &message.dispatcher_id, &message.worker_id, &message.service_name);
                     messages.push(message);
                 }
             }
-
             // process all the messages we found
             for message in messages {
-                println!("iterate through message start messages");
-                println!("{} {} {} {}", message.sid, message.dispatcher_id, message.worker_id, message.service_name);
                 self.send_dispatch_action(DispatchAction::Start(message, None)).await;
             }
         }
