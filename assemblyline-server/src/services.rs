@@ -18,7 +18,7 @@ use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::{RwLock, Mutex};
 use redis_objects::RedisObjects;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::constants::{ServiceStage, SERVICE_STAGE_KEY};
 use crate::elastic::Elastic;
@@ -32,6 +32,7 @@ type ChangeChannel = mpsc::Receiver<Option<ServiceChange>>;
 pub struct ServiceHelper{
     classification: Arc<ClassificationParser>,
     inner: Arc<RwLock<ServiceInfo>>,
+    changes: tokio::sync::broadcast::Sender<ServiceName>,
     service_stage_hash: redis_objects::Hashmap<ServiceStage>,
     regex_cache: RegexCache,
     config: Arc<ServiceConfig>,
@@ -48,6 +49,7 @@ impl ServiceHelper {
         let changes: ChangeChannel = redis_volatile.pubsub_json_listener()
             .psubscribe("changes.services.*".to_owned())
             .listen().await;
+        let (sender, _) = tokio::sync::broadcast::channel(128);
 
         // Initialize the services
         let services = datastore.list_all_services().await.context("list_all_services")?;
@@ -59,12 +61,13 @@ impl ServiceHelper {
         }));
 
         // Launch agent that keeps watch for service updates
-        tokio::spawn(service_daemon(datastore, changes, inner.clone()));
+        tokio::spawn(service_daemon(datastore, changes, inner.clone(), sender.clone()));
 
         // return shared reference
         Ok(Self { 
             inner, 
             classification, 
+            changes: sender,
             service_stage_hash: redis_volatile.hashmap(SERVICE_STAGE_KEY.to_owned(), None),
             regex_cache: RegexCache::new(), 
             config: Arc::new(config.clone()) 
@@ -73,6 +76,10 @@ impl ServiceHelper {
 
     pub fn get(&self, name: ServiceName) -> Option<Arc<Service>> {
         self.inner.read().services.get(&name).cloned()
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<ServiceName> {
+        self.changes.subscribe()
     }
 
     /// A hash from service name to ServiceStage enum values.
@@ -248,13 +255,13 @@ impl ServiceHelper {
 }
 
 
-async fn service_daemon(datastore: Arc<Elastic>, mut changes: ChangeChannel, info: Arc<RwLock<ServiceInfo>>) {
-    while let Err(err) = _service_daemon(datastore.clone(), &mut changes, info.clone()).await {
+async fn service_daemon(datastore: Arc<Elastic>, mut changes: ChangeChannel, info: Arc<RwLock<ServiceInfo>>, mut changes_output: broadcast::Sender<ServiceName>) {
+    while let Err(err) = _service_daemon(datastore.clone(), &mut changes, info.clone(), &mut changes_output).await {
         error!("Error in service list daemon: {err}");
     }
 }
 
-async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, service_info: Arc<RwLock<ServiceInfo>>) -> Result<()> {
+async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, service_info: Arc<RwLock<ServiceInfo>>, changes_output: &mut broadcast::Sender<ServiceName>) -> Result<()> {
     // 
     let mut refresh_interval = tokio::time::interval(REFRESH_INTERVAL);
     debug!("Service info daemon starting.");
@@ -270,6 +277,7 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
                     if change.operation.is_removed() {
                         info!("Service Watcher: Service removed: {}", change.name);
                         service_info.write().services.remove(&change.name);
+                        _ = changes_output.send(change.name);
                         // don't worry about access_cache on this branch, extra service names will be ignored
                     } else {
                         info!("Service Watcher: Service changed: {}", change.name);
@@ -280,6 +288,7 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
                             None => info.services.remove(&change.name),
                         };
                         info.access_cache.clear();
+                        _ = changes_output.send(change.name);
                     }
                     continue
                 }
@@ -298,6 +307,9 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
             .map(|service|(service.name, Arc::new(service)))
             .collect();
         info.access_cache.clear();
+        for name in info.services.keys() {
+            _ = changes_output.send(*name);
+        }
         info!("Service Watcher: Service load finished");
     }
     Ok(())

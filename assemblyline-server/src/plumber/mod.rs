@@ -72,6 +72,15 @@ impl Plumber {
         let tls_config = crate::config::TLSConfig::load().await?;
         pool.spawn(http::start(bind_address, tls_config, self.clone()));
 
+        // Watch for services that have invalid configurations
+        // TODO this can be removed after privileged services are removed from scaler
+        let this = self.clone();
+        pool.spawn(async move {
+            while let Err(err) = this.remove_service_privilege().await {
+                error!("Error in service config cleanup: {err}");
+            }
+        });
+
         // Start a task cleanup thread
         let this = self.clone();
         pool.spawn(async move {
@@ -315,5 +324,40 @@ impl Plumber {
         Ok(())
     }
 
+
+    async fn remove_service_privilege(&self) -> Result<()> {
+        // subscribe to service changes
+        let mut names_to_check = self.core.services.subscribe();
+
+        // check current service values
+        for (_, service) in self.core.services.list_all() {
+            self.apply_service_config_change(service).await?
+        }
+
+        // wait for service changes and respond to them
+        while let Ok(name) = names_to_check.recv().await {
+            if let Some(service) = self.core.services.get(name) {
+                self.apply_service_config_change(service).await?
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_service_config_change(&self, service: Arc<Service>) -> Result<()> {
+        // if not privledged we are done
+        if !service.privileged { return Ok(()) }
+
+        // update service in elastic
+        let mut operations = OperationBatch::default();
+        operations.set("privileged".to_owned(), serde_json::Value::Bool(false));
+        self.datastore.service_delta.update(&service.name, operations, None, Some(5)).await?;
+
+        // send notification of service change
+        self.core.redis_volatile.publish(&("changes.services.".to_owned() + &service.name), &serde_json::to_vec(&ServiceChange {
+            operation: assemblyline_models::messages::changes::Operation::Added,
+            name: service.name,
+        })?).await?;
+        Ok(())
+    }
 
 }
