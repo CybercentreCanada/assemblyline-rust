@@ -266,6 +266,12 @@ pub enum ServiceResponse {
     Error(Box<ServiceError>),
 }
 
+impl std::fmt::Debug for ServiceResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceResponse").field("result", &matches!(self, ServiceResponse::Result(..))).finish()
+    }
+}
+
 impl ServiceResponse {
     pub fn sid(&self) -> Sid {
         match self {

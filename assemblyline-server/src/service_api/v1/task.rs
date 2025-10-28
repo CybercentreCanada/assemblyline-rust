@@ -141,15 +141,22 @@ async fn task_finished(
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct TaskSuccess {
+    pub task: JsonMap,
+    #[serde(default)]
+    pub exec_time: u64,
+    pub freshen: bool,
+    pub result: models::Result,
+    #[serde(default)]
+    pub errors: Vec<models::ExtraError>,
+    #[serde(default)]
+    pub warnings: Vec<models::ExtraWarning>,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FinishedBody {
-    Success {
-        task: JsonMap,
-        #[serde(default)]
-        exec_time: u64,
-        freshen: bool,
-        result: models::Result,
-    },
+    Success(Box<TaskSuccess>),
     Error {
         task: JsonMap,
         #[serde(default)]
@@ -165,6 +172,7 @@ pub enum FinishedBody {
 pub mod models {
     use std::collections::HashMap;
 
+    use assemblyline_models::datastore::error::ErrorTypes;
     use assemblyline_models::datastore::result::{BodyFormat, PromoteTo, ResponseBody};
     use assemblyline_models::types::{ClassificationString, JsonMap, Sha256, Text};
     use chrono::{DateTime, Utc};
@@ -302,4 +310,20 @@ pub mod models {
     }
 
     fn default_frequency() -> i32 { 1 }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct ExtraError {
+        pub message: String,
+        #[serde(default="unknown_error")]
+        pub error_type: ErrorTypes,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct ExtraWarning {
+        pub message: String,
+        #[serde(default="unknown_error")]
+        pub error_type: ErrorTypes,
+    }
+
+    fn unknown_error() -> ErrorTypes { ErrorTypes::Unknown }
 }

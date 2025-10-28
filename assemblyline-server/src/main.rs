@@ -297,29 +297,18 @@ impl Core {
     #[cfg(test)]
     pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, TestGuard) {
         use rand::Rng;
-        use std::sync::LazyLock;
-        use parking_lot::Mutex;
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
 
-        static USED_DB: LazyLock<Arc<Mutex<Vec<i64>>>> = LazyLock::new(|| {
-            let out = Vec::from_iter(1..16);
-            Arc::new(Mutex::new(out))
-        });
-
-        let table = USED_DB.clone();
-        let db = loop {
-            {
-                if let Some(value) = table.lock().pop() {
-                    break value
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
+        static USED_DB: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+        let db = USED_DB.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let host = "localhost";
         let port = 6379;
+        println!("Redis connection");
         let redis = RedisObjects::open_host(host, port, db).unwrap();
+        println!("Redis wipe");
         redis.wipe().await.unwrap();
+    
 
         let filestore = tempfile::TempDir::new().unwrap();
 
@@ -351,13 +340,18 @@ impl Core {
                 "archive": vec![format!("file://{}", filestore.path().to_string_lossy())],
             }
         })).unwrap();
+
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
         let prefix = rand::rng().random::<u128>().to_string();
+
+        println!("core setup");
         let core = Self::setup(Arc::new(config), &prefix, false).await.unwrap();
         let elastic = core.datastore.clone();
+
+        println!("test settings");
         elastic.apply_test_settings().await.unwrap();
-        let guard = TestGuard { used: db, table, elastic, filestore, running: core.running.clone(), cleaned: false };
+        let guard = TestGuard { used: db, elastic, filestore, running: core.running.clone(), cleaned: false };
         (core, guard)
     }
     
@@ -432,7 +426,6 @@ struct TestGuard {
     used: i64,
     elastic: Arc<Elastic>,
     filestore: tempfile::TempDir,
-    table: Arc<parking_lot::Mutex<Vec<i64>>>,
     cleaned: bool
 }
 
@@ -450,10 +443,8 @@ struct TestGuard {
 impl Drop for TestGuard {
     fn drop(&mut self) {
         if !self.cleaned {
+            self.cleaned = true;
             self.running.set(false);
-            // self.table.lock().push(self.used);
-            let table = self.table.clone();
-            let used = self.used;
 
             let elastic = self.elastic.clone();
             std::thread::spawn(move || {
@@ -464,8 +455,6 @@ impl Drop for TestGuard {
                         error!("Could not clear test data: {err}");
                     }
                 });
-
-                table.lock().push(used);
             });
         }
     }

@@ -21,6 +21,12 @@ pub struct Queue<T: Serialize + DeserializeOwned> {
     _data: PhantomData<T>
 }
 
+impl<T: Serialize + DeserializeOwned> std::fmt::Debug for Queue<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Queue").field("name", &self.raw.name).finish()
+    }
+}
+
 impl<T: Serialize + DeserializeOwned> Clone for Queue<T> {
     fn clone(&self) -> Self {
         Self { raw: self.raw.clone(), _data: self._data }

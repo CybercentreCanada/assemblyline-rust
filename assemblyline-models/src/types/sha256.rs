@@ -12,12 +12,6 @@ use crate::{ElasticMeta, ModelError};
 #[metadata_type(ElasticMeta)]
 pub struct Sha256(String);
 
-// impl Described<ElasticMeta> for internment::ArcIntern<String> {
-//     fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
-//         String::metadata()
-//     }
-// }
-
 impl std::fmt::Display for Sha256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)

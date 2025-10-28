@@ -242,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "assemblyline-markings 0.1.13",
  "base62",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-server"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
@@ -4020,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "redis-objects"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "deadpool-redis",

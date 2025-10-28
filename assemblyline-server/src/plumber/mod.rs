@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::datastore::Service;
+use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::types::{JsonMap, ServiceName};
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
@@ -20,6 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::constants::{service_queue_name, ServiceStage, SERVICE_QUEUE_PREFIX};
 use crate::dispatcher::client::DispatchClient;
+use crate::elastic::collection::OperationBatch;
 use crate::elastic::Elastic;
 use crate::{Core, Flag};
 
@@ -69,6 +71,15 @@ impl Plumber {
         let bind_address = crate::config::load_bind_address()?;
         let tls_config = crate::config::TLSConfig::load().await?;
         pool.spawn(http::start(bind_address, tls_config, self.clone()));
+
+        // Watch for services that have invalid configurations
+        // TODO this can be removed after privileged services are removed from scaler
+        let this = self.clone();
+        pool.spawn(async move {
+            while let Err(err) = this.remove_service_privilege().await {
+                error!("Error in service config cleanup: {err}");
+            }
+        });
 
         // Start a task cleanup thread
         let this = self.clone();
@@ -134,22 +145,9 @@ impl Plumber {
                         };
 
                         use assemblyline_models::datastore::error;
-
-                        let error = error::Error {
-                            archive_ts: None,
-                            created: Utc::now(),
-                            expiry_ts: if task.ttl > 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
-                            response: error::Response {
-                                message: "The service was disabled while processing this task.".into(),
-                                service_name: task.service_name,
-                                service_version: "0".to_string(),
-                                service_tool_version: None,
-                                service_debug_info: None,
-                                status: error::Status::FailNonrecoverable,
-                            },
-                            sha256: task.fileinfo.sha256.clone(),
-                            error_type: error::ErrorTypes::TaskPreempted,
-                        };
+                        let error = error::Error::from_task(&task)
+                            .error_type(error::ErrorTypes::TaskPreempted)
+                            .message("The service was disabled while processing this task.".into());
 
                         let error_key = error.build_key(None, Some(&task))?;
                         self.dispatch_client.service_failed(task, &error_key, error).await?;
@@ -312,22 +310,10 @@ impl Plumber {
                     None => break
                 };
 
-                use assemblyline_models::datastore::error::{Error, Status, ErrorTypes, Response};
-                let error = Error {
-                    archive_ts: None,
-                    created: Utc::now(),
-                    expiry_ts: if task.ttl != 0 { Some(Utc::now() + TimeDelta::days(task.ttl as i64)) } else { None },
-                    response: Response {
-                        message: "Task canceled due to execesive queuing.".into(),
-                        service_name: task.service_name,
-                        service_version: "0".to_string(),
-                        status: Status::FailNonrecoverable,
-                        service_debug_info: None,
-                        service_tool_version: None,
-                    },
-                    sha256: task.fileinfo.sha256.clone(),
-                    error_type: ErrorTypes::TaskPreempted,
-                };
+                use assemblyline_models::datastore::error::{Error, ErrorTypes};
+                let error = Error::from_task(&task)
+                    .error_type(ErrorTypes::TaskPreempted)
+                    .message("Task canceled due to execesive queuing.".into());
 
                 let error_key = error.build_key(None, Some(&task))?;
                 self.dispatch_client.service_failed(task, &error_key, error).await?;
@@ -338,5 +324,41 @@ impl Plumber {
         Ok(())
     }
 
+
+    async fn remove_service_privilege(&self) -> Result<()> {
+        // subscribe to service changes
+        let mut names_to_check = self.core.services.subscribe();
+
+        // check current service values
+        for (_, service) in self.core.services.list_all() {
+            self.apply_service_config_change(service).await?
+        }
+
+        // wait for service changes and respond to them
+        while let Ok(name) = names_to_check.recv().await {
+            if let Some(service) = self.core.services.get(name) {
+                self.apply_service_config_change(service).await?
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_service_config_change(&self, service: Arc<Service>) -> Result<()> {
+        // if not privledged we are done
+        if !service.privileged { return Ok(()) }
+
+        // update service in elastic
+        let mut operations = OperationBatch::default();
+        operations.set("privileged".to_owned(), serde_json::Value::Bool(false));
+        self.datastore.service_delta.update(&service.name, operations, None, Some(5)).await?;
+
+        // send notification of service change
+        self.core.redis_volatile.publish(&("changes.services.".to_owned() + &service.name), &serde_json::to_vec(&ServiceChange {
+            operation: assemblyline_models::messages::changes::Operation::Added,
+            name: service.name,
+            reason: Some("Disabling privileged service".to_owned())
+        })?).await?;
+        Ok(())
+    }
 
 }
