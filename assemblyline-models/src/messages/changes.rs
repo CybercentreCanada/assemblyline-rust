@@ -34,6 +34,8 @@ impl<'de> Deserialize<'de> for Operation {
 pub struct ServiceChange {
     pub name: ServiceName,
     pub operation: Operation,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
