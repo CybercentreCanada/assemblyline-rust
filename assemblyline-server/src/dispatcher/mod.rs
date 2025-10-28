@@ -359,12 +359,13 @@ impl SubmissionTask {
                 let results_to_process = args.results.iter().filter(|(k, _)| k.as_str().contains(sha.to_string().as_str())).collect_vec();
 
                 for (k, result) in results_to_process {
-                    if let [sha256, service, _] = k.splitn(3, ".").collect_vec()[..] {
-                        let sha256: Sha256 = match sha256.parse() {
-                            Ok(sha) => sha,
-                            Err(_) => continue,
-                        };
 
+                    let [sha256_str, service, _] = k.splitn(3, ".").collect_vec()[..] else { continue};
+
+                    let sha256: Sha256 = match sha256_str.parse() {
+                        Ok(sha) => sha,
+                        Err(_) => continue,
+                    };
 
                     if let Ok(tags) = result.scored_tag_dict() {
                         for (key, tag) in tags {
@@ -398,9 +399,6 @@ impl SubmissionTask {
                     }
                 }
             }
-
-            }
-
         }
 
         // store errors that are already part of this submission

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::types::{ExpandingClassification, Sid};
@@ -95,11 +95,15 @@ impl SubmitManager {
         match sub_data {
             Some(submission) =>
             {
-                let dispatch_message = SubmissionDispatchMessage::new(submission, completed_queue).set_file_infos(submission_obj.file_infos).set_file_tree(submission_obj.file_tree).set_results(submission_obj.results).set_errors(submission_obj.errors);
-            self.dispatch_submission_queue.push(&dispatch_message).await?;
-            return Ok(());
+                let dispatch_message = SubmissionDispatchMessage::new(submission, completed_queue)
+                .set_file_infos(submission_obj.file_infos)
+                .set_file_tree(submission_obj.file_tree)
+                .set_results(submission_obj.results)
+                .set_errors(submission_obj.errors);
+                self.dispatch_submission_queue.push(&dispatch_message).await?;
+                return Ok(());
             },
-            None =>  panic!("Cannot find submission {sid:?} in datastore."),
+            None =>  bail!("Cannot find submission {sid:?} in datastore."),
         };
     }
 }
