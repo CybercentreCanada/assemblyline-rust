@@ -23,7 +23,7 @@ use crate::types::{ClassificationString, ExpandingClassification, ServiceName, S
 
 use super::tagging::Tagging;
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described, Clone)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum BodyFormat {
@@ -44,18 +44,18 @@ pub enum BodyFormat {
 // This needs to match the PROMOTE_TO StringTable in
 // assemblyline-v4-service/assemblyline_v4_service/common/result.py.
 // Any updates here need to go in that StringTable also.
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[serde(rename_all="SCREAMING_SNAKE_CASE")]
 pub enum PromoteTo {
-    Screenshot, 
-    Entropy, 
+    Screenshot,
+    Entropy,
     UriParams
 }
 
 // constants = forge.get_constants()
 
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Attack {
@@ -70,7 +70,7 @@ pub struct Attack {
 }
 
 /// Heuristic Signatures
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Signature {
@@ -88,7 +88,7 @@ pub struct Signature {
 fn default_signature_frequency() -> i32 { 1 }
 
 /// Heuristic associated to the Section
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Heuristic {
@@ -109,7 +109,7 @@ pub struct Heuristic {
 }
 
 /// Result Section
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Section {
@@ -147,7 +147,7 @@ pub struct Section {
 }
 
 /// Result Body
-#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct ResultBody {
@@ -160,7 +160,7 @@ pub struct ResultBody {
 }
 
 /// Service Milestones
-#[derive(Serialize, Deserialize, Debug, Default, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Default, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct Milestone {
@@ -184,7 +184,7 @@ impl rand::distr::Distribution<Milestone> for rand::distr::StandardUniform {
 
 
 /// File related to the Response
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {
@@ -210,10 +210,31 @@ pub struct File {
     pub allow_dynamic_recursion: bool,
 }
 
+
+impl PartialEq for File {
+    fn eq(&self, other: &Self) ->bool {
+        self.sha256 == other.sha256
+    }
+}
+
+impl File {
+    pub fn new(sha256: Sha256, name: String) -> Self {
+        File {
+            name: name,
+            sha256: sha256,
+            description: Default::default(),
+            classification: ClassificationString::default_unrestricted(),
+            is_section_image: false,
+            parent_relation: Default::default(),
+            allow_dynamic_recursion: false
+        }
+    }
+}
+
 fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
 
 /// Response Body of Result
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct ResponseBody {
@@ -265,7 +286,7 @@ impl rand::distr::Distribution<ResponseBody> for rand::distr::StandardUniform {
 
 
 /// Result Model
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Result {

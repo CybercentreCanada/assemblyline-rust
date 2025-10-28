@@ -497,8 +497,8 @@ pub struct Classification {
 
 impl Default for Classification {
     fn default() -> Self {
-        Self { 
-            path: Some("/etc/assemblyline/classification.yml".into()), 
+        Self {
+            path: Some("/etc/assemblyline/classification.yml".into()),
             config: None,
         }
     }
@@ -517,9 +517,9 @@ pub struct Dispatcher {
 
 impl Default for Dispatcher {
     fn default() -> Self {
-        Self { 
-            timeout: 15.0 * 60.0, 
-            max_inflight: 1000 
+        Self {
+            timeout: 15.0 * 60.0,
+            max_inflight: 1000
         }
     }
 }
@@ -551,16 +551,16 @@ pub struct Expiry {
 
 impl Default for Expiry {
     fn default() -> Self {
-        Self { 
-            batch_delete: false, 
-            delay: 0, 
-            delete_storage: true, 
-            sleep_time: 15, 
-            workers: 20, 
-            delete_workers: 2, 
-            iteration_max_tasks: 20, 
-            delete_batch_size: 200, 
-            badlisted_tag_dtl: 0 
+        Self {
+            batch_delete: false,
+            delay: 0,
+            delete_storage: true,
+            sleep_time: 15,
+            workers: 20,
+            delete_workers: 2,
+            iteration_max_tasks: 20,
+            delete_batch_size: 200,
+            badlisted_tag_dtl: 0
         }
     }
 }
@@ -735,9 +735,9 @@ pub struct Metrics {
 
 impl Default for Metrics {
     fn default() -> Self {
-        Self { 
+        Self {
             apm_server: Default::default(),
-            export_interval: 5, 
+            export_interval: 5,
             redis: default_redis_nonpersistant()
         }
     }
@@ -764,8 +764,8 @@ pub struct Redis {
 
 impl Default for Redis {
     fn default() -> Self {
-        Self { 
-            nonpersistent: default_redis_nonpersistant(), 
+        Self {
+            nonpersistent: default_redis_nonpersistant(),
             persistent: default_redis_persistant()
         }
     }
@@ -1003,7 +1003,7 @@ pub struct Plumber {
 
 impl Default for Plumber {
     fn default() -> Self {
-        Self { 
+        Self {
             notification_queue_interval: 30 * 60,
             notification_queue_max_age: 24 * 60 * 60
         }
@@ -1025,9 +1025,9 @@ pub struct Archive {
 
 impl Default for Archive {
     fn default() -> Self {
-        Self { 
-            enabled: false, 
-            indices: vec!["file".to_owned(), "submission".to_owned(), "result".to_owned()], 
+        Self {
+            enabled: false,
+            indices: vec!["file".to_owned(), "submission".to_owned(), "result".to_owned()],
         }
     }
 }
@@ -1114,10 +1114,10 @@ pub struct Filestore {
 
 impl Default for Filestore {
     fn default() -> Self {
-        Self { 
-            archive: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-archive&use_ssl=False".to_string()], 
-            cache: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-cache&use_ssl=False".to_string()], 
-            storage: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False".to_string()] 
+        Self {
+            archive: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-archive&use_ssl=False".to_string()],
+            cache: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-cache&use_ssl=False".to_string()],
+            storage: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False".to_string()]
         }
     }
 }
@@ -1125,7 +1125,7 @@ impl Default for Filestore {
 #[derive(Debug, strum::Display, SerializeDisplay, strum::EnumString, DeserializeFromStr)]
 #[strum(serialize_all="UPPERCASE", ascii_case_insensitive)]
 pub enum LogLevel {
-    Debug, 
+    Debug,
     Info,
     Warning,
     Error,
@@ -1169,7 +1169,7 @@ pub struct Logging {
 
 impl Default for Logging {
     fn default() -> Self {
-        Self { 
+        Self {
             log_directory: "/var/log/assemblyline/".into(),
             log_as_json: true,
             log_level: LogLevel::Info,
@@ -1217,7 +1217,7 @@ pub enum SafelistHashTypes {
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy)]
 #[strum(serialize_all = "lowercase")]
 pub enum RegistryTypes {
-    Docker, 
+    Docker,
     Harbor
 }
 
@@ -1236,9 +1236,9 @@ pub struct ServiceSafelist {
 
 impl Default for ServiceSafelist {
     fn default() -> Self {
-        Self { 
-            enabled: true, 
-            hash_types: vec![SafelistHashTypes::Sha1, SafelistHashTypes::Sha256], 
+        Self {
+            enabled: true,
+            hash_types: vec![SafelistHashTypes::Sha1, SafelistHashTypes::Sha256],
             enforce_safelist_service: false,
         }
     }
@@ -1259,7 +1259,7 @@ pub struct Services {
 //     categories: List[str] = odm.List(odm.Keyword(), description="List of categories a service can be assigned to")
 //     default_timeout: int = odm.Integer(description="Default service timeout time in seconds")
     /// List of execution stages a service can be assigned to
-    pub stages: Vec<String>, 
+    pub stages: Vec<String>,
     /// Substitution variables for image paths (for custom registry support)
     // pub image_variables: Dict[str, str] = odm.Mapping(odm.Keyword(default=''), ),
     /// Similar to `image_variables` but only applied to the updater. Intended for use with local registries.
@@ -1281,7 +1281,7 @@ pub struct Services {
 
 impl Default for Services {
     fn default() -> Self {
-        Self { 
+        Self {
     //     "categories": SERVICE_CATEGORIES,
     //     "default_timeout": 60,
             stages: default_service_stages(),
@@ -1505,7 +1505,7 @@ pub struct UI {
 
 impl Default for UI {
     fn default() -> Self {
-        Self { 
+        Self {
 // DEFAULT_UI = {
 //     "alerting_meta": DEFAULT_ALERTING_META,
             allow_malicious_hinting: false,
@@ -1643,7 +1643,7 @@ impl Default for UI {
 //     'malicious': 1000
 // }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Debug, Clone, Copy, PartialEq, Eq)]
 // #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum TemporaryKeyType {
@@ -1758,5 +1758,3 @@ pub struct Config {
     // /// Retrohunt configuration for the frontend and server
     // pub retrohunt: Option<Retrohunt>,
 }
-
-

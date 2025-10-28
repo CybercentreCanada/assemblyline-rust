@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
-use assemblyline_models::types::ExpandingClassification;
+use assemblyline_models::types::{ExpandingClassification, Sid};
 use chrono::{Utc, Duration};
 
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
@@ -32,7 +32,8 @@ impl SubmitManager {
             dispatch_submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
             config: core.config.clone(),
             classification_parser: core.classification_parser.clone(),
-            datastore: core.datastore.clone()
+            datastore: core.datastore.clone(),
+
         }
     }
 
@@ -83,8 +84,27 @@ impl SubmitManager {
 
         self.datastore.submission.save(&sub.sid.to_string(), &sub, None, None).await?;
 
-        self.dispatch_submission_queue.push(&SubmissionDispatchMessage::simple(sub, completed_queue)).await?;
+        self.dispatch_submission_queue.push(&SubmissionDispatchMessage::new(sub, completed_queue)).await?;
         Ok(())
+    }
+
+    pub async fn submit_bundle(&self, submission_obj: MessageSubmission, completed_queue: Option<String>) -> Result<()> {
+        let sid : Sid = submission_obj.sid;
+        let sub_data = self.datastore.submission.get(&sid.to_string(), None).await?;
+
+        match sub_data {
+            Some(submission) =>
+            {
+                let dispatch_message = SubmissionDispatchMessage::new(submission, completed_queue)
+                .set_file_infos(submission_obj.file_infos)
+                .set_file_tree(submission_obj.file_tree)
+                .set_results(submission_obj.results)
+                .set_errors(submission_obj.errors);
+                self.dispatch_submission_queue.push(&dispatch_message).await?;
+                return Ok(());
+            },
+            None =>  bail!("Cannot find submission {sid:?} in datastore."),
+        };
     }
 }
 

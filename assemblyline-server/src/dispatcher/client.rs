@@ -85,7 +85,7 @@ impl DispatchClient {
         }
 
         Ok(Self {
-            datastore: core.datastore.clone(), 
+            datastore: core.datastore.clone(),
             submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
             dispatcher_table: core.dispatcher_instances_table(),
             dispatcher_data: Mutex::new(Default::default()),
@@ -217,7 +217,7 @@ impl DispatchClient {
     }
 
     async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: &str,
-                           timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>> 
+                           timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>>
     {
         let start_time = std::time::Instant::now();
         debug!("request_work {worker_id}/{service_name} timeout: {timeout:?} blocking: {blocking}");
@@ -357,7 +357,7 @@ impl DispatchClient {
                     Err(err) => {
                         return Err(err.into())
                     }
-                }    
+                }
             }
         }
 
@@ -373,7 +373,7 @@ impl DispatchClient {
         let msg = WatchQueueMessage::ok(result_key.to_owned());
         for w in self._watcher_list(task.sid).members().await? {
             self.redis_volatile.queue(w, None).push(&msg).await?;
-        }    
+        }
 
         // Save the tags and their score
         let tags = result.scored_tag_dict()?;
@@ -442,7 +442,7 @@ impl DispatchClient {
                 },
             }
         }
-    }   
+    }
 
     pub async fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> Result<()> {
         // task_key = ServiceTask.make_key(sid=sid, service_name=error.response.service_name, sha=error.sha256)
@@ -463,7 +463,7 @@ impl DispatchClient {
             let msg = WatchQueueMessage::fail(error_key.to_owned());
             for w in self._watcher_list(task.sid).members().await? {
                 self.redis_volatile.queue(w, None).push(&msg).await?;
-            }    
+            }
         }
 
         // dispatcher = task.metadata['dispatcher__']
