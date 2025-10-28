@@ -304,7 +304,9 @@ impl Core {
 
         let host = "localhost";
         let port = 6379;
+        println!("Redis connection");
         let redis = RedisObjects::open_host(host, port, db).unwrap();
+        println!("Redis wipe");
         redis.wipe().await.unwrap();
     
 
@@ -338,11 +340,16 @@ impl Core {
                 "archive": vec![format!("file://{}", filestore.path().to_string_lossy())],
             }
         })).unwrap();
+
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
         let prefix = rand::rng().random::<u128>().to_string();
+
+        println!("core setup");
         let core = Self::setup(Arc::new(config), &prefix, false).await.unwrap();
         let elastic = core.datastore.clone();
+
+        println!("test settings");
         elastic.apply_test_settings().await.unwrap();
         let guard = TestGuard { used: db, elastic, filestore, running: core.running.clone(), cleaned: false };
         (core, guard)

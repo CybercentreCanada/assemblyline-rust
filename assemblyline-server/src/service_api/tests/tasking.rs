@@ -156,6 +156,7 @@ async fn setup_service(core: &Core) -> Service {
     core.redis_volatile.publish_json(&format!("changes.services.{name}"), &ServiceChange {
         name,
         operation: assemblyline_models::messages::changes::Operation::Added,
+        reason: Some("service_api test setup".to_owned()),
     }).await.unwrap();
 
     let start = std::time::Instant::now();

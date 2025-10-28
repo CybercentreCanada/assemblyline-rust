@@ -356,6 +356,7 @@ impl Plumber {
         self.core.redis_volatile.publish(&("changes.services.".to_owned() + &service.name), &serde_json::to_vec(&ServiceChange {
             operation: assemblyline_models::messages::changes::Operation::Added,
             name: service.name,
+            reason: Some("Disabling privileged service".to_owned())
         })?).await?;
         Ok(())
     }

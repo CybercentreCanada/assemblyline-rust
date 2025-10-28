@@ -46,12 +46,14 @@ struct ServiceInfo {
 impl ServiceHelper {
     pub async fn start(datastore: Arc<Elastic>, redis_volatile: &Arc<RedisObjects>, classification: Arc<ClassificationParser>, config: &ServiceConfig) -> Result<Self> {
         // register for change to services
+        debug!("ServiceHelper::start subscribing to service changes");
         let changes: ChangeChannel = redis_volatile.pubsub_json_listener()
             .psubscribe("changes.services.*".to_owned())
             .listen().await;
         let (sender, _) = tokio::sync::broadcast::channel(128);
 
         // Initialize the services
+        debug!("ServiceHelper::start collecting initial service listings");
         let services = datastore.list_all_services().await.context("list_all_services")?;
         let inner = Arc::new(RwLock::new( ServiceInfo {
             services: services.into_iter()
@@ -61,6 +63,7 @@ impl ServiceHelper {
         }));
 
         // Launch agent that keeps watch for service updates
+        debug!("ServiceHelper::start spawning daemon to maintain service listings");
         tokio::spawn(service_daemon(datastore, changes, inner.clone(), sender.clone()));
 
         // return shared reference
@@ -280,7 +283,8 @@ async fn _service_daemon(datastore: Arc<Elastic>, changes: &mut ChangeChannel, s
                         _ = changes_output.send(change.name);
                         // don't worry about access_cache on this branch, extra service names will be ignored
                     } else {
-                        info!("Service Watcher: Service changed: {}", change.name);
+                        let reason = change.reason.unwrap_or_else(|| "Unknown".to_owned());
+                        info!("Service Watcher: Service changed: {} ({reason})", change.name);
                         let service_data = datastore.get_service_with_delta(&change.name, None).await?;
                         let mut info = service_info.write();
                         match service_data {
@@ -503,6 +507,7 @@ pub mod test {
             core.redis_volatile.publish(&("changes.services.".to_owned() + name), &serde_json::to_vec(&ServiceChange {
                 operation: assemblyline_models::messages::changes::Operation::Added,
                 name: *name,
+                reason: Some("services::test::setup_services".to_owned())
             }).unwrap()).await.unwrap();
         }
         println!("Services added");

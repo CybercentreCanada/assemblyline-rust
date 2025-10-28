@@ -362,7 +362,8 @@ impl TaskingClient {
         // Notify components watching for service config changes
         self.redis_volatile.publish_json(&("services.".to_owned() + &service.name), &ServiceChange{
             operation: Operation::Added,
-            name: service.name
+            name: service.name,
+            reason: Some("register_service".to_owned())
         }).await?;
 
         Ok(RegisterResponse{

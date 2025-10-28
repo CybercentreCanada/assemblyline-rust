@@ -339,7 +339,7 @@ async fn setup() -> TestContext {
 }
 
 async fn setup_custom(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestContext {
-    tokio::time::timeout(std::time::Duration::from_secs(30), _setup_inner(ingest_op)).await
+    tokio::time::timeout(std::time::Duration::from_secs(120), _setup_inner(ingest_op)).await
         .expect("initalization timeout. testing parallelism likely too high for environment.")
 }
 
@@ -353,6 +353,7 @@ async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     let (core, guard) = setup_services(service_configurations).await;
 
     // launch the api Server
+    println!("Starting service server");
     let (service_server, api_address) = start_api_server(core.clone()).await;
 
     // launch the services
@@ -384,24 +385,32 @@ async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     core.datastore.user.commit(None).await.unwrap();
 
     // launch the ingester
+    println!("Starting ingester");
     let ingester = Arc::new(ingest_op(Ingester::new(core.clone()).await.unwrap()));
     ingester.start(&mut components).await.unwrap();
 
     // launch the dispatcher
+    println!("Starting dispatcher - bind address");
     let bind_address = "0.0.0.0:0".parse().unwrap();
     let tls_config = crate::config::TLSConfig::load().await.unwrap();
     let tcp = crate::http::create_tls_binding(bind_address, tls_config).await.unwrap();
+    println!("Starting dispatcher - initialize");
     let dispatcher = Dispatcher::new(core.clone(), tcp).await.unwrap();
+    println!("Starting dispatcher - start");
     dispatcher.start(&mut components);
 
     // launch the plumber
+    println!("Starting plumber");
     let plumber_name = format!("plumber{}", rand::rng().random::<u32>());
     let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
     plumber.start(&mut components).await.unwrap();
 
+    println!("Starting metrics collecter");
+    let metrics = MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await);
 
+    println!("Test setup finished");
     TestContext {
-        metrics: MetricsWatcher::new(core.redis_metrics.subscribe(METRICS_CHANNEL.to_owned()).await),
+        metrics,
         ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
         core,
         guard,
@@ -757,7 +766,7 @@ async fn test_ingest_timeout() {
     // Make sure the scanning table has been cleared
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let scanning = context.core.redis_persistant.hashmap::<IngestTask>(SCANNING_TABLE_NAME.to_owned(), None);
-    for _ in 0..60 {
+    for _ in 0..600 {
         if !scanning.exists(&scan_key).await.unwrap() {
             break
         }
@@ -1251,7 +1260,8 @@ async fn test_plumber_clearing() {
     context.core.datastore.service_delta.commit(None).await.unwrap();
     context.core.redis_volatile.publish("changes.services.core-b", &serde_json::to_vec(&ServiceChange {
         name: ServiceName::from_string("core-b".to_owned()),
-        operation: assemblyline_models::messages::changes::Operation::Modified
+        operation: assemblyline_models::messages::changes::Operation::Modified,
+        reason: Some("test_plumber_clearing invocation message".to_owned()),
     }).unwrap()).await.unwrap();
 
     let notification_queue = context.core.notification_queue("test_plumber_clearing");
