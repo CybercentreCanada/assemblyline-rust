@@ -64,9 +64,9 @@ impl Submission {
 
     pub fn new(sid: Sid,time: chrono::DateTime<chrono::Utc>, params: SubmissionParams) -> Self {
         Self {
-            sid: sid,
-            time: time,
-            params: params,
+            sid,
+            time,
+            params,
 
             files: Default::default(),
             metadata: Default::default(),

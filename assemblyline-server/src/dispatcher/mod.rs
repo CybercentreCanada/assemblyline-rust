@@ -457,16 +457,11 @@ impl SubmissionTask {
     }
 
     fn propagate_temp_data_to_children(&mut self, parent: &Sha256, children: impl Iterator<Item=Sha256>){
-
-        match self.file_temporary_data.get(parent).cloned() {
-            Some(file) => {
-                for child in children {
-                    self.file_temporary_data.insert(child, file.child());
-                }
-            },
-            None => {}
+        if let Some(file) = self.file_temporary_data.get(parent).cloned() {
+            for child in children {
+                self.file_temporary_data.insert(child, file.child());
+            }
         }
-
     }
 
     fn all_ancestors(&self, sha256: &Sha256) -> Vec<&Sha256> {

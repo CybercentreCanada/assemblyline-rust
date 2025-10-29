@@ -661,7 +661,7 @@ async fn test_create_submission_task() {
         file_count: 1,
         files: files.clone(),
         max_score: 500,
-        metadata: metadata,
+        metadata,
         params: SubmissionParams::new(ClassificationString::default_unrestricted()).set_initial_data(Some(initial_data)),
         results: Default::default(),
         sid: rand::rng().random(),

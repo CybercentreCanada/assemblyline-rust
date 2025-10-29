@@ -533,7 +533,7 @@ async fn test_submit_bundle() {
         file_count: 1,
         files: files.clone(),
         max_score: 500,
-        metadata: metadata,
+        metadata,
         params: SubmissionParams::new(ClassificationString::unrestricted(&core.classification_parser)),
         results: Default::default(),
         sid: rand::rng().random(),

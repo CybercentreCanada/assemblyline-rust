@@ -220,8 +220,8 @@ impl PartialEq for File {
 impl File {
     pub fn new(sha256: Sha256, name: String) -> Self {
         File {
-            name: name,
-            sha256: sha256,
+            name,
+            sha256,
             description: Default::default(),
             classification: ClassificationString::default_unrestricted(),
             is_section_image: false,
