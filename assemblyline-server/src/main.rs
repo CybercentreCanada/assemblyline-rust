@@ -351,7 +351,7 @@ impl Core {
 
         println!("test settings");
         elastic.apply_test_settings().await.unwrap();
-        let guard = TestGuard { used: db, elastic, filestore, running: core.running.clone(), cleaned: false };
+        let guard = TestGuard { elastic, _filestore: filestore, running: core.running.clone(), cleaned: false };
         (core, guard)
     }
     
@@ -423,9 +423,8 @@ fn get_datastore_verify() -> Result<bool> {
 #[cfg(test)]
 struct TestGuard {
     running: Arc<Flag>,
-    used: i64,
     elastic: Arc<Elastic>,
-    filestore: tempfile::TempDir,
+    _filestore: tempfile::TempDir,
     cleaned: bool
 }
 

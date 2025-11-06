@@ -291,14 +291,17 @@ impl Ingester {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn set_retry_delay(&mut self, delay: chrono::Duration) {
         self.retry_delay = delay;
     }
 
+    #[cfg(test)]
     pub fn set_timeout_delay(&mut self, delay: chrono::Duration) {
         self.timeout_delay = delay;
     }
 
+    #[cfg(test)]
     pub fn clear_local_cache(&self) {
         self.cache.lock().clear();
     }

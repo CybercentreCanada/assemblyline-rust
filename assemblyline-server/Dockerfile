@@ -77,5 +77,4 @@ USER user
 
 # Copy in the executable for this container
 COPY --from=builder /out/release/assemblyline-server /usr/bin/assemblyline-server
-RUN ulimit -n 262144
 CMD ["/usr/bin/assemblyline-server"]

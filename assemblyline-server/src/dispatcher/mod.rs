@@ -120,9 +120,11 @@ enum DispatchAction {
     ListOutstanding(Sid, oneshot::Sender<HashMap<ServiceName, u64>>),
     Terminate(Sid, oneshot::Sender<()>),
     DispatchFile(Sid, Sha256),
+    #[cfg(test)]
     TestReport(Sid, oneshot::Sender<TestReport>),
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub struct TestReport {
     pub queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
@@ -141,6 +143,7 @@ impl DispatchAction {
             DispatchAction::ListOutstanding(sid, _) => *sid,
             DispatchAction::Terminate(sid, _) => *sid,
             DispatchAction::DispatchFile(sid, _) => *sid,
+            #[cfg(test)]
             DispatchAction::TestReport(sid, _) => *sid,
         }
     }
@@ -166,7 +169,7 @@ struct AncestoryEntry {
     sha256: Sha256,
 }
 
-/// Tracks whether a task needs to be rerun based on
+/// Tracks whether a task needs to be rerun based on metadata triggers
 #[derive(Debug)]
 struct MonitorTask {
     /// Service name
@@ -1700,6 +1703,7 @@ impl Dispatcher {
                 DispatchAction::DispatchFile(_, sha256) => {
                     self.dispatch_file(task, &sha256).await?;
                 },
+                #[cfg(test)]
                 DispatchAction::TestReport(_, respond) => {
                     _ = respond.send(TestReport {
                         queue_keys: task.queue_keys.clone(),
