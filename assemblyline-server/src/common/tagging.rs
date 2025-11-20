@@ -127,7 +127,7 @@ pub struct SafelistFile {
 }
 
 pub struct TagSafelister {
-    datastore: Arc<Elastic>,
+    // datastore: Arc<Elastic>,
     safelist: Arc<Mutex<HashSet<String>>>,
     matched: HashMap<String, Vec<String>>,
     regex: HashMap<String, Vec<Regex>>,
@@ -137,7 +137,7 @@ impl TagSafelister {
     pub async fn new(datastore: Arc<Elastic>, data: SafelistFile) -> Result<Self> {
         let mut new = Self {
             safelist: safelist_watcher(datastore.clone()).await?,
-            datastore,
+            // datastore,
             matched: Default::default(),
             regex: Default::default()
         };

@@ -11,21 +11,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
+use assemblyline_models::datastore::apikey::{Apikey, get_apikey_id};
+use assemblyline_models::datastore::user::{AclCatagory, UserRole, UserType, load_roles, load_roles_form_acls};
+use assemblyline_models::Readable;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::types::{JsonMap, ServiceName};
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
+use serde::Deserialize;
 use tokio::task::JoinHandle;
 
 use crate::constants::{service_queue_name, ServiceStage, SERVICE_QUEUE_PREFIX};
-use crate::dispatcher::client::DispatchClient;
+use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::elastic::collection::OperationBatch;
 use crate::elastic::Elastic;
 use crate::{Core, Flag};
 
 mod http;
+#[cfg(test)]
+mod tests;
 
 const DAY: TimeDelta = TimeDelta::days(1);
 const TASK_DELETE_CHUNK: u64 = 10000;
@@ -41,11 +47,11 @@ pub async fn main(core: Core) -> Result<()> {
     Ok(())
 }
 
-pub struct Plumber {
+pub struct Plumber<Dispatch: Send + Sync> {
     core: Core,
     datastore: Arc<Elastic>,
     delay: Duration,
-    dispatch_client: DispatchClient,
+    dispatch_client: Dispatch,
     flush_tasks: Mutex<HashMap<ServiceName, ServiceWorker>>
 }
 
@@ -55,7 +61,7 @@ struct ServiceWorker {
     task: JoinHandle<()>,
 }
 
-impl Plumber {
+impl Plumber<DispatchClient> {
     pub async fn new(core: Core, delay: Option<Duration>, user: Option<&str>) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
             datastore: core.datastore.switch_user(user.unwrap_or("plumber")).await?,
@@ -65,12 +71,47 @@ impl Plumber {
             flush_tasks: Default::default(),
         }))
     }
+}
+
+#[cfg(test)]
+use crate::dispatcher::client::MockDispatchClient;
+
+#[cfg(test)]
+impl Plumber<MockDispatchClient> {
+    pub async fn new_mocked(core: Core, delay: Option<Duration>, user: Option<&str>) -> Result<Arc<Self>> {
+        Ok(Arc::new(Self {
+            datastore: core.datastore.switch_user(user.unwrap_or("plumber")).await?,
+            delay: delay.unwrap_or(Duration::from_secs(60)),
+            dispatch_client: MockDispatchClient::new(core.clone()),
+            core,
+            flush_tasks: Default::default(),
+        }))
+    }
+}
+
+impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
 
     pub async fn start(self: &Arc<Self>, pool: &mut tokio::task::JoinSet<()>) -> Result<()> {
         // Launch the http interface
         let bind_address = crate::config::load_bind_address()?;
         let tls_config = crate::config::TLSConfig::load().await?;
         pool.spawn(http::start(bind_address, tls_config, self.clone()));
+
+        // launch a cleanup task to fix old user api keys
+        let this = self.clone();
+        pool.spawn(async move {
+            if let Err(err) = this.user_apikey_cleanup().await {
+                error!("Error in API key cleanup: {err}");
+            }
+        });
+
+        // launch a cleanup task to update old user profiles
+        // let this = self.clone();
+        // pool.spawn(async move {
+        //     if let Err(err) = this.migrate_user_settings().await {
+        //         error!("Error in user migration: {err}");
+        //     }
+        // });
 
         // Watch for services that have invalid configurations
         // TODO this can be removed after privileged services are removed from scaler
@@ -135,6 +176,7 @@ impl Plumber {
                 // For disabled or othewise unavailable services purge the queue
                 let current_stage = service_stage_hash.get(service_name).await?.unwrap_or(ServiceStage::Running);
                 let disabled = service.as_ref().map(|s|!s.enabled).unwrap_or(true); // either enabled is false or the service info is none
+
                 if disabled || current_stage != ServiceStage::Running {
                     let mut proccessed_tasks = 0;
                     loop {
@@ -361,4 +403,176 @@ impl Plumber {
         Ok(())
     }
 
+    async fn user_apikey_cleanup(&self) -> Result<()> {
+        let expiry_ts = self.core.config.auth.apikey_max_dtl.map(
+            |days| chrono::Utc::now() + chrono::TimeDelta::days(days as i64)
+        );
+
+        let mut changes_made = false;
+
+        #[derive(Deserialize, Debug)]
+        pub struct LegacyApiKey {
+            /// Access Control List for the API key
+            pub acl: Vec<AclCatagory>,
+            /// BCrypt hash of the password for the apikey
+            pub password: String,
+            /// List of roles tied to the API key
+            #[serde(default)]
+            pub roles: Vec<UserRole>,
+        }
+        
+        #[derive(Deserialize, Debug)]
+        struct PartialUser {
+            uname: String,
+            #[serde(default)]
+            pub apikeys: HashMap<String, LegacyApiKey>,
+            /// Type of user
+            #[serde(rename="type", default="assemblyline_models::datastore::user::default_user_types")]
+            pub user_types: Vec<UserType>,
+            #[serde(default)]
+            pub roles: Vec<UserRole>,
+        }
+
+        impl Readable for PartialUser {
+            fn set_from_archive(&mut self, _from_archive: bool) { }
+        }
+
+        let mut search = self.datastore.user.stream_search::<PartialUser>("*", "uname,apikeys,type,roles".to_string(), vec![], None, None, None).await?;        
+
+        while let Some(user) = search.next().await? {
+            changes_made = true;
+            let uname = user.uname;
+            let user_roles = load_roles(&user.user_types, &user.roles);
+
+            for (key, old_apikey) in user.apikeys {
+                let key_id = get_apikey_id(&key, &uname);
+
+                let mut roles = vec![];
+                if old_apikey.acl == vec![AclCatagory::C] {
+                    for r in old_apikey.roles {
+                        if user_roles.contains(&r) {
+                            roles.push(r);
+                        }
+                    }
+                } else {
+                    for r in load_roles_form_acls(&old_apikey.acl, &[]) {
+                        if user_roles.contains(&r) {
+                            roles.push(r)
+                        }
+                    }
+                }
+                let new_apikey = Apikey {
+                    password: old_apikey.password,
+                    acl: old_apikey.acl,
+                    uname: uname.clone(),
+                    key_name: key,
+                    roles,
+                    expiry_ts,
+                    creation_date: Utc::now(),
+                    last_used: None,
+                };
+                self.datastore.apikey.save(&key_id, &new_apikey, None, None).await?;
+            }
+        }
+
+        if changes_made {
+            // Commit changes made to indices
+            self.datastore.apikey.commit(None).await?;
+
+            // // Update permissions for API keys based on submission customization
+            // self.datastore.apikey.update_by_query('roles:"submission_create" AND NOT roles:"submission_customize"',
+            //                                       [(self.datastore.apikey.UPDATE_APPEND, 'roles', 'submission_customize')])
+        }
+
+        Ok(())
+    }
+
+    // async fn migrate_user_settings(&self) -> Result<()> {
+    //     let service_list = self.datastore.list_all_services().await?;
+
+    //     // Migrate user settings to the new format
+    //     // for doc in self.datastore.user_settings.scan_with_search_after(query={
+    //     //     "bool": {
+    //     //         "must": {
+    //     //             "query_string": {
+    //     //                 "query": "*",
+    //     //             }
+    //     //         }
+    //     //     }
+    //     // }):
+
+    //     let stream_cursor = self.datastore.user_settings
+
+    //     while let Some(doc) = {
+    //         user_settings = doc["_source"]
+    //         if user_settings.get('submission_profiles'):
+    //             # User settings already migrated, skip
+    //             continue
+
+    //         # Create the list of submission profiles
+    //         submission_profiles = {
+    //             # Grant everyone a default of which all settings from before 4.6 should be transferred
+    //             "default": SubmissionProfileParams(user_settings).as_primitives(strip_null=True)
+    //         }
+
+    //         profile_error_checks = {}
+    //         # Try to apply the original settings to the system-defined profiles
+    //         for profile in self.config.submission.profiles:
+    //             updates = deepcopy(user_settings)
+    //             profile_error_checks.setdefault(profile.name, 0)
+    //             validated_profile = profile.params.as_primitives(strip_null=True)
+
+    //             updates.setdefault("services", {})
+    //             updates["services"].setdefault("selected", [])
+    //             updates["services"].setdefault("excluded", [])
+
+    //             # Append the exclusion list set by the profile
+    //             updates['services']['excluded'] = updates['services']['excluded'] + \
+    //                 list(validated_profile.get("services", {}).get("excluded", []))
+
+    //             # Ensure the selected services are not in the excluded list
+    //             for service in service_list:
+    //                 if service['name'] in updates['services']['selected'] and service['name'] in updates['services']['excluded']:
+    //                     updates['services']['selected'].remove(service['name'])
+    //                     profile_error_checks[profile.name] += 1
+    //                 elif service['category'] in updates['services']['selected'] and service['category'] in updates['services']['excluded']:
+    //                     updates['services']['selected'].remove(service['category'])
+    //                     profile_error_checks[profile.name] += 1
+
+
+    //             # Check the services parameters
+    //             for param_type, list_of_params in profile.restricted_params.items():
+    //                 # Check if there are restricted submission parameters
+    //                 if param_type == "submission":
+    //                     requested_params = (set(list_of_params) & set(updates.keys())) - set({'services', 'service_spec'})
+    //                     if requested_params:
+    //                         # Track the number of errors for each profile
+    //                         profile_error_checks[profile.name] += len(requested_params)
+    //                         for param in requested_params:
+    //                             # Remove the parameter from the updates
+    //                             updates.pop(param, None)
+
+    //                 # Check if there are restricted service parameters
+    //                 else:
+    //                     service_spec = updates.get('service_spec', {}).get(param_type, {})
+    //                     requested_params = set(list_of_params) & set(service_spec)
+    //                     if requested_params:
+    //                         # Track the number of errors for each profile
+    //                         profile_error_checks[profile.name] += len(requested_params)
+    //                         for param in requested_params:
+    //                             # Remove the parameter from the updates
+    //                             service_spec.pop(param, None)
+
+    //                         if not service_spec:
+    //                             # Remove the service spec if empty
+    //                             updates['service_spec'].pop(param_type, None)
+    //             submission_profiles[profile.name] = SubmissionProfileParams(updates).as_primitives(strip_null=True)
+
+    //         # Assign the profile with the least number of errors
+    //         user_settings['submission_profiles'] = submission_profiles
+    //         user_settings['preferred_submission_profile'] = sorted(profile_error_checks.items(), key=lambda x: x[1])[0][0]
+
+    //         self.datastore.user_settings.save(doc["_id"], user_settings)
+    //     }
+    // }
 }

@@ -427,17 +427,20 @@ pub fn default_postprocess_actions() -> HashMap<String, PostprocessAction> {
 // }
 
 
-// @odm.model(index=False, store=False, description="Authentication Methods")
-// class Auth(odm.Model):
-//     allow_2fa: bool = odm.Boolean(description="Allow 2FA?")
-//     allow_apikeys: bool = odm.Boolean(description="Allow API keys?")
-//     allow_extended_apikeys: bool = odm.Boolean(description="Allow extended API keys?")
-//     allow_security_tokens: bool = odm.Boolean(description="Allow security tokens?")
-//     internal: Internal = odm.Compound(Internal, default=DEFAULT_INTERNAL,
-//                                       description="Internal authentication settings")
-//     ldap: LDAP = odm.Compound(LDAP, default=DEFAULT_LDAP, description="LDAP settings")
-//     oauth: OAuth = odm.Compound(OAuth, default=DEFAULT_OAUTH, description="OAuth settings")
-
+/// Authentication Methods
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Auth {
+    // allow_2fa: bool = odm.Boolean(description="Allow 2FA?")
+    // allow_apikeys: bool = odm.Boolean(description="Allow API keys?")
+    /// Number of days apikey can live for.
+    pub apikey_max_dtl: Option<u64>,
+    // allow_extended_apikeys: bool = odm.Boolean(description="Allow extended API keys?")
+    // allow_security_tokens: bool = odm.Boolean(description="Allow security tokens?")
+    // internal: Internal = odm.Compound(Internal, default=DEFAULT_INTERNAL, description="Internal authentication settings")
+    // ldap: LDAP = odm.Compound(LDAP, default=DEFAULT_LDAP, description="LDAP settings")
+    // oauth: OAuth = odm.Compound(OAuth, default=DEFAULT_OAUTH, description="OAuth settings")
+}
 
 // DEFAULT_AUTH = {
 //     "allow_2fa": True,
@@ -1734,8 +1737,8 @@ impl Default for Submission {
 pub struct Config {
     /// Classification information
     pub classification: Classification,
-    // /// Authentication module configuration
-    // pub auth: Auth,
+    /// Authentication module configuration
+    pub auth: Auth,
     /// Core component configuration
     pub core: Core,
     /// Datastore configuration

@@ -20,7 +20,7 @@ use rand::Rng;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::dispatcher::client::DispatchClient;
+use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::dispatcher::{Dispatcher, SubmissionTask};
 use crate::services::test::{dummy_service, setup_core_with_config, setup_services, setup_services_and_core};
 use crate::{Core, TestGuard};
@@ -403,7 +403,7 @@ async fn test_dispatch_extracted_bypass_drp()  {
 // mock_time = mock.Mock()
 // mock_time.return_value = 0
 
-
+//MARK: timeout
 // @mock.patch('time.time', mock_time)
 #[tokio::test]
 async fn test_timeout() {
@@ -491,8 +491,7 @@ pub async fn fake_dispatcher(port: oneshot::Sender<u16>, channel: mpsc::Sender<S
     }
 }
 
-
-
+//MARK: prevent overwrite
 #[tokio::test]
 async fn test_prevent_result_overwrite() {
     let (core, _guard) = setup().await;

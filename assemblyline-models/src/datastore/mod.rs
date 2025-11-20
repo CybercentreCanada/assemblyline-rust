@@ -15,6 +15,7 @@ pub mod emptyresult;
 pub mod badlist;
 pub mod heuristic;
 pub mod safelist;
+pub mod apikey;
 
 pub use submission::Submission;
 pub use error::Error;

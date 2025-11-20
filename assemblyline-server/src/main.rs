@@ -10,10 +10,8 @@
     clippy::needless_return,
     clippy::collapsible_else_if
 )]
-#![allow(
-    // remove after development, allow now so more important warnings can be seen
-    dead_code 
-)]
+// remove after development, allow now so more important warnings can be seen
+// #![allow(dead_code)]
 
 use std::{path::PathBuf, process::ExitCode, sync::Arc};
 
