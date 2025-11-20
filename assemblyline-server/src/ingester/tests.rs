@@ -150,6 +150,7 @@ fn uniform_string(value: char, length: usize) -> String {
     out
 }
 
+//MARK: simple
 #[tokio::test]
 async fn test_ingest_simple() {
     // setup the test environment
@@ -202,6 +203,7 @@ async fn test_ingest_simple() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 }
 
+//MARK: stale score exists
 #[tokio::test]
 async fn test_ingest_stale_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -238,6 +240,7 @@ async fn test_ingest_stale_score_exists() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 }
 
+//MARK: score exists
 #[tokio::test]
 async fn test_ingest_score_exists() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -270,6 +273,7 @@ async fn test_ingest_score_exists() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 }
 
+//MARK: groups custom
 #[tokio::test]
 async fn test_ingest_groups_custom() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -295,6 +299,7 @@ async fn test_ingest_groups_custom() {
     assert_eq!(task.submission.params.groups, ["group_b"].iter().map(|v| UpperString::from(*v)).collect_vec());
 }
 
+//MARK: size error
 #[tokio::test]
 async fn test_ingest_size_error() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -335,6 +340,7 @@ async fn test_ingest_size_error() {
     assert!(!task.failure.is_empty());
 }
 
+//MARK: always create submission
 #[tokio::test]
 async fn test_ingest_always_create_submission() {
     let (core, _redis_lock) = Core::test_custom_setup(|config| {
@@ -434,6 +440,7 @@ fn create_ingest_task(ce: &Arc<ClassificationParser>) -> IngestTask {
     IngestTask::new(submission)
 }
 
+//MARK: submit simple
 #[tokio::test]
 async fn test_submit_simple() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -588,7 +595,7 @@ async fn test_submit_bundle() {
     }
 }
 
-
+//MARK: submit duplicate
 #[tokio::test]
 async fn test_submit_duplicate() {
     let (core, _redis_lock) = Core::test_setup().await;
@@ -616,6 +623,7 @@ async fn test_submit_duplicate() {
     assert_eq!(ingester.duplicate_queue.length(&scan_key).await.unwrap(), 1);
 }
 
+// MARK: existing score
 #[tokio::test]
 async fn test_existing_score() {
     let (core, _redis_lock) = Core::test_setup().await;

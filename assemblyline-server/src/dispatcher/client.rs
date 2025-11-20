@@ -1,6 +1,9 @@
 //! Code for consistent interface with the dispatcher from other components.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+#[cfg(test)]
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,6 +14,8 @@ use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, Watc
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::types::{JsonMap, ServiceName, Sid};
 use log::{debug, error, info, warn};
+#[cfg(test)]
+use redis_objects::RedisObjects;
 use reqwest::StatusCode;
 use tokio::sync::Mutex;
 
@@ -20,12 +25,17 @@ use crate::Core;
 
 use super::ServiceStartMessage;
 
-
 // MAX_CANCEL_RESPONSE_WAIT = 10
 const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
 
 // class RetryRequestWork(Exception):
 //     pass
+
+pub trait DispatchCapable: 'static + Send + Sync {
+    fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> impl Future<Output=Result<Option<ServiceTask>>> + Send;
+    fn service_finished(&self, task: ServiceTask, result_key: String, result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> impl Future<Output=Result<()>> + Send;
+    fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> impl Future<Output=Result<()>> + Send;
+}
 
 pub struct DispatchClient {
     datastore: Arc<Elastic>,
@@ -48,150 +58,7 @@ struct DispatcherList {
     dead: HashSet<String>,
 }
 
-impl DispatchClient {
-    pub async fn new_from_core(core: &Core) -> Result<Self> {
-//     def __init__(self, datastore=None, redis=None, redis_persist=None, logger=None):
-//         self.config = forge.get_config()
-
-//         self.redis = redis or get_client(
-//             host=self.config.core.redis.nonpersistent.host,
-//             port=self.config.core.redis.nonpersistent.port,
-//             private=False,
-//         )
-
-//         self.redis_persist = redis_persist or get_client(
-//             host=self.config.core.redis.persistent.host,
-//             port=self.config.core.redis.persistent.port,
-//             private=False,
-//         )
-
-//         self.ds = datastore or forge.get_datastore(self.config)
-//         self.log = logger or logging.getLogger("assemblyline.dispatching.client")
-//         self.results = self.ds.result
-//         self.errors = self.ds.error
-//         self.files = self.ds.file
-//         self.submission_assignments = ExpiringHash(DISPATCH_TASK_HASH, host=self.redis_persist)
-//         self.bad_sids = Set(BAD_SID_HASH, host=self.redis_persist)
-//         self.service_data = cast(dict[str, Service], CachedObject(self._get_services))
-//         self.dead_dispatchers = []
-
-        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
-        match crate::config::get_cluster_ca_cert().await? {
-            Some(cert) => {
-                let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
-                http_client = http_client.add_root_certificate(cert);
-            }
-            None => http_client = http_client.danger_accept_invalid_certs(true),
-        }
-
-        Ok(Self {
-            datastore: core.datastore.clone(),
-            submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
-            dispatcher_table: core.dispatcher_instances_table(),
-            dispatcher_data: Mutex::new(Default::default()),
-            redis_volatile: core.redis_volatile.clone(),
-            http_client: http_client.build()?,
-            emptyresult_dtl: chrono::TimeDelta::days(core.config.submission.emptyresult_dtl.into()),
-            // running_tasks: core.redis_volatile.hashmap(DISPATCH_RUNNING_TASK_HASH.to_owned(), None),
-        })
-    }
-
-
-
-//     @weak_lru(maxsize=128)
-//     def _get_queue_from_cache(self, name):
-//         return NamedQueue(name, host=self.redis, ttl=QUEUE_EXPIRY)
-
-//     def _get_services(self):
-//         # noinspection PyUnresolvedReferences
-//         return {x.name: x for x in self.ds.list_all_services(full=True)}
-
-    async fn is_known_dead(&self, dispatcher_id: &str) -> bool {
-        self.dispatcher_data.lock().await.dead.contains(dispatcher_id)
-    }
-
-    async fn is_dispatcher(&self, dispatcher_id: &str) -> Result<bool> {
-        let mut dispatchers = self.dispatcher_data.lock().await;
-        if dispatchers.dead.contains(dispatcher_id) {
-            return Ok(false);
-        }
-
-        let data_stale = chrono::Utc::now() - dispatchers.last_update > UPDATE_INTERVAL;
-        if data_stale || !dispatchers.alive.contains(dispatcher_id) {
-            dispatchers.alive = self.dispatcher_table.keys().await?.into_iter().collect();
-            dispatchers.last_update = chrono::Utc::now();
-            debug!("dispatch_client refresh dispatcher list: {:?}", dispatchers.alive);
-        }
-
-        Ok(if dispatchers.alive.contains(dispatcher_id) {
-            true
-        } else {
-            dispatchers.dead.insert(dispatcher_id.to_owned());
-            false
-        })
-    }
-
-    /// Insert a submission, potentially with other components, into the dispatching system.
-    ///
-    /// Prerequsits:
-    ///     - submission and all other referenced objects should already be saved in the datastore
-    ///     - files should already be in the datastore and filestore
-    pub async fn dispatch_bundle(&self, message: &SubmissionDispatchMessage) -> Result<()> {
-        self.submission_queue.push(message).await?; Ok(())
-    }
-
-//     def cancel_submission(self, sid):
-//         """
-//         If the submission is running make sure it is saved with the to_be_deleted flag set.
-//         """
-//         # Mark the sid as bad
-//         self.bad_sids.add(sid)
-
-//         # Tell all the known dispatchers that they need to update their bad list
-//         queue_name = reply_queue_name(prefix="D", suffix="ResponseQueue")
-//         queue: NamedQueue[dict[str, int]] = NamedQueue(queue_name, host=self.redis, ttl=30)
-//         listed_dispatchers = set()
-
-//         for dispatcher_id in Dispatcher.all_instances(self.redis_persist):
-//             listed_dispatchers.add(dispatcher_id)
-//             command_queue = NamedQueue(DISPATCH_COMMAND_QUEUE+dispatcher_id, ttl=QUEUE_EXPIRY, host=self.redis)
-//             command_queue.push(DispatcherCommandMessage({
-//                 'kind': UPDATE_BAD_SID,
-//                 'payload_data': queue_name
-//             }).as_primitives())
-
-//         # Wait to hear back from the dispatchers that they have processed the changes to the bad sid list
-//         wait_start_time = time.time()
-//         while listed_dispatchers and time.time() - wait_start_time > MAX_CANCEL_RESPONSE_WAIT:
-//             dispatcher_id = queue.pop(timeout=5)
-//             listed_dispatchers.discard(dispatcher_id)
-
-//     def queued_submissions(self) -> list[dict]:
-//         return self.submission_queue.content()
-
-//     def outstanding_services(self, sid) -> Optional[dict[str, int]]:
-//         """
-//         List outstanding services for a given submission and the number of file each
-//         of them still have to process.
-
-//         :param sid: Submission ID
-//         :return: Dictionary of services and number of files
-//                  remaining per services e.g. {"SERVICE_NAME": 1, ... }
-//         """
-//         dispatcher_id = self.submission_assignments.get(sid)
-//         if dispatcher_id:
-//             queue_name = reply_queue_name(prefix="D", suffix="ResponseQueue")
-//             queue: NamedQueue[dict[str, int]] = NamedQueue(queue_name, host=self.redis, ttl=30)
-//             command_queue = NamedQueue(DISPATCH_COMMAND_QUEUE+dispatcher_id, ttl=QUEUE_EXPIRY, host=self.redis)
-//             command_queue.push(DispatcherCommandMessage({
-//                 'kind': LIST_OUTSTANDING,
-//                 'payload_data': ListOutstanding({
-//                     'response_queue': queue_name,
-//                     'submission': sid
-//                 })
-//             }).as_primitives())
-//             return queue.pop(timeout=5)
-//         return {}
+impl DispatchCapable for DispatchClient {
 
     // Pull work from the service queue for the service in question.
     //
@@ -202,7 +69,7 @@ impl DispatchClient {
     // :param blocking: Whether to wait for jobs to enter the queue, or if false, return immediately
     // :return: The job found, and a boolean value indicating if this is the first time this task has
     //         been returned by request_work.
-    pub async fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
+    async fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
         let timeout = timeout.unwrap_or_else(|| Duration::from_secs(120));
         let low_priority = low_priority.unwrap_or_default();
         let start = std::time::Instant::now();
@@ -216,111 +83,8 @@ impl DispatchClient {
         return Ok(None)
     }
 
-    async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: &str,
-                           timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>>
-    {
-        let start_time = std::time::Instant::now();
-        debug!("request_work {worker_id}/{service_name} timeout: {timeout:?} blocking: {blocking}");
-        // For when we repeatedly retry on bad task dequeue-ing
-        if timeout.is_zero() {
-            debug!("{service_name}:{worker_id} no task returned [timeout]");
-            return Ok(None)
-        }
-
-        // Get work from the queue
-        let work_queue = self.redis_volatile.priority_queue::<ServiceTask>(service_queue_name(&service_name));
-        let result = if blocking {
-            work_queue.blocking_pop(timeout, low_priority).await?
-        } else if low_priority {
-            work_queue.unpush(1).await?.pop()
-        } else {
-            work_queue.pop(1).await?.pop()
-        };
-
-        let mut task = match result {
-            Some(task) => task,
-            None => {
-                debug!("{service_name}:{worker_id} no task returned: [empty message] after {:?}", start_time.elapsed());
-                return Ok(None)
-            }
-        };
-
-        if self.is_known_dead(&task.dispatcher).await {
-            return Ok(None)
-        }
-
-        task.metadata.insert("worker__".to_string(), worker_id.into());
-
-        let url = format!("https://{}/start", task.dispatcher_address);
-        let message = ServiceStartMessage {
-            sid: task.sid,
-            sha: task.fileinfo.sha256.clone(),
-            service_name: task.service_name,
-            worker_id: worker_id.to_string(),
-            dispatcher_id: task.dispatcher.clone(),
-            task_id: Some(task.task_id),
-        };
-
-        loop {
-            // Let the dispatcher know we want to start this task
-            let response = self.http_client.post(&url).json(&message).send().await;
-
-            match response {
-                // if we got a complete response of any kind, treat as accepted
-                Ok(response) => {
-                    let status = response.status();
-                    if status.is_success() {
-                        return Ok(Some(task))
-                    } else if status == StatusCode::GONE {
-                        // The dispatcher we are trying to reach no longer exists.
-                        self.dispatcher_data.lock().await.dead.insert(task.dispatcher);
-                        return Ok(None)
-                    } else {
-                        let body = response.text().await?;
-                        info!("Dispatcher has refused submission: {}/{} [{status}: {body}]", task.sid, task.service_name);
-                        return Ok(None)
-                    }
-                },
-                Err(err) => {
-                    error!("Error reaching dispatcher: {err:?}");
-                    if !self.is_dispatcher(&task.dispatcher).await? {
-                        info!("{service_name}:{worker_id} no task returned: [task from dead dispatcher]");
-                        return Ok(None)
-                    } else {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-                },
-            }
-        }
-        // let resp = match .send().await {
-        //     Ok(resp) => resp,
-        //     Err(err) => {
-        //         info!("Couldn't reach dispatcher [{}] at [{}] {err}", task.dispatcher, task.dispatcher_address);
-        //         return false;
-        //     }
-        // };
-        // let resp: BasicStatus = match resp.json().await {
-        //     Ok(resp) => resp,
-        //     Err(err) => {
-        //         info!("Couldn't understand dispatcher response [{}] at [{}] {err}", task.dispatcher, task.dispatcher_address);
-        //         return false;
-        //     }
-        // };
-        // resp.instance_id == task.dispatcher
-
-
-
-        // if self.running_tasks.add(&task.key(), &task).await? {
-        //     info!("[{}/{}] {service_name}:{worker_id} task found", task.sid, task.fileinfo.sha256);
-        //     start_queue = self._get_queue_from_cache(DISPATCH_START_EVENTS + dispatcher);
-        //     start_queue.push((task.sid, task.fileinfo.sha256, service_name, worker_id));
-        //     return Ok(Some(task))
-        // }
-        // return Ok(None)
-    }
-
     /// Notifies the dispatcher of service completion, and possible new files to dispatch.
-    pub async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
+    async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
         let mut version = Some(version.unwrap_or(Version::Create));
 
         // Make sure the dispatcher knows we were working on this task
@@ -444,7 +208,7 @@ impl DispatchClient {
         }
     }
 
-    pub async fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> Result<()> {
+    async fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> Result<()> {
         // task_key = ServiceTask.make_key(sid=sid, service_name=error.response.service_name, sha=error.sha256)
         // task = self.running_tasks.pop(task_key)
         // if not task {
@@ -507,6 +271,239 @@ impl DispatchClient {
 
     }
 
+}
+
+impl DispatchClient {
+    pub async fn new_from_core(core: &Core) -> Result<Self> {
+//     def __init__(self, datastore=None, redis=None, redis_persist=None, logger=None):
+//         self.config = forge.get_config()
+
+//         self.redis = redis or get_client(
+//             host=self.config.core.redis.nonpersistent.host,
+//             port=self.config.core.redis.nonpersistent.port,
+//             private=False,
+//         )
+
+//         self.redis_persist = redis_persist or get_client(
+//             host=self.config.core.redis.persistent.host,
+//             port=self.config.core.redis.persistent.port,
+//             private=False,
+//         )
+
+//         self.ds = datastore or forge.get_datastore(self.config)
+//         self.log = logger or logging.getLogger("assemblyline.dispatching.client")
+//         self.results = self.ds.result
+//         self.errors = self.ds.error
+//         self.files = self.ds.file
+//         self.submission_assignments = ExpiringHash(DISPATCH_TASK_HASH, host=self.redis_persist)
+//         self.bad_sids = Set(BAD_SID_HASH, host=self.redis_persist)
+//         self.service_data = cast(dict[str, Service], CachedObject(self._get_services))
+//         self.dead_dispatchers = []
+
+        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
+        match crate::config::get_cluster_ca_cert().await? {
+            Some(cert) => {
+                let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
+                http_client = http_client.add_root_certificate(cert);
+            }
+            None => http_client = http_client.danger_accept_invalid_certs(true),
+        }
+
+        Ok(Self {
+            datastore: core.datastore.clone(),
+            submission_queue: core.redis_volatile.queue(SUBMISSION_QUEUE.to_owned(), None),
+            dispatcher_table: core.dispatcher_instances_table(),
+            dispatcher_data: Mutex::new(Default::default()),
+            redis_volatile: core.redis_volatile.clone(),
+            http_client: http_client.build()?,
+            emptyresult_dtl: chrono::TimeDelta::days(core.config.submission.emptyresult_dtl.into()),
+            // running_tasks: core.redis_volatile.hashmap(DISPATCH_RUNNING_TASK_HASH.to_owned(), None),
+        })
+    }
+
+
+
+//     @weak_lru(maxsize=128)
+//     def _get_queue_from_cache(self, name):
+//         return NamedQueue(name, host=self.redis, ttl=QUEUE_EXPIRY)
+
+//     def _get_services(self):
+//         # noinspection PyUnresolvedReferences
+//         return {x.name: x for x in self.ds.list_all_services(full=True)}
+
+    async fn is_known_dead(&self, dispatcher_id: &str) -> bool {
+        self.dispatcher_data.lock().await.dead.contains(dispatcher_id)
+    }
+
+    async fn is_dispatcher(&self, dispatcher_id: &str) -> Result<bool> {
+        let mut dispatchers = self.dispatcher_data.lock().await;
+        if dispatchers.dead.contains(dispatcher_id) {
+            return Ok(false);
+        }
+
+        let data_stale = chrono::Utc::now() - dispatchers.last_update > UPDATE_INTERVAL;
+        if data_stale || !dispatchers.alive.contains(dispatcher_id) {
+            dispatchers.alive = self.dispatcher_table.keys().await?.into_iter().collect();
+            dispatchers.last_update = chrono::Utc::now();
+            debug!("dispatch_client refresh dispatcher list: {:?}", dispatchers.alive);
+        }
+
+        Ok(if dispatchers.alive.contains(dispatcher_id) {
+            true
+        } else {
+            dispatchers.dead.insert(dispatcher_id.to_owned());
+            false
+        })
+    }
+
+    // /// Insert a submission, potentially with other components, into the dispatching system.
+    // ///
+    // /// Prerequsits:
+    // ///     - submission and all other referenced objects should already be saved in the datastore
+    // ///     - files should already be in the datastore and filestore
+    // pub async fn dispatch_bundle(&self, message: &SubmissionDispatchMessage) -> Result<()> {
+    //     self.submission_queue.push(message).await?; Ok(())
+    // }
+
+//     def cancel_submission(self, sid):
+//         """
+//         If the submission is running make sure it is saved with the to_be_deleted flag set.
+//         """
+//         # Mark the sid as bad
+//         self.bad_sids.add(sid)
+
+//         # Tell all the known dispatchers that they need to update their bad list
+//         queue_name = reply_queue_name(prefix="D", suffix="ResponseQueue")
+//         queue: NamedQueue[dict[str, int]] = NamedQueue(queue_name, host=self.redis, ttl=30)
+//         listed_dispatchers = set()
+
+//         for dispatcher_id in Dispatcher.all_instances(self.redis_persist):
+//             listed_dispatchers.add(dispatcher_id)
+//             command_queue = NamedQueue(DISPATCH_COMMAND_QUEUE+dispatcher_id, ttl=QUEUE_EXPIRY, host=self.redis)
+//             command_queue.push(DispatcherCommandMessage({
+//                 'kind': UPDATE_BAD_SID,
+//                 'payload_data': queue_name
+//             }).as_primitives())
+
+//         # Wait to hear back from the dispatchers that they have processed the changes to the bad sid list
+//         wait_start_time = time.time()
+//         while listed_dispatchers and time.time() - wait_start_time > MAX_CANCEL_RESPONSE_WAIT:
+//             dispatcher_id = queue.pop(timeout=5)
+//             listed_dispatchers.discard(dispatcher_id)
+
+//     def queued_submissions(self) -> list[dict]:
+//         return self.submission_queue.content()
+
+//     def outstanding_services(self, sid) -> Optional[dict[str, int]]:
+//         """
+//         List outstanding services for a given submission and the number of file each
+//         of them still have to process.
+
+//         :param sid: Submission ID
+//         :return: Dictionary of services and number of files
+//                  remaining per services e.g. {"SERVICE_NAME": 1, ... }
+//         """
+//         dispatcher_id = self.submission_assignments.get(sid)
+//         if dispatcher_id:
+//             queue_name = reply_queue_name(prefix="D", suffix="ResponseQueue")
+//             queue: NamedQueue[dict[str, int]] = NamedQueue(queue_name, host=self.redis, ttl=30)
+//             command_queue = NamedQueue(DISPATCH_COMMAND_QUEUE+dispatcher_id, ttl=QUEUE_EXPIRY, host=self.redis)
+//             command_queue.push(DispatcherCommandMessage({
+//                 'kind': LIST_OUTSTANDING,
+//                 'payload_data': ListOutstanding({
+//                     'response_queue': queue_name,
+//                     'submission': sid
+//                 })
+//             }).as_primitives())
+//             return queue.pop(timeout=5)
+//         return {}
+
+    async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: &str,
+                           timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>>
+    {
+        let start_time = std::time::Instant::now();
+        debug!("request_work {worker_id}/{service_name} timeout: {timeout:?} blocking: {blocking}");
+        // For when we repeatedly retry on bad task dequeue-ing
+        if timeout.is_zero() {
+            debug!("{service_name}:{worker_id} no task returned [timeout]");
+            return Ok(None)
+        }
+
+        // Get work from the queue
+        let work_queue = self.redis_volatile.priority_queue::<ServiceTask>(service_queue_name(&service_name));
+        let result = if blocking {
+            work_queue.blocking_pop(timeout, low_priority).await?
+        } else if low_priority {
+            work_queue.unpush(1).await?.pop()
+        } else {
+            work_queue.pop(1).await?.pop()
+        };
+
+        let mut task = match result {
+            Some(task) => task,
+            None => {
+                debug!("{service_name}:{worker_id} no task returned: [empty message] after {:?}", start_time.elapsed());
+                return Ok(None)
+            }
+        };
+
+        if self.is_known_dead(&task.dispatcher).await {
+            return Ok(None)
+        }
+
+        task.metadata.insert("worker__".to_string(), worker_id.into());
+
+        let url = format!("https://{}/start", task.dispatcher_address);
+        let message = ServiceStartMessage {
+            sid: task.sid,
+            sha: task.fileinfo.sha256.clone(),
+            service_name: task.service_name,
+            worker_id: worker_id.to_string(),
+            dispatcher_id: task.dispatcher.clone(),
+            task_id: Some(task.task_id),
+        };
+
+        loop {
+            // Let the dispatcher know we want to start this task
+            let response = self.http_client.post(&url).json(&message).send().await;
+
+            match response {
+                // if we got a complete response of any kind, treat as accepted
+                Ok(response) => {
+                    let status = response.status();
+                    if status.is_success() {
+                        return Ok(Some(task))
+                    } else if status == StatusCode::GONE {
+                        // The dispatcher we are trying to reach no longer exists.
+                        self.dispatcher_data.lock().await.dead.insert(task.dispatcher);
+                        return Ok(None)
+                    } else {
+                        let body = response.text().await?;
+                        info!("Dispatcher has refused submission: {}/{} [{status}: {body}]", task.sid, task.service_name);
+                        return Ok(None)
+                    }
+                },
+                Err(err) => {
+                    error!("Error reaching dispatcher: {err:?}");
+                    if !self.is_dispatcher(&task.dispatcher).await? {
+                        info!("{service_name}:{worker_id} no task returned: [task from dead dispatcher]");
+                        return Ok(None)
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                },
+            }
+        }
+
+        // if self.running_tasks.add(&task.key(), &task).await? {
+        //     info!("[{}/{}] {service_name}:{worker_id} task found", task.sid, task.fileinfo.sha256);
+        //     start_queue = self._get_queue_from_cache(DISPATCH_START_EVENTS + dispatcher);
+        //     start_queue.push((task.sid, task.fileinfo.sha256, service_name, worker_id));
+        //     return Ok(Some(task))
+        // }
+        // return Ok(None)
+    }
+
 //     def setup_watch_queue(self, sid: str) -> Optional[str]:
 //         """
 //         This function takes a submission ID as a parameter and creates a unique queue where all service
@@ -536,4 +533,68 @@ impl DispatchClient {
         return self.redis_volatile.expiring_set(make_watcher_list_name(sid), None)
     }
 
+}
+
+#[cfg(test)]
+pub struct MockDispatchClient {
+    core: Core,
+    failed: Arc<tokio::sync::Mutex<Vec<ServiceTask>>>,
+    finished: Arc<tokio::sync::Mutex<Vec<ServiceTask>>>,
+    change: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+impl MockDispatchClient {
+    pub fn new(core: Core) -> Self {
+        Self {
+            core,
+            failed: Arc::new(tokio::sync::Mutex::new(vec![])),
+            finished: Arc::new(tokio::sync::Mutex::new(vec![])),
+            change: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    pub async fn failed(&self) -> Vec<ServiceTask> {
+        let timeout = tokio::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            {
+                let failed = self.failed.lock().await;
+                if !failed.is_empty() {
+                    return failed.clone()
+                }
+            }
+            match tokio::time::timeout_at(timeout, self.change.notified()).await {
+                Ok(()) => continue,
+                Err(_) => return vec![]
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl DispatchCapable for MockDispatchClient {
+    async fn request_work(&self, _worker_id: &str, service_name: ServiceName, _service_version: &str, timeout: Option<Duration>, blocking: bool, _low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
+        let queue = self.core.get_service_queue(&service_name);
+        if blocking {
+            let timeout = timeout.unwrap_or(Duration::from_secs(1));
+            Ok(queue.blocking_pop(timeout, false).await?)
+        } else {
+            let mut row = queue.pop(1).await?;
+            Ok(row.pop())
+        }
+    }
+
+    async fn service_finished(&self, task: ServiceTask, _result_key: String, _result: result::Result, _temporary_data: Option<JsonMap>, _version: Option<Version>, _errors: Vec<Error>) -> Result<()> {
+        let mut buffer = self.finished.lock().await;
+        buffer.push(task);
+        self.change.notify_waiters();
+        Ok(())
+    }
+
+    async fn service_failed(&self, task: ServiceTask, _error_key: &str, _error: Error) -> Result<()> {
+        let mut buffer = self.failed.lock().await;
+        buffer.push(task);
+        self.change.notify_waiters();
+        Ok(())
+    }
 }

@@ -18,6 +18,12 @@ pub struct Request {
     // raise_not_found: bool,
 }
 
+impl std::fmt::Display for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{} {}://{}:{}{}", self.method, self.url.scheme(), self.url.host_str().unwrap_or_default(), self.url.port_or_known_default().unwrap_or(80), self.url.path()))
+    }
+}
+
 // impl From<(reqwest::Method, reqwest::Url)> for Request {
 //     fn from(value: (reqwest::Method, reqwest::Url)) -> Self {
 //         Request {

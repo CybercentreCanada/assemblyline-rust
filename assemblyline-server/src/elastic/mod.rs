@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use assemblyline_models::datastore::apikey::Apikey;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
@@ -712,9 +713,7 @@ impl ElasticHelper {
             return Ok(None)
         } else if StatusCode::UNAUTHORIZED == status {
             // authentication errors
-            // let hosts = $helper.get_hosts_safe().join(" | ");
-            // warn!("No connection to Elasticsearch server(s): {}, because [{}] retrying [{}]...", hosts, message, stringify!($expression));
-            warn!("No connection to Elasticsearch server(s) retrying...");
+            warn!("[{request}] No connection to Elasticsearch server(s) retrying...");
             return Ok(None)
         }
 
@@ -737,7 +736,7 @@ impl ElasticHelper {
     }
 
     /// Start an http request with an empty body
-    async fn make_request(&self, attempt: &mut u64, request: &Request) -> Result<reqwest::Response> {
+    pub async fn make_request(&self, attempt: &mut u64, request: &Request) -> Result<reqwest::Response> {
         loop {
             *attempt += 1;
 
@@ -755,7 +754,7 @@ impl ElasticHelper {
 
     /// start an http request with a json body
     #[instrument(skip(body))]
-    async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<reqwest::Response> {
+    pub async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<reqwest::Response> {
         loop {
             *attempt += 1;
 
@@ -834,10 +833,10 @@ impl ElasticHelper {
         }))
     }
 
-    fn get_hosts_safe(&self) -> Vec<String> {
-        // self.hosts.iter().map(|url|format!("{}:{}", url.host_str().unwrap_or_default(), url.port_or_known_default().unwrap_or(80))).collect()
-        vec![format!("{}:{}", self.host.host_str().unwrap_or_default(), self.host.port_or_known_default().unwrap_or(80))]
-    }
+    // fn get_hosts_safe(&self) -> Vec<String> {
+    //     // self.hosts.iter().map(|url|format!("{}:{}", url.host_str().unwrap_or_default(), url.port_or_known_default().unwrap_or(80))).collect()
+    //     vec![format!("{}:{}", self.host.host_str().unwrap_or_default(), self.host.port_or_known_default().unwrap_or(80))]
+    // }
 
     #[instrument]
     pub async fn remove_index(&self, name: &str) -> Result<()> {
@@ -983,6 +982,7 @@ pub struct Elastic {
     es: Arc<ElasticHelper>,
     prefix: String,
 
+    pub apikey: Collection<Apikey>,
     pub file: Collection<File>,
     pub submission: Collection<Submission>,
     pub user: Collection<User>,
@@ -1026,6 +1026,7 @@ impl Elastic {
 
         Ok(Arc::new(Self {
             es: helper.clone(),
+            apikey: collection!("apikey"),
             file: collection!(archive, "file"),
             submission: collection!(archive, "submission"),
             error: collection!("error"),
@@ -1040,6 +1041,11 @@ impl Elastic {
             filescore: collection!("filescore"),
             prefix: prefix.to_string(),
         }))
+    }
+
+    #[cfg(test)]
+    pub fn connection(&self) -> Arc<ElasticHelper> {
+        self.es.clone()
     }
 
     #[instrument]

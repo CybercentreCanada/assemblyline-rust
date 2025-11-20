@@ -62,9 +62,9 @@ pub fn load_bind_address() -> Result<SocketAddr> {
     }
 }
 
-pub fn bind_address() -> Result<std::net::TcpListener> {
-    Ok(std::net::TcpListener::bind(load_bind_address()?)?)
-}
+// pub fn bind_address() -> Result<std::net::TcpListener> {
+//     Ok(std::net::TcpListener::bind(load_bind_address()?)?)
+// }
 
 pub fn hostname() -> Result<String> {
     match std::env::var("HOSTNAME") {

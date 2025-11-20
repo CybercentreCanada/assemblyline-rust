@@ -29,7 +29,7 @@ use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
 use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
 use crate::constants::{ServiceStatus, METRICS_CHANNEL, SERVICE_STATE_HASH};
-use crate::dispatcher::client::DispatchClient;
+use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::elastic::bulk::TypedBulkPlan;
 use crate::elastic::responses::BulkResult;
 use crate::elastic::{create_empty_result_from_key, Elastic};

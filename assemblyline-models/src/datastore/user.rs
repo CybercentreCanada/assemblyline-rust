@@ -11,7 +11,7 @@ use crate::types::{Email, UpperString, ExpandingClassification};
 
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, Described, Clone, Copy, Debug)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
 pub enum UserType {
@@ -37,7 +37,7 @@ pub enum UserType {
 pub enum Scope {R, W, RW, C}
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, strum::EnumIter, Described, Clone, Copy, PartialEq, Eq)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::FromRepr, strum::EnumIter, Described, Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
 pub enum UserRole {
@@ -207,7 +207,7 @@ impl UserType {
 }
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy, Debug, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
 pub enum AclCatagory {R, W, E, C}
 
@@ -262,47 +262,41 @@ impl AclCatagory {
 }
 
 
-// def load_roles_form_acls(acls, curRoles):
-//     # Check if we have current roles first
-//     if curRoles:
-//         return curRoles
+pub fn load_roles_form_acls(acls: &[AclCatagory], current_roles: &[UserRole]) -> Vec<UserRole> {
+    // Check if we have current roles first
+    if !current_roles.is_empty() {
+        return current_roles.to_vec()
+    }
 
-//     # Otherwise load the roles from the api_key ACLs
-//     roles = set({})
-//     for acl in ACL_MAP.keys():
-//         if acl in acls:
-//             roles = roles.union(ACL_MAP[acl])
+    // Otherwise load the roles from the api_key ACLs
+    let mut roles = vec![];
+    for acl in acls {
+        roles.extend_from_slice(acl.roles())
+    }
 
-//     # Return roles as a list
-//     return list(roles)
+    // Return roles as a list
+    roles.sort_unstable();
+    roles.dedup();
+    return roles
+}
 
 
-// def load_roles(types, curRoles):
-//     # Check if we have current roles first
-//     if curRoles:
-//         return curRoles
+pub fn load_roles(types: &[UserType], current_roles: &[UserRole]) -> Vec<UserRole> {
+    // Check if we have current roles first
+    if !current_roles.is_empty() {
+        return current_roles.to_vec()
+    }
 
-//     # Otherwise load the roles from the user type
-//     roles = set({})
-//     for user_type in USER_TYPE_DEP.keys():
-//         if user_type in types:
-//             roles = roles.union(USER_TYPE_DEP[user_type])
+    // Otherwise load the roles from the user type
+    let mut roles = vec![];
+    for user_type in types {
+        roles.extend_from_slice(&user_type.roles());
+    }
 
-//     # Return roles as a list
-//     return list(roles)
-
-/// Model for API keys
-#[derive(Serialize, Deserialize, Described)]
-#[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
-pub struct ApiKey {
-    /// Access Control List for the API key
-    pub acl: Vec<AclCatagory>,
-    /// BCrypt hash of the password for the apikey
-    pub password: String,
-    /// List of roles tied to the API key
-    #[serde(default)]
-    pub roles: Vec<UserRole>,
+    // Return roles as a deduplicated list
+    roles.sort_unstable();
+    roles.dedup();
+    return roles
 }
 
 /// Model of Apps used of OBO (On Behalf Of)
@@ -340,10 +334,10 @@ pub struct User {
     #[metadata(store=false, mapping="integer")]
     #[serde(default)]
     pub api_daily_quota: Option<u64>,
-    /// Mapping of API keys
-    #[metadata(index=false, store=false)]
-    #[serde(default)]
-    pub apikeys: HashMap<String, ApiKey>,
+    // /// Mapping of API keys
+    // #[metadata(index=false, store=false)]
+    // #[serde(default)]
+    // pub apikeys: HashMap<String, ApiKey>,
     /// Applications with access to the account
     #[metadata(index=false, store=false)]
     #[serde(default)]
@@ -412,7 +406,7 @@ pub struct User {
     pub uname: String,
 }
 
-fn default_user_types() -> Vec<UserType> { vec![UserType::User] }
+pub fn default_user_types() -> Vec<UserType> { vec![UserType::User] }
 fn default_user_is_active() -> bool { true }
 
 impl Readable for User {
@@ -425,7 +419,7 @@ impl User {
             agrees_with_tos: None,
             api_quota: None,
             api_daily_quota: None,
-            apikeys: Default::default(),
+            // apikeys: Default::default(),
             apps: Default::default(),
             can_impersonate: false,
             classification: ExpandingClassification::try_unrestricted().unwrap(),

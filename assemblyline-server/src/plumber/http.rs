@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::config::TLSConfig;
+use crate::dispatcher::client::DispatchCapable;
 use crate::logging::LoggerMiddleware;
 
 use super::Plumber;
@@ -16,14 +17,14 @@ async fn get_status() -> Result<()> {
     return Ok(())
 }
 
-pub async fn start(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, plumber: Arc<Plumber>) {
+pub async fn start<Dispatch: DispatchCapable>(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, plumber: Arc<Plumber<Dispatch>>) {
     while let Err(err) = _start(bind_address, tls.clone(), plumber.clone()).await {
         error!("Error with http interface: {err} {}", err.root_cause());
     }
 }
 
 
-async fn _start(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, plumber: Arc<Plumber>) -> Result<()> {
+async fn _start<Dispatch: DispatchCapable>(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, plumber: Arc<Plumber<Dispatch>>) -> Result<()> {
     let app = Route::new()
         .at("/alive", get(get_status))
         .data(plumber.clone())
