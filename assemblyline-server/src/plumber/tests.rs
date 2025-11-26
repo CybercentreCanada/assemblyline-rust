@@ -27,7 +27,7 @@ async fn test_expire_missing_service() {
     queue.push(0.0, &task).await.unwrap();
 
     // start the plumber
-    let plumber = Plumber::new_mocked(core, Some(Duration::from_millis(100)), Some("plumber_1")).await.unwrap();
+    let plumber = Plumber::new_mocked(core, Some(Duration::from_millis(100)), Some("plumber_1".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
 
@@ -53,7 +53,7 @@ async fn test_flush_paused_queues() {
     queue.push(0.0, &task).await.unwrap();
 
     // start the plumber
-    let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_2")).await.unwrap();
+    let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_2".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
 
