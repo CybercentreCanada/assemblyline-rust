@@ -46,7 +46,6 @@ mod dispatcher;
 mod postprocessing;
 mod elastic;
 mod logging;
-mod tls;
 mod error;
 mod constants;
 mod config;
