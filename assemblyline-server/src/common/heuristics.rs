@@ -79,15 +79,15 @@ pub async fn safelist_watcher(ds: Arc<Elastic>) -> Result<Arc<Mutex<HashSet<Stri
 
 
 pub struct  HeuristicHandler {
-    datastore: Arc<Elastic>,
+    // datastore: Arc<Elastic>,
     safelist: Arc<Mutex<HashSet<String>>>,
 }
 
 impl HeuristicHandler {
     pub async fn new(datastore: Arc<Elastic>) -> Result<Self> {
         Ok(Self {
-            safelist: safelist_watcher(datastore.clone()).await?,
-            datastore,
+            safelist: safelist_watcher(datastore).await?,
+            // datastore,
         })
     }
 

@@ -1061,7 +1061,22 @@ impl Elastic {
         Ok(())
     } 
 
-    pub async fn switch_user(&self, username: &str) -> Result<Arc<Elastic>> {
+    pub async fn switch_to_user(&self, username: &str, password: &str) -> Result<Arc<Elastic>> {
+        // Modify the client details for next reconnect
+        let mut url = self.es.host.clone();
+
+        url.set_username(username).map_err(|_| ElasticErrorInner::Fatal("Could not set username when switching user".to_owned()))?;
+        url.set_password(Some(&password)).map_err(|_| ElasticErrorInner::Fatal("Could not set password when switching user".to_owned()))?;
+
+        // self._hosts = [h.replace(f"{urlparse(h).username}:{urlparse(h).password}",
+        //                         f"{username}:{password}") for h in self._hosts]
+        // self.client.close()
+        // self.connection_reset()
+        let helper = Arc::new(self.es.change_host(url));
+        Self::setup(helper, &self.prefix).await
+    }
+
+    pub async fn switch_to_new_user(&self, username: &str) -> Result<Arc<Elastic>> {
         if !ALT_ELASTICSEARCH_USERS.contains(&username){
             warn!("Unknown alternative user '{username}' to switch to for Elasticsearch");
         }
@@ -1091,18 +1106,7 @@ impl Elastic {
             })).await?;
         }
 
-        // Modify the client details for next reconnect
-        let mut url = self.es.host.clone();
-
-        url.set_username(username).map_err(|_| ElasticErrorInner::Fatal("Could not set username when switching user".to_owned()))?;
-        url.set_password(Some(&password)).map_err(|_| ElasticErrorInner::Fatal("Could not set password when switching user".to_owned()))?;
-
-        // self._hosts = [h.replace(f"{urlparse(h).username}:{urlparse(h).password}",
-        //                         f"{username}:{password}") for h in self._hosts]
-        // self.client.close()
-        // self.connection_reset()
-        let helper = Arc::new(self.es.change_host(url));
-        Self::setup(helper, &self.prefix).await
+        self.switch_to_user(username, &password).await
     }
 
     pub async fn task_cleanup(&self, deleteable_task_age: Option<chrono::TimeDelta>, max_tasks: Option<u64>) -> Result<u64> {
