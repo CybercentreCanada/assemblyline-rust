@@ -8,6 +8,7 @@ use bytes::Bytes;
 pub mod local;
 pub mod azure;
 pub mod s3;
+pub mod ftp;
 
 #[async_trait]
 pub trait Transport: Send + Sync + std::fmt::Debug {
@@ -41,3 +42,19 @@ pub trait Transport: Send + Sync + std::fmt::Debug {
     async fn delete(&self, name: &str) -> Result<()>;
 }
 
+fn normalize_srl_path(path: &str) -> String {
+    if path.contains("/") {
+        return path.to_owned()
+    }
+
+    if path.len() > 4 {
+        let mut chars = path.chars();
+        let a = chars.next().unwrap();
+        let b = chars.next().unwrap();
+        let c = chars.next().unwrap();
+        let d = chars.next().unwrap();
+        format!("{a}/{b}/{c}/{d}/{path}")
+    } else {
+        path.to_string()
+    }
+}

@@ -18,6 +18,7 @@ bytes = "1.9"
 safe-path = "0.1"
 log = "0.4"
 url = "2.5"
+parking_lot = "0.12"
 
 # Encoding tools
 percent-encoding = "2.3"
@@ -26,6 +27,9 @@ percent-encoding = "2.3"
 # Error handling utilities
 anyhow = "1.0"
 thiserror = "2.0"
+
+# FTP client
+suppaftp = { version = "^7", features=["tokio-async-native-tls"] }
 
 # Azure cloud service libraries
 azure_core = { version = "0.21", features = ["tokio-fs"]}
@@ -46,3 +50,10 @@ legacy-rustls = { package = "rustls", version = "0.21.8", features = ["dangerous
 [dev-dependencies]
 tempfile = "3.15"
 env_logger = "0.11"
+libunftp = { version = "0.21.0" }
+unftp-sbe-fs = "0.3.0"
+openssl = "0.10"
+chrono = "0.4"
+async-trait = "0.1"
+uuid = "1.18"
+rand = "0.9"

@@ -1,9 +1,13 @@
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use bytes::Bytes;
+use log::debug;
+
+use crate::transport::normalize_srl_path;
 
 use super::Transport;
 
@@ -16,30 +20,24 @@ impl LocalTransport {
         Self { path }
     }
 
-    fn make_path(&self, mut name: &str) -> Result<PathBuf> {
-        while let Some(tail) = name.strip_prefix("/") {
-            name = tail;
-        }
-
-        let prefixed = if name.len() >= 4 {
-            let mut chars = name.chars();
-            let a = chars.next().unwrap();
-            let b = chars.next().unwrap();
-            let c = chars.next().unwrap();
-            let d = chars.next().unwrap();
-            &format!("{a}/{b}/{c}/{d}/{name}")
+    fn normalize(&self, path: &str) -> Result<PathBuf> {
+        // If they've provided an absolute path. Leave it a is.
+        let s = if path.starts_with('/') {
+            PathBuf::from_str(path)?
+        } else if path.contains("/") || path.len() != 64 { // Relative paths
+            safe_path::scoped_join(&self.path, path)?
         } else {
-            name
+            safe_path::scoped_join(&self.path, normalize_srl_path(path))?
         };
-        
-        Ok(safe_path::scoped_join(&self.path, prefixed)?)
+        debug!("local normalized: {} -> {}", path, s.to_string_lossy());
+        return Ok(s)
     }
 }
 
 #[async_trait]
 impl Transport for LocalTransport {
     async fn put(&self, name: &str, body: &Bytes) -> Result<()> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -47,7 +45,7 @@ impl Transport for LocalTransport {
     }
 
     async fn upload(&self, source: &Path, name: &str) -> Result<()> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -60,12 +58,12 @@ impl Transport for LocalTransport {
     }
 
     async fn exists(&self, name: &str) -> Result<bool> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         Ok(tokio::fs::try_exists(path).await?)
     }
 
     async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         match tokio::fs::read(path).await {
             Ok(body) => Ok(Some(body)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -74,7 +72,7 @@ impl Transport for LocalTransport {
     }
 
     async fn download(&self, name: &str, dest: &Path) -> Result<()> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -89,7 +87,7 @@ impl Transport for LocalTransport {
     }
 
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         let metadata = tokio::fs::metadata(&path).await?;
         let (send, recv) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
@@ -123,7 +121,7 @@ impl Transport for LocalTransport {
     }
 
     async fn delete(&self, name: &str) -> Result<()> {
-        let path = self.make_path(name)?;
+        let path = self.normalize(name)?;
         if let Err(err) = tokio::fs::remove_file(path).await {
             if err.kind() == ErrorKind::NotFound {
                 return Ok(())

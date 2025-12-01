@@ -6,6 +6,7 @@ use bytes::Bytes;
 use log::warn;
 
 use crate::transport::Transport;
+use crate::transport::ftp::TransportFtp;
 use crate::transport::local::LocalTransport;
 
 /// An abstract interface over one or more storage transports.
@@ -119,6 +120,23 @@ impl FileStore {
         
                 Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters).await?))
             }
+            "ftp" | "ftps" => {
+                let host = match host {
+                    Some(host) => host.to_owned(),
+                    None => bail!("A host must be provided for ftp transport")
+                };
+
+                let user = match url.username() {
+                    "" => None,
+                    value => Some(value.to_owned())
+                };
+                
+                if url.scheme().eq_ignore_ascii_case("ftps") {
+                    Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                } else {
+                    Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                }
+            }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());
             }
@@ -211,7 +229,7 @@ impl FileStore {
         let mut failed_tuples = vec![];
         for (src_path, dst_path) in local_remote_tuples {
             if let Err(error) = self.upload(src_path, dst_path).await {
-                failed_tuples.push((src_path.to_path_buf(), dst_path.to_string(), error.to_string()));
+                failed_tuples.push((src_path.to_path_buf(), dst_path.to_string(), format!("{error:?}")));
             }
         }
         return failed_tuples
