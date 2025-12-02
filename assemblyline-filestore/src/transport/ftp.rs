@@ -31,6 +31,8 @@ struct FtpConnectionPool<T: TokioTlsStream + Send> {
     
     pool: parking_lot::Mutex<Vec<Client<T>>>,
     signal: tokio::sync::Notify,
+
+    retry_limit: Option<usize>
 }
 
 /// A single connection owned by the pool, loaned to a function call
@@ -39,12 +41,22 @@ struct Client<T: TokioTlsStream + Send> {
     client: Option<ImplAsyncFtpStream<T>>,
 }
 
+impl<T: TokioTlsStream + Send> Client<T> {
+    async fn close(mut self) {
+        if let Some(mut client) = self.client.take() {
+            _ = client.quit().await;
+        }
+    }
+}
+
 /// Return the loaned connection to the pool when the function call drops the Client handle
 impl<T: TokioTlsStream + Send> Drop for Client<T> {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.upgrade() {
-            pool.pool.lock().push(Client { pool: Arc::downgrade(&pool), client: self.client.take() });
-            pool.signal.notify_one();
+            if let Some(client) = self.client.take() {
+                pool.pool.lock().push(Client { pool: Arc::downgrade(&pool), client: Some(client) });
+                pool.signal.notify_one();
+            }
         }
     }
 }
@@ -65,7 +77,7 @@ impl<T: TokioTlsStream + Send> std::ops::DerefMut for Client<T> {
 
 
 impl<T: TokioTlsStream + Send> FtpConnectionPool<T> {
-    pub async fn new(tls: bool, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>) -> Result<Arc<Self>> {
+    pub async fn new(tls: bool, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>, retry_limit: Option<usize>) -> Result<Arc<Self>> {
         let new = Arc::new(Self {
             user,
             password,
@@ -76,6 +88,8 @@ impl<T: TokioTlsStream + Send> FtpConnectionPool<T> {
 
             pool: parking_lot::Mutex::new(vec![]),
             signal: tokio::sync::Notify::new(),
+
+            retry_limit
         });
 
         // initiaize the pool with some connections
@@ -120,7 +134,6 @@ impl<T: TokioTlsStream + Send> FtpConnectionPool<T> {
 
 pub struct TransportFtp<T: TokioTlsStream + Send> {
     pool: Arc<FtpConnectionPool<T>>,
-    retry_limit: Option<usize>,
 }
 
 impl<T: TokioTlsStream + Send> std::fmt::Debug for TransportFtp<T> {
@@ -135,8 +148,7 @@ impl TransportFtp<AsyncNoTlsStream> {
 
     pub async fn new(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>) -> Result<Self> {
         Ok(Self {
-            pool: FtpConnectionPool::new(false, base, host, port, user, password).await?,
-            retry_limit
+            pool: FtpConnectionPool::new(false, base, host, port, user, password, retry_limit).await?,
         })
     }
 }
@@ -145,8 +157,7 @@ impl TransportFtp<AsyncNativeTlsStream> {
 
     pub async fn new_secure(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>) -> Result<Self> {
         Ok(Self {
-            pool: FtpConnectionPool::new(true, base, host, port, user, password).await?,
-            retry_limit
+            pool: FtpConnectionPool::new(true, base, host, port, user, password, retry_limit).await?,
         })
     }
 }
@@ -167,9 +178,7 @@ impl<T: TokioTlsStream + Send + 'static> TransportFtp<T> {
         return Ok(s)
     }
 
-    async fn upload_stream(&self, name: &str, mut stream: mpsc::Receiver<Bytes>) -> Result<()> {
-        let mut client = self.pool.get_connection().await?;
-
+    async fn upload_stream(&self, client: &mut Client<T>, name: &str, mut stream: mpsc::Receiver<Bytes>) -> Result<()> {
         let mut upload_stream = {
             let path = self.normalize(name)?;
             
@@ -182,7 +191,7 @@ impl<T: TokioTlsStream + Send + 'static> TransportFtp<T> {
                 build_path += dir;
                 match client.mkdir(&build_path).await {
                     Ok(_) => {},
-                    Err(err) if is_file_unavailable(&err) => {},
+                    Err(err) if err.is_file_unavailable() => {},
                     Err(err) => return Err(err.into())
                 }
                 build_path += "/";
@@ -199,35 +208,26 @@ impl<T: TokioTlsStream + Send + 'static> TransportFtp<T> {
         Ok(())
     }
 
-    async fn _get(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        let (size, mut stream) = match self.stream(name).await {
-            Ok((size, stream)) => (size, stream),
-            Err(err) => {
-                match err.downcast() {
-                    Ok(FtpError::UnexpectedResponse(resp)) if resp.status == Status::FileUnavailable => return Ok(None),
-                    Ok(other) => return Err(other.into()),
-                    Err(other) => return Err(other)
-                }
-            }
-        };
+    async fn _get(&self, name: &str) -> Result<Vec<u8>> {
+        let (size, mut stream) = self.stream(name).await?;
 
         let mut buffer = Vec::with_capacity(size as usize);
         while let Some(chunk) = stream.recv().await {
             let chunk = chunk?;
             buffer.extend_from_slice(&chunk);
         }
-        Ok(Some(buffer))
+        Ok(buffer)
     }
 
-    async fn _put(&self, name: &str, body: &Bytes) -> Result<()> {
+    async fn _put(&self, client: &mut Client<T>, name: &str, body: &Bytes) -> Result<()> {
         let (send, recv) = mpsc::channel(8);
         send.send(body.clone()).await?;
         drop(send); 
-        self.upload_stream(name, recv).await?;
+        self.upload_stream(client, name, recv).await?;
         Ok(())
     }
 
-    async fn _upload(&self, src: &Path, dest: &str) -> Result<()> {
+    async fn _upload(&self, client: &mut Client<T>, src: &Path, dest: &str) -> Result<()> {
         let (send, recv) = mpsc::channel(8);
         let mut read_handle = tokio::fs::OpenOptions::new().read(true).create(false).open(src).await?;
         let handle = tokio::spawn(async move {
@@ -240,7 +240,7 @@ impl<T: TokioTlsStream + Send + 'static> TransportFtp<T> {
             }
         });
         
-        self.upload_stream(dest, recv).await?;
+        self.upload_stream(client, dest, recv).await?;
         handle.await?
     }
 
@@ -249,21 +249,20 @@ impl<T: TokioTlsStream + Send + 'static> TransportFtp<T> {
 #[async_trait]
 impl<T: TokioTlsStream + Send + 'static> Transport for TransportFtp<T> { 
     async fn put(&self, name: &str, body: &Bytes) -> Result<()> {
-        retry!(self.retry_limit, self._put(name, body).await)
+        retry!(self.pool, client, self._put(&mut client, name, body).await)
     }
 
     async fn upload(&self, src: &Path, dest: &str) -> Result<()> {
-        retry!(self.retry_limit, self._upload(src, dest).await)
+        retry!(self.pool, client, self._upload(&mut client, src, dest).await)
     }
 
     async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
-        retry!(self.retry_limit, self._get(name).await)
+        retry!(until_missing, self.pool, client, false, self._get(name).await)
     }
     
     async fn exists(&self, name: &str) -> Result<bool> {
         let path = self.normalize(name)?;
-        let size = retry!(until_missing, self.retry_limit, {
-            let mut client = self.pool.get_connection().await?;
+        let size = retry!(until_missing, self.pool, client, true, {
             client.size(&path).await
         })?;
         return Ok(size.is_some())
@@ -278,13 +277,15 @@ impl<T: TokioTlsStream + Send + 'static> Transport for TransportFtp<T> {
         let (output_stream, channel) = tokio::sync::mpsc::channel(16);
 
         tokio::spawn(async move {
+            let mut error = false;
             loop {
                 let mut buffer = BytesMut::zeroed(BUFFER_SIZE);
                 let len = match stream.read(&mut buffer[..]).await {
                     Ok(0) => break,
                     Ok(len) => len,
-                    Err(error) => {
-                        _ = output_stream.send(Err(std::io::Error::other(error))).await;
+                    Err(err) => {
+                        error = true;
+                        _ = output_stream.send(Err(std::io::Error::other(err))).await;
                         break
                     },
                 };
@@ -293,44 +294,69 @@ impl<T: TokioTlsStream + Send + 'static> Transport for TransportFtp<T> {
                 _ = output_stream.send(Ok(buffer.freeze())).await;
             }
             if let Err(err) = client.finalize_retr_stream(stream).await {
+                error = true;
                 _ = output_stream.send(Err(std::io::Error::other(err))).await;
+            }
+            if error {
+                client.close().await;
             }
         });
 
         Ok((size, channel))
+
     }
 
     async fn delete(&self, name: &str) -> Result<()> {
         let name = self.normalize(name)?;
-        retry!(until_missing, self.retry_limit, {
-            let mut client = self.pool.get_connection().await?;
+        retry!(until_missing, self.pool, client, true, {
             client.rm(&name).await
         })?;
         Ok(())
     }
 }
 
-fn is_file_unavailable(err: &FtpError) -> bool {
-    if let FtpError::UnexpectedResponse(resp) = err {
-        if resp.status == Status::FileUnavailable {
-            return true
-        }
-    }
-    false
+trait IsFileUnavailable {
+    fn is_file_unavailable(&self) -> bool;
+
 }
 
+impl IsFileUnavailable for FtpError {
+    fn is_file_unavailable(&self) -> bool {
+        if let FtpError::UnexpectedResponse(resp) = self {
+            if resp.status == Status::FileUnavailable {
+                return true
+            }
+        }
+        false
+    }
+}
+
+impl IsFileUnavailable for anyhow::Error {
+    fn is_file_unavailable(&self) -> bool {
+        if let Some(FtpError::UnexpectedResponse(resp)) = self.downcast_ref() {
+            if resp.status == Status::FileUnavailable {
+                return true
+            }
+        }
+        false
+    }
+}
+
+
 macro_rules! retry {
-    (until_missing, $connection_attempts: expr, $body: expr) => {
+    (until_missing, $pool: expr, $client: ident, $reset_client: ident, $body: expr) => {
         {
             let mut backoff = MIN_BACKOFF;
             let mut retries = 0;
             loop {
-                if let Some(limit) = $connection_attempts {
+                if let Some(limit) = $pool.retry_limit {
                     if retries > limit {
                         break Err(anyhow::Error::from(crate::errors::ConnectionError))
                     }
                 }
 
+                #[allow(unused_mut)]
+                let mut $client = $pool.get_connection().await?;
                 let ret_val = $body;
                 retries += 1;
 
@@ -342,7 +368,7 @@ macro_rules! retry {
 
                         break Ok(Some(value))
                     },
-                    Err(err) if is_file_unavailable(&err) => {
+                    Err(err) if err.is_file_unavailable() => {
                         if retries > 1 {
                             log::info!("Reconnected to FTP Transport!")
                         }
@@ -351,6 +377,9 @@ macro_rules! retry {
                     },
                     Err(err) => {
                         log::warn!("Filestore error: {err:?}");
+                        if $reset_client {
+                            $client.close().await;
+                        }
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(MAX_BACKOFF);
                         continue
@@ -360,30 +389,32 @@ macro_rules! retry {
         }
     };
 
-    ($connection_attempts: expr, $body: expr) => {
+    ($pool: expr, $client: ident, $body: expr) => {
         {
             let mut backoff = MIN_BACKOFF;
             let mut retries = 0;
             loop {
-                if let Some(limit) = $connection_attempts {
+                if let Some(limit) = $pool.retry_limit {
                     if retries > limit {
                         break Err(anyhow::Error::from(crate::errors::ConnectionError))
                     }
                 }
 
+                let mut $client = $pool.get_connection().await?;
                 let ret_val = $body;
                 retries += 1;
 
                 match ret_val {
                     Ok(value) => {
                         if retries > 1 {
-                            log::info!("Reconnected to FTP Server!")
+                            log::info!("Reconnected to FTP Transport!")
                         }
 
                         break Ok(value)
                     },
                     Err(err) => {
                         log::warn!("Filestore error: {err:?}");
+                        $client.close().await;
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(MAX_BACKOFF);
                         continue
