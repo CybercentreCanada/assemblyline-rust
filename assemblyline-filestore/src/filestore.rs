@@ -8,7 +8,7 @@ use log::warn;
 use crate::transport::Transport;
 use crate::transport::ftp::TransportFtp;
 use crate::transport::local::LocalTransport;
-use crate::transport::sftp::TransportSftp;
+use crate::transport::sftp::{SftpParameters, TransportSftp};
 
 /// An abstract interface over one or more storage transports.
 #[derive(Debug)]
@@ -145,19 +145,17 @@ impl FileStore {
                 };
                 let user = url.username().to_owned();
 
-                let mut private_key = None;
-                let mut private_key_password = None;
-                let mut validate_host = false;
+                let mut params = SftpParameters::default();
                 for (name, value) in url.query_pairs() {
                     match name.as_ref() {
-                        "private_key" => private_key = Some(value.to_string()), 
-                        "private_key_password" => private_key_password = Some(value.to_string()),
-                        "validate_host" => validate_host = read_bool(&value),
+                        "private_key" => params.private_key = Some(value.to_string()), 
+                        "private_key_password" => params.private_key_password = Some(value.to_string()),
+                        "validate_host" => params.validate_host = read_bool(&value),
                         _ => {}
                     }
                 }
 
-                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), private_key, private_key_password, validate_host, connection_attempts).await?))                
+                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params).await?))                
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());

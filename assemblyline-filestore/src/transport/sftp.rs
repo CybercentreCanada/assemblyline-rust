@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use std::time::Duration;
@@ -11,12 +11,7 @@ use russh::client::Handler;
 use russh::keys::PrivateKeyWithHashAlg;
 use russh_sftp::client::SftpSession;
 use russh_sftp::client::error::Error;
-use russh_sftp::protocol::{OpenFlags, Status, StatusCode};
-// use rusftp::client::SftpClient;
-// use rusftp::message::PFlags;
-// use rusftp::russh::client::Handler;
-// use rusftp::russh;
-// use rusftp::russh::keys::key::KeyPair;
+use russh_sftp::protocol::{OpenFlags, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::transport::{Transport, normalize_srl_path};
@@ -25,66 +20,6 @@ const MIN_BACKOFF: Duration = Duration::from_millis(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const BUFFER_SIZE: usize = 1 << 14;
 
-// import logging
-// import os
-// import posixpath
-// import tempfile
-// import warnings
-
-
-// # Stop Blowfish deprecation warning
-// with warnings.catch_warnings():
-//     warnings.simplefilter("ignore")
-
-//     import pysftp
-
-// from io import BytesIO
-// from paramiko import SSHException
-
-// from assemblyline.common.exceptions import ChainAll
-// from assemblyline.common.uid import get_random_id
-// from assemblyline.filestore.transport.base import Transport, TransportException, normalize_srl_path
-
-
-// def reconnect_retry_on_fail(func):
-//     def new_func(self, *args, **kwargs):
-//         with warnings.catch_warnings():
-//             warnings.simplefilter("ignore")
-
-//             try:
-//                 if not self.sftp:
-//                     self.sftp = pysftp.Connection(self.host,
-//                                                   username=self.user,
-//                                                   password=self.password,
-//                                                   private_key=self.private_key,
-//                                                   private_key_pass=self.private_key_pass,
-//                                                   port=self.port,
-//                                                   cnopts=self.cnopts)
-//                 return func(self, *args, **kwargs)
-//             except SSHException:
-//                 pass
-
-//             # The previous attempt at calling original func failed.
-//             # Reset the connection and try again (one time).
-//             if self.sftp:
-//                 self.sftp.close()   # Just best effort.
-
-//             # The original func will reconnect automatically.
-//             self.sftp = pysftp.Connection(self.host,
-//                                           username=self.user,
-//                                           password=self.password,
-//                                           private_key=self.private_key,
-//                                           private_key_pass=self.private_key_pass,
-//                                           cnopts=self.cnopts)
-//             return func(self, *args, **kwargs)
-
-//     new_func.__name__ = func.__name__
-//     new_func.__doc__ = func.__doc__
-//     return new_func
-
-
-
-// @ChainAll(TransportException)
 pub struct TransportSftp {
     host: String,
     port: u16,
@@ -119,15 +54,23 @@ impl Handler for ConnectionHandler {
     }
 }
 
+#[derive(Default)]
+pub struct SftpParameters {
+    pub private_key: Option<String>, 
+    pub private_key_password: Option<String>, 
+    pub validate_host: bool
+}
+
+
 impl TransportSftp {
-    pub async fn new(base: String, host: String, password: Option<String>, user: String, port: u16, private_key: Option<String>, private_key_pass: Option<String>, validate_host: bool, retry_limit: Option<usize>) -> Result<Self> {
+    pub async fn new(base: String, host: String, password: Option<String>, user: String, port: u16, retry_limit: Option<usize>, params: SftpParameters) -> Result<Self> {
         // let base = if base == "/" { "".to_owned() } else { base };
 
-        debug!("SFTP to {user}@{host}:{port}{base}; password ({}), private_key ({})", password.is_some(), private_key.is_some());
+        debug!("SFTP to {user}@{host}:{port}{base}; password ({}), private_key ({})", password.is_some(), params.private_key.is_some());
 
         let config = Arc::new(russh::client::Config::default());
         let handler = ConnectionHandler{ 
-            validate_host,
+            validate_host: params.validate_host,
             host: host.clone(),
             port
         };
@@ -137,9 +80,9 @@ impl TransportSftp {
             session.authenticate_password(&user, password).await?;
         }
 
-        if let Some(key) = private_key {
+        if let Some(key) = params.private_key {
             let mut private_key = russh::keys::PrivateKey::from_openssh(key)?;
-            if let Some(pass) = private_key_pass {
+            if let Some(pass) = params.private_key_password {
                 if private_key.is_encrypted() {
                     private_key = private_key.decrypt(pass)?;
                 }
@@ -157,28 +100,6 @@ impl TransportSftp {
         let channel = session.channel_open_session().await.unwrap();
         channel.request_subsystem(true, "sftp").await.unwrap();
         let sftp = SftpSession::new(channel.into_stream()).await.unwrap();
-        
-
-//         self.host = host
-//         self.port = int(port or 22)
-//         self.password = password
-//         self.user = user
-//         self.private_key = private_key
-//         self.private_key_pass = private_key_pass
-//         if not validate_host:
-//             self.cnopts = pysftp.CnOpts()
-//             self.cnopts.hostkeys = None
-//         else:
-//             self.cnopts = None
-
-//         # Connect on create
-//         self.sftp = pysftp.Connection(self.host,
-//                                       username=self.user,
-//                                       password=self.password,
-//                                       private_key=self.private_key,
-//                                       private_key_pass=self.private_key_pass,
-//                                       port=self.port,
-//                                       cnopts=self.cnopts)
 
         Ok(Self {
             client: sftp,
@@ -189,10 +110,6 @@ impl TransportSftp {
             retry_limit,
         })
     }
-
-//     def close(self):
-//         if self.sftp:
-//             self.sftp.close()
 
 }
 

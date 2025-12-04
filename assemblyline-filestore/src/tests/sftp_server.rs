@@ -1,12 +1,10 @@
 
 use std::collections::HashMap;
-use std::io::{ErrorKind, Write};
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use bytes::Bytes;
 use log::info;
 use parking_lot::Mutex;
 
@@ -64,8 +62,8 @@ impl russh::server::Handler for SshSession {
 
     async fn auth_publickey(
         &mut self,
-        user: &str,
-        public_key: &russh::keys::PublicKey,
+        _user: &str,
+        _public_key: &russh::keys::PublicKey,
     ) -> Result<Auth, Self::Error> {
         info!("Reject key auth");
         Ok(Auth::reject())
@@ -130,7 +128,7 @@ impl russh_sftp::server::Handler for SftpSession {
         "Unimplemented".into()
     }
 
-    async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, attrs: FileAttributes) -> Result<Handle, Self::Error> {
+    async fn open(&mut self, id: u32, filename: String, pflags: OpenFlags, _attrs: FileAttributes) -> Result<Handle, Self::Error> {
         info!("Open {filename}");
         let path = safe_path::scoped_join(&self.directory, filename)?;
         let file = tokio::fs::OpenOptions::new()
@@ -183,7 +181,7 @@ impl russh_sftp::server::Handler for SftpSession {
         })
     }
 
-    async fn mkdir(&mut self, id: u32, path: String, attrs: FileAttributes) -> Result<russh_sftp::protocol::Status, Self::Error> {
+    async fn mkdir(&mut self, id: u32, path: String, _attrs: FileAttributes) -> Result<russh_sftp::protocol::Status, Self::Error> {
         info!("mkdir {path}");
         let path = safe_path::scoped_join(&self.directory, path)?;
         tokio::fs::create_dir(path).await?;
@@ -249,7 +247,7 @@ impl russh_sftp::server::Handler for SftpSession {
     }
 }
 
-struct Error(StatusCode, String);
+struct Error(StatusCode);
 
 impl From<Error> for StatusCode {
     fn from(val: Error) -> Self {
@@ -260,22 +258,22 @@ impl From<Error> for StatusCode {
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
         if value.kind() == ErrorKind::NotFound {
-            Error(StatusCode::NoSuchFile, value.to_string())
+            Error(StatusCode::NoSuchFile)
         } else {
-            value.to_string().into()
+            Error(StatusCode::Failure)
         }
     }
 }
 
 impl From<&str> for Error {
-    fn from(value: &str) -> Self {
-        Error(StatusCode::Failure, value.to_string())
+    fn from(_value: &str) -> Self {
+        Error(StatusCode::Failure)
     }
 }
 
 impl From<String> for Error {
-    fn from(value: String) -> Self {
-        Error(StatusCode::Failure, value)
+    fn from(_value: String) -> Self {
+        Error(StatusCode::Failure)
     }
 }
 
