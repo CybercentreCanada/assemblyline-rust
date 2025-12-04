@@ -8,6 +8,7 @@ use log::warn;
 use crate::transport::Transport;
 use crate::transport::ftp::TransportFtp;
 use crate::transport::local::LocalTransport;
+use crate::transport::sftp::TransportSftp;
 
 /// An abstract interface over one or more storage transports.
 #[derive(Debug)]
@@ -136,6 +137,27 @@ impl FileStore {
                 } else {
                     Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
                 }
+            }
+            "sftp" => {
+                let host = match host {
+                    Some(host) => host.to_owned(),
+                    None => bail!("A host must be provided for ftp transport")
+                };
+                let user = url.username().to_owned();
+
+                let mut private_key = None;
+                let mut private_key_password = None;
+                let mut validate_host = false;
+                for (name, value) in url.query_pairs() {
+                    match name.as_ref() {
+                        "private_key" => private_key = Some(value.to_string()), 
+                        "private_key_password" => private_key_password = Some(value.to_string()),
+                        "validate_host" => validate_host = read_bool(&value),
+                        _ => {}
+                    }
+                }
+
+                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), private_key, private_key_password, validate_host, connection_attempts).await?))                
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());

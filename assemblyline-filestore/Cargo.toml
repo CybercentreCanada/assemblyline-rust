@@ -31,6 +31,10 @@ thiserror = "2.0"
 # FTP client
 suppaftp = { version = "^7", features=["tokio-async-native-tls"] }
 
+# SFTP client
+russh = "0.55"
+russh-sftp = "2.1"
+
 # Azure cloud service libraries
 azure_core = { version = "0.21", features = ["tokio-fs"]}
 azure_identity = "0.21"

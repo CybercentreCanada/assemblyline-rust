@@ -9,6 +9,7 @@ pub mod local;
 pub mod azure;
 pub mod s3;
 pub mod ftp;
+pub mod sftp;
 
 #[async_trait]
 pub trait Transport: Send + Sync + std::fmt::Debug {

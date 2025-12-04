@@ -17,7 +17,7 @@ pub mod errors;
 pub use filestore::FileStore;
 
 #[cfg(test)]
-mod test;
+mod tests;
 
 
 // from __future__ import annotations
