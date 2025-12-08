@@ -27,7 +27,7 @@ async fn test_expire_missing_service() {
     queue.push(0.0, &task).await.unwrap();
 
     // start the plumber
-    let plumber = Plumber::new_mocked(core, Some(Duration::from_millis(100)), Some("plumber_1")).await.unwrap();
+    let plumber = Plumber::new_mocked(core, Some(Duration::from_millis(100)), Some("plumber_1".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
 
@@ -53,7 +53,7 @@ async fn test_flush_paused_queues() {
     queue.push(0.0, &task).await.unwrap();
 
     // start the plumber
-    let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_2")).await.unwrap();
+    let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_2".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
 
@@ -72,61 +72,63 @@ async fn test_flush_paused_queues() {
 }
 
 // Newer versions of elastic block writing to the .tasks index
-// #[tokio::test]
-// async fn test_cleanup_old_tasks() {
-//     let name = ServiceName::from("a");
-//     let services = [
-//         (name, dummy_service("a", "core", None, None, None, None))
-//     ].into();
-//     let (core, _guard) = setup_services_and_core(services).await;
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cleanup_old_tasks() {
+    let name = ServiceName::from("a");
+    let services = [
+        (name, dummy_service("a", "core", None, None, None, None))
+    ].into();
+    let (core, _guard) = setup_services_and_core(services).await;
 
+    // Generate new documents in .tasks index
+    let num_old_tasks = 10;
+    let connection = core.datastore.switch_to_new_user("plumber_test_task_cleanup").await.unwrap().connection();
+    for _ in 0..num_old_tasks {
+        let body = json!({
+            "completed": true,
+            "task": {
+                "start_time_in_millis": 0
+            }
+        });
 
-//     // Generate new documents in .tasks index
-//     let num_old_tasks = 10;
-//     let connection = core.datastore.connection();
-//     for _ in 0..num_old_tasks {
-//         let body = json!({
-//             "completed": true,
-//             "task": {
-//                 "start_time_in_millis": 0
-//             }
-//         });
+        let url = connection.host.join(".tasks/_doc/").unwrap();
+        let request = Request::new_on_document(Method::POST, url, ".tasks".to_string(), "".to_string());
 
-//         let url = connection.host.join(&format!(".tasks/_doc/")).unwrap();
-//         let request = Request::new_on_document(Method::POST, url, ".tasks".to_string(), "".to_string());
+        connection.make_request_json(&mut 0, &request, &body).await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
-//         connection.make_request_json(&mut 0, &request, &body).await.unwrap();
-//     }
-//     tokio::time::sleep(Duration::from_secs(1)).await;
+    // Assert that these have been indeed committed to the tasks index
+    let request = Request::get_search(&connection.host, vec![
+        ("index", ".tasks".into()),
+        ("q", "task.start_time_in_millis:0".into()),
+        ("size", "0".into()),
+        ("track_total_hits", "1000".into()),
+    ]).unwrap();
+    let result = connection.make_request(&mut 0, &request).await.unwrap();
+    let result: responses::Search<(), ()> = result.json().await.unwrap();
+    assert_eq!(result.hits.total.value, num_old_tasks);
 
-//     // Assert that these have been indeed committed to the tasks index
-//     let request = Request::get_search(&connection.host, vec![
-//         ("index", ".tasks".into()),
-//         ("q", "task.start_time_in_millis:0".into()),
-//         ("size", "0".into()),
-//         ("track_total_hits", "1000".into()),
-//     ]).unwrap();
-//     let result = connection.make_request(&mut 0, &request).await.unwrap();
-//     let result: responses::Search<(), ()> = result.json().await.unwrap();
-//     assert_eq!(result.hits.total.value, num_old_tasks);
+    // Run task cleanup, we should return to no more "old" completed tasks
+    println!("Starting plumber");
+    let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_test_task_cleanup2".to_string())).await.unwrap();
+    let mut pool = tokio::task::JoinSet::new();
+    plumber.start(&mut pool).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
-//     // Run task cleanup, we should return to no more "old" completed tasks
-//     let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_3")).await.unwrap();
-//     let mut pool = tokio::task::JoinSet::new();
-//     plumber.start(&mut pool).await.unwrap();
-//     tokio::time::sleep(Duration::from_secs(1)).await;
-
-//     //
-//     let request = Request::get_search(&connection.host, vec![
-//         ("index", ".tasks".into()),
-//         ("q", "task.start_time_in_millis:0".into()),
-//         ("size", "0".into()),
-//         ("track_total_hits", "1000".into()),
-//     ]).unwrap();
-//     let result = connection.make_request(&mut 0, &request).await.unwrap();
-//     let result: responses::Search<(), ()> = result.json().await.unwrap();
-//     assert_eq!(result.hits.total.value, 0);
-// }
+    //
+    println!("Checking for trailing tasks");
+    let request = Request::get_search(&connection.host, vec![
+        ("index", ".tasks".into()),
+        ("q", "task.start_time_in_millis:0".into()),
+        ("size", "0".into()),
+        ("track_total_hits", "1000".into()),
+    ]).unwrap();
+    let result = connection.make_request(&mut 0, &request).await.unwrap();
+    let result: responses::Search<(), ()> = result.json().await.unwrap();
+    assert_eq!(result.hits.total.value, 0);
+    println!("finished");
+}
 
 
 // #[tokio::test]

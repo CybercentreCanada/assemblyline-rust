@@ -404,7 +404,7 @@ async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     // launch the plumber
     println!("Starting plumber");
     let plumber_name = format!("plumber{}", rand::rng().random::<u32>());
-    let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(&plumber_name)).await.unwrap();
+    let plumber = Plumber::new(core.clone(), Some(Duration::from_secs(2)), Some(plumber_name)).await.unwrap();
     plumber.start(&mut components).await.unwrap();
 
     println!("Starting metrics collecter");

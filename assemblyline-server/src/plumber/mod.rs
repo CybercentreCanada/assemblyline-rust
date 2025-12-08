@@ -50,6 +50,7 @@ pub async fn main(core: Core) -> Result<()> {
 pub struct Plumber<Dispatch: Send + Sync> {
     core: Core,
     datastore: Arc<Elastic>,
+    task_user: Option<String>,
     delay: Duration,
     dispatch_client: Dispatch,
     flush_tasks: Mutex<HashMap<ServiceName, ServiceWorker>>
@@ -62,9 +63,10 @@ struct ServiceWorker {
 }
 
 impl Plumber<DispatchClient> {
-    pub async fn new(core: Core, delay: Option<Duration>, user: Option<&str>) -> Result<Arc<Self>> {
+    pub async fn new(core: Core, delay: Option<Duration>, user: Option<String>) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
-            datastore: core.datastore.switch_user(user.unwrap_or("plumber")).await?,
+            datastore: core.datastore.clone(),
+            task_user: user,
             delay: delay.unwrap_or(Duration::from_secs(60)),
             dispatch_client: DispatchClient::new_from_core(&core).await?,
             core,
@@ -78,9 +80,10 @@ use crate::dispatcher::client::MockDispatchClient;
 
 #[cfg(test)]
 impl Plumber<MockDispatchClient> {
-    pub async fn new_mocked(core: Core, delay: Option<Duration>, user: Option<&str>) -> Result<Arc<Self>> {
+    pub async fn new_mocked(core: Core, delay: Option<Duration>, user: Option<String>) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
-            datastore: core.datastore.switch_user(user.unwrap_or("plumber")).await?,
+            datastore: core.datastore.clone(),
+            task_user: user,
             delay: delay.unwrap_or(Duration::from_secs(60)),
             dispatch_client: MockDispatchClient::new(core.clone()),
             core,
@@ -123,12 +126,21 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         });
 
         // Start a task cleanup thread
-        let this = self.clone();
-        pool.spawn(async move {
-            while let Err(err) = this.cleanup_old_tasks().await {
-                error!("Error in datastore task cleanup: {err}");
-            }
-        });
+        let config = self.core.config.core.plumber.clone();
+        if config.enable_task_cleanup {
+
+            let connection = match (config.task_cleanup_user, config.task_cleanup_password) {
+                (Some(username), Some(password)) => self.core.datastore.switch_to_user(&username, &password).await?,
+                _ => self.core.datastore.switch_to_new_user(self.task_user.as_deref().unwrap_or("plumber")).await?
+            };
+
+            let this = self.clone();
+            pool.spawn(async move {
+                while let Err(err) = this.cleanup_old_tasks(connection.clone()).await {
+                    error!("Error in datastore task cleanup: {err}");
+                }
+            });
+        }
 
         // Start a notification queue cleanup thread
         let this = self.clone();
@@ -321,10 +333,10 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         Ok(())
     }
 
-    async fn cleanup_old_tasks(&self) -> Result<()> {
+    async fn cleanup_old_tasks(&self, connection: Arc<Elastic>) -> Result<()> {
         info!("Cleaning up task index for old completed tasks...");
         while self.core.running.read() {
-            let deleted = self.datastore.task_cleanup(Some(DAY), Some(TASK_DELETE_CHUNK)).await?;
+            let deleted = connection.task_cleanup(Some(DAY), Some(TASK_DELETE_CHUNK)).await?;
             if deleted == 0 {
                 self.core.sleep(self.delay).await;
             } else {

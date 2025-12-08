@@ -172,10 +172,10 @@ struct AncestoryEntry {
 /// Tracks whether a task needs to be rerun based on metadata triggers
 #[derive(Debug)]
 struct MonitorTask {
-    /// Service name
-    service: ServiceName,
-    /// sha256 of file in question
-    sha: Sha256,
+    // /// Service name
+    // service: ServiceName,
+    // /// sha256 of file in question
+    // sha: Sha256,
     /// The temporary values this task was last dispatached with
     values: HashMap<String, Option<serde_json::Value>>,
     /// Should aservice be dispatched again when possible
@@ -502,8 +502,8 @@ impl SubmissionTask {
     /// A service with monitoring has dispatched, keep track of the conditions.
     fn set_monitoring_entry(&mut self, sha256: Sha256, service_name: ServiceName, values: HashMap<String, Option<serde_json::Value>>) {
         self.monitoring.insert((sha256.clone(), service_name), MonitorTask {
-            service: service_name,
-            sha: sha256,
+            // service: service_name,
+            // sha: sha256,
             values,
             dispatch_needed: false
         });
