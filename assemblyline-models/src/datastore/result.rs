@@ -39,6 +39,7 @@ pub enum BodyFormat {
     Multi,
     OrderedKeyValue,
     Timeline,
+    Sandbox
 }
 
 // This needs to match the PROMOTE_TO StringTable in
