@@ -689,42 +689,42 @@ async fn test_create_submission_task() {
     for f in files.clone() {
 
         // check if file_names are stored properly
-        let file_name = task.file_names.get(&f.sha256).expect(format!("Cannot find file with sha {} in task.file_names", &f.sha256).as_str());
+        let file_name = task.file_names.get(&f.sha256).unwrap_or_else(|| panic!("Cannot find file with sha {} in task.file_names", &f.sha256));
         assert_eq!(*file_name, f.name, "task.file_names error on sha 256 {}. Expect {} and got {}", f.sha256, f.name, file_name);
 
         // check if file_info are stored properly
-        let file_info = task.file_info.get(&f.sha256).expect(format!("Cannot find file with sha {} in task._file_info", &f.sha256).as_str()).as_ref().unwrap().as_ref();
+        let file_info = task.file_info.get(&f.sha256).unwrap_or_else(|| panic!("Cannot find file with sha {} in task._file_info", &f.sha256)).as_ref().unwrap().as_ref();
 
         assert_eq!(*file_info, *file_infos.get(&f.sha256).expect("Did not initialize test data file_infos correctly."));
 
         // check if temporary_data is present for all file
-        let temporary_data = task.file_temporary_data.get(&f.sha256).expect(format!("Cannot find file with sha {} in task.file_temporary_data", &f.sha256).as_str());
+        let temporary_data = task.file_temporary_data.get(&f.sha256).unwrap_or_else(|| panic!("Cannot find file with sha {} in task.file_temporary_data", &f.sha256));
 
-        assert_eq!(*temporary_data.config.get(&"key1".to_string()).expect(format!("No key1 in file_temporary_data config for sha {}", &f.sha256).as_str()), TemporaryKeyType::Overwrite );
-        assert_eq!(*temporary_data.config.get(&"key2".to_string()).expect(format!("No key2 in file_temporary_data config for sha {}", &f.sha256).as_str()), TemporaryKeyType::Union );
+        assert_eq!(*temporary_data.config.get(&"key1".to_string()).unwrap_or_else(|| panic!("No key1 in file_temporary_data config for sha {}", &f.sha256)), TemporaryKeyType::Overwrite );
+        assert_eq!(*temporary_data.config.get(&"key2".to_string()).unwrap_or_else(|| panic!("No key2 in file_temporary_data config for sha {}", &f.sha256)), TemporaryKeyType::Union );
 
         let shared_temp_data = temporary_data.shared.as_ref().lock();
-        assert_eq!(*shared_temp_data.get(&"key1".to_string()).expect(format!("No key1 in file_temporary_data shared for sha {}", &f.sha256).as_str()),json!(["value1"]));
+        assert_eq!(*shared_temp_data.get(&"key1".to_string()).unwrap_or_else(|| panic!("No key1 in file_temporary_data shared for sha {}", &f.sha256)),json!(["value1"]));
 
-        assert_eq!(*shared_temp_data.get(&"key2".to_string()).expect(format!("No key1 in file_temporary_data shared for sha {}", &f.sha256).as_str()),json!(["value2"]));
+        assert_eq!(*shared_temp_data.get(&"key2".to_string()).unwrap_or_else(|| panic!("No key1 in file_temporary_data shared for sha {}", &f.sha256)),json!(["value2"]));
 
     }
 
     // check file depth
-    assert_eq!(*task.file_depth.get(&files[0].sha256).expect(format!("Cannot find sha {} in task.file_depth.", &files[0].sha256).as_str()), 0);
-    assert_eq!(*task.file_depth.get(&files[1].sha256).expect(format!("Cannot find sha {} in task.file_depth.", &files[1].sha256).as_str()), 1);
-    assert_eq!(*task.file_depth.get(&files[2].sha256).expect(format!("Cannot find sha {} in task.file_depth.", &files[2].sha256).as_str()), 2);
-    assert_eq!(*task.file_depth.get(&files[3].sha256).expect(format!("Cannot find sha {} in task.file_depth.", &files[3].sha256).as_str()), 2);
+    assert_eq!(*task.file_depth.get(&files[0].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task.file_depth.", &files[0].sha256)), 0);
+    assert_eq!(*task.file_depth.get(&files[1].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task.file_depth.", &files[1].sha256)), 1);
+    assert_eq!(*task.file_depth.get(&files[2].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task.file_depth.", &files[2].sha256)), 2);
+    assert_eq!(*task.file_depth.get(&files[3].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task.file_depth.", &files[3].sha256)), 2);
 
     // check parent map elements
     // the root file doesn't have a parent
     assert!(!task._parent_map.contains_key(&files[0].sha256));
-    assert!(task._parent_map.get(&files[1].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).contains(&files[0].sha256));
-    assert_eq!(task._parent_map.get(&files[1].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).len(), 1);
-    assert!(task._parent_map.get(&files[2].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).contains(&files[1].sha256));
-    assert_eq!(task._parent_map.get(&files[2].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).len(), 1);
-    assert!(task._parent_map.get(&files[3].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).contains(&files[1].sha256));
-    assert_eq!(task._parent_map.get(&files[3].sha256).expect(format!("Cannot find sha {} in task._parent_map.", &files[0].sha256).as_str()).len(), 1);
+    assert!(task._parent_map.get(&files[1].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).contains(&files[0].sha256));
+    assert_eq!(task._parent_map.get(&files[1].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).len(), 1);
+    assert!(task._parent_map.get(&files[2].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).contains(&files[1].sha256));
+    assert_eq!(task._parent_map.get(&files[2].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).len(), 1);
+    assert!(task._parent_map.get(&files[3].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).contains(&files[1].sha256));
+    assert_eq!(task._parent_map.get(&files[3].sha256).unwrap_or_else(|| panic!("Cannot find sha {} in task._parent_map.", &files[0].sha256)).len(), 1);
 
     // check service results
     let task_results = task.service_results.clone();
@@ -735,7 +735,7 @@ async fn test_create_submission_task() {
                             Err(_) => continue,
             };
 
-            let res_summary = task_results.get(&(sha256.clone(), ServiceName::from(service))).expect(format!("Cannot find sha {sha256} and service {service} in task.service_results.").as_str());
+            let res_summary = task_results.get(&(sha256.clone(), ServiceName::from(service))).unwrap_or_else(|| panic!("Cannot find sha {sha256} and service {service} in task.service_results."));
 
             assert_eq!(res_summary.key, *k);
 
@@ -750,7 +750,7 @@ async fn test_create_submission_task() {
                             Ok(sha) => sha,
                             Err(_) => continue,
             };
-            let error = task_errors.get(&(sha256.clone(), ServiceName::from(service))).expect(format!("Cannot find sha {sha256} and service {service} in task.service_errors.").as_str());
+            let error = task_errors.get(&(sha256.clone(), ServiceName::from(service))).unwrap_or_else(|| panic!("Cannot find sha {sha256} and service {service} in task.service_errors."));
             assert_eq!(*error, *error);
         };
     }

@@ -995,20 +995,31 @@ pub struct Core {
 // }
 
 /// Plumber Configuration
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Plumber {
     /// Interval in seconds at which the notification queue cleanup should run
     pub notification_queue_interval: u64,
     /// Max age in seconds notification queue messages can be
     pub notification_queue_max_age: u64,
+    /// Should rust run cleanup of elasticsearch's .tasks table
+    pub enable_task_cleanup: bool,
+    /// If task cleanup is enabled what user to use for that task (if not set a user will be created)
+    /// The task_cleanup_password must also be set.
+    pub task_cleanup_user: Option<String>,
+    /// Password for the task cleanup user, in kubernetes deployments should probably be set to 
+    /// an environment variable defined in coreEnv where the password is being set from a secret.
+    pub task_cleanup_password: Option<String>,
 }
 
 impl Default for Plumber {
     fn default() -> Self {
         Self {
             notification_queue_interval: 30 * 60,
-            notification_queue_max_age: 24 * 60 * 60
+            notification_queue_max_age: 24 * 60 * 60,
+            enable_task_cleanup: true,
+            task_cleanup_user: None,
+            task_cleanup_password: None
         }
     }
 }
