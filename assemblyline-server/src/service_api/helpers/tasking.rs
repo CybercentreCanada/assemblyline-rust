@@ -280,6 +280,74 @@ impl TaskingClient {
             info!("{log_prefix}{} version ({}) registered", service.name, service.version);
         } else {
             debug!("Registering service: version already set");
+
+            // Check for any changes that should be merged into the service delta            
+            let mut service_delta = self.datastore.service_delta.get_json(&service.name, None).await?.unwrap();
+
+            // Check if the configuration has changed
+            match service_delta.get("config") {
+                Some(config) => {
+
+                    // Get the new configurations that don't exist in the delta
+                    let new_config = service.config.iter().filter_map(|(k, v)| {
+                        if config.as_object().unwrap().get(k).is_none() {
+                            // New configuration found
+                            Some((k.clone(), v.clone()))
+                        } else {
+                            // Configuration already exists in delta, skip
+                            None
+                        }
+                    }).collect::<JsonMap>();
+
+                    // Merge new configurations into the existing delta config
+                    if let Some(config_obj) = service_delta.get_mut("config").and_then(|c| c.as_object_mut()) {
+                        for (k, v) in new_config {
+                            config_obj.insert(k, v);
+                        }
+                    } 
+                },
+                None => {
+                    // No config changes found, we can skip
+                    debug!("Registering service: configuration unchanged");
+                }
+            }
+            
+            // Check if the submission parameters have changed
+            match service_delta.get("submission_params") {
+                Some(params) => {
+                    let existing_params: Vec<String> = params.as_array().unwrap().iter().filter_map(|param| {
+                        param.get("name").and_then(|name| name.as_str().map(|s| s.to_string()))
+                    }).collect();
+
+                    // Get the new submission parameters that don't exist in the delta
+                    let new_params = service.submission_params.iter().filter_map(|param| {
+                        if !existing_params.contains(&param.name) {
+                            // New submission parameter found
+                            Some((
+                                param.name.clone(),
+                                serde_json::to_value(param).unwrap()
+                            ))
+                        } else {
+                            // Submission parameter already exists in delta, skip
+                            None
+                        }
+                    }).collect::<JsonMap>();
+
+                    // Merge new submission parameters into the existing delta
+                    if let Some(params_array) = service_delta.get_mut("submission_params").and_then(|p| p.as_array_mut()) {
+                        for (_, param_value) in new_params {
+                            params_array.push(param_value);
+                        }
+                    }
+                },
+                None => {
+                    // No submission parameter changes found, we can skip
+                    debug!("Registering service: submission parameters unchanged");
+                }
+            }
+
+            // Save any changes to the service delta
+            self.datastore.service_delta.save_json(&service.name, &mut service_delta, None, None).await?;
         }
 
         let mut new_heuristics = vec![];
