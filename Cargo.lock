@@ -362,7 +362,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-server"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
