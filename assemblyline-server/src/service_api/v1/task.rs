@@ -22,7 +22,7 @@ use serde_json::json;
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_error, make_api_response, make_empty_api_error};
-use crate::service_api::helpers::tasking::{timestamp, ServiceMissing, TaskingClient};
+use crate::service_api::helpers::tasking::{MalformedResult, ServiceMissing, TaskingClient, timestamp};
 use crate::Core;
 
 use super::require_header;
@@ -136,7 +136,13 @@ async fn task_finished(
     let service_name = client_info.service_name;
     match tasking.task_finished(body, &client_info.client_id, service_name).await {
         Ok(response) => Ok(make_api_response(response)),
-        Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}")))
+        Err(err) => if let Some(err) = err.downcast_ref::<MalformedResult>(){
+            Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("{err:?}")))
+        } else if let Some(err) = err.downcast_ref::<serde_json::Error>(){
+            Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("json error: {err:?}")))
+        } else {
+            Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}")))
+        }
     }
 }
 
