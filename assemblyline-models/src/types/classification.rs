@@ -281,6 +281,12 @@ impl From<ClassificationString> for String {
     }
 }
 
+impl From<ExpandingClassification> for ClassificationString {
+    fn from(value: ExpandingClassification) -> Self {
+        ClassificationString(value.classification)
+    }
+}
+
 impl Deref for ClassificationString {
     type Target = str;
 
@@ -307,7 +313,7 @@ impl ClassificationString {
     }
     
     pub fn unrestricted(parser: &ClassificationParser) -> Self {
-        Self(parser.unrestricted().to_owned())
+        Self(parser.normalize_classification_options(parser.unrestricted(), NormalizeOptions::short()).unwrap())
     }
 
     pub fn as_str(&self) -> &str {

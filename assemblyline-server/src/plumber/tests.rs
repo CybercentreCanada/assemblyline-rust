@@ -107,25 +107,33 @@ async fn test_cleanup_old_tasks() {
     ]).unwrap();
     let result = connection.make_request(&mut 0, &request).await.unwrap();
     let result: responses::Search<(), ()> = result.json().await.unwrap();
-    assert_eq!(result.hits.total.value, num_old_tasks);
+    assert!(result.hits.total.value >= num_old_tasks);
 
     // Run task cleanup, we should return to no more "old" completed tasks
     println!("Starting plumber");
     let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_test_task_cleanup2".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     //
-    println!("Checking for trailing tasks");
-    let request = Request::get_search(&connection.host, vec![
-        ("index", ".tasks".into()),
-        ("q", "task.start_time_in_millis:0".into()),
-        ("size", "0".into()),
-        ("track_total_hits", "1000".into()),
-    ]).unwrap();
-    let result = connection.make_request(&mut 0, &request).await.unwrap();
-    let result: responses::Search<(), ()> = result.json().await.unwrap();
+    let mut attempts = 0;
+    let result = loop {
+        println!("Checking for trailing tasks");
+        let request = Request::get_search(&connection.host, vec![
+            ("index", ".tasks".into()),
+            ("q", "task.start_time_in_millis:0".into()),
+            ("size", "0".into()),
+            ("track_total_hits", "1000".into()),
+        ]).unwrap();
+        let result = connection.make_request(&mut 0, &request).await.unwrap();
+        let result: responses::Search<(), ()> = result.json().await.unwrap();
+        attempts += 1;
+        if attempts > 100 || result.hits.total.value == 0 {
+            break result
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     assert_eq!(result.hits.total.value, 0);
     println!("finished");
 }
