@@ -6,7 +6,7 @@ use uuid::uuid;
 
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
-pub const MAGIC_PATTERNS: [(&str, &str); 99] = [
+pub const MAGIC_PATTERNS: [(&str, &str); 100] = [
     ("network/tnef", "Transport Neutral Encapsulation Format"),
     ("archive/chm", "MS Windows HtmlHelp Data"),
     ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
