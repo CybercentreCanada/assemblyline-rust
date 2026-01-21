@@ -123,6 +123,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 99] = [
     ("java/class", "java class data"),
     ("resource/pyc", "python [^\\|]+byte"),
     ("resource/pyc", "^Byte-compiled Python module"),
+    ("resource/yara/v3", "^YARA 3.x compiled rule set"),
     ("android/apk", "Android package \\(APK\\)"),
     ("code/xml", "OpenGIS KML"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L161
