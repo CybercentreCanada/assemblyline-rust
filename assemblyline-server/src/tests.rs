@@ -14,6 +14,7 @@ use assemblyline_models::datastore::{Service, Submission};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, ServiceName, Sha256, Sid};
+use itertools::Itertools;
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use sha2::Digest;
@@ -531,9 +532,10 @@ impl MetricsWatcher {
         let mut values: HashMap<&str, i64> = HashMap::from_iter(values.iter().cloned());
         while !values.is_empty() {
             if start.elapsed() > RESPONSE_TIMEOUT {
-                match self.counts.lock().get(service) {
+                let counts = self.counts.lock();
+                match counts.get(service) {
                     Some(count) => error!("Existing metrics for {service}: {count:?}"),
-                    None => error!("No metrics for {service}"),
+                    None => error!("No metrics for {service} ({})", counts.keys().join(", ")),
                 };
                 panic!("Metrics failed {service} {:?}", values);
             }
@@ -1659,3 +1661,59 @@ async fn test_complex_extracted() {
     }
     assert_eq!(partial_results, 0, "partial_results");
 }
+
+
+/// MARK: service cache
+#[tokio::test(flavor = "multi_thread")]
+async fn test_service_cache() {
+    // disable caching at the ingester level so we can test it at the service level
+    let context = setup_custom({
+        |mut ingester| {
+            ingester.disable_cache();
+            ingester
+        }
+    }).await;
+    let (sha, size) = ready_body(&context.core, json!({})).await;
+
+    let submit_once = async || {
+        let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]))
+            .set_files(vec![File {
+                sha256: sha.clone(),
+                size: Some(size as u64),
+                name: "abc123".to_string()
+            }])
+            .set_notification(Notification {
+                queue: Some("service-cache".to_string()),
+                threshold: None,
+            });
+
+        context.ingest_queue.push(&sub_message).await.unwrap();
+    };
+
+    let notification_queue = context.core.notification_queue("service-cache");
+    
+    submit_once().await;
+    let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    let mut first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    first_submission.results.sort_unstable();
+
+    submit_once().await;
+    let second_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+    let mut second_submission: Submission = context.core.datastore.submission.get(&second_task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    second_submission.results.sort_unstable();
+
+    // The two submissions should be distinct, but have the same results assigned by service caching
+    assert_ne!(first_submission.sid, second_submission.sid);
+    assert_eq!(first_submission.results, second_submission.results);
+    assert_eq!(first_submission.results.len(), 4);
+    for service_name in ["pre", "core-a", "core-b", "finish"] {
+        assert!(first_submission.results.iter().any(|key| key.contains(service_name)));
+        context.metrics.assert_metrics("service", &[("execute", 2), ("cache_hit", 1), ("cache_miss", 1)]).await; 
+    }
+}
+
+
