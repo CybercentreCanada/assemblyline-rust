@@ -181,6 +181,8 @@ pub struct Ingester {
 
     #[cfg(test)]
     pub test_hook_fail_submit: Mutex<usize>,
+    always_create_submission: bool,
+    disable_cache: bool,
 }
 
 
@@ -245,6 +247,8 @@ impl Ingester {
             submit_manager: SubmitManager::new(&core),
             async_submission_tracker: core.redis_persistant.user_quota_tracker("async_submissions".to_owned())
                 .set_timeout(chrono::Duration::days(1).to_std().unwrap()),
+            disable_cache: false,
+            always_create_submission: core.config.core.ingester.always_create_submission,
             core,
             #[cfg(test)]
             test_hook_fail_submit: Mutex::new(0),
@@ -289,6 +293,11 @@ impl Ingester {
         // Daemon to report CPU usage
         components.spawn(retry!("Metrics Reporter".to_string(), self, handle_metrics));
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn disable_cache(&mut self) {
+        self.disable_cache = true;
     }
 
     #[cfg(test)]
@@ -429,7 +438,7 @@ impl Ingester {
         // }
 
         // Check if this file has been previously processed.
-        let (cache_entry, scan_key) = if !task.submission.params.ignore_cache {
+        let (cache_entry, scan_key) = if !task.submission.params.ignore_cache && !self.disable_cache {
             self.check(&mut task, true).await?
         } else {
             (None, Self::stamp_filescore_key(&mut task, None))
@@ -679,7 +688,7 @@ impl Ingester {
         // Check if this file is already being processed
         debug!("[{} :: {}] checking cache? {}", task.ingest_id, task.sha256(), !task.params().ignore_cache);
         Self::stamp_filescore_key(&mut task, None);
-        let (cache_entry, _) = if task.params().ignore_cache {
+        let (cache_entry, _) = if task.params().ignore_cache || self.disable_cache {
             (None, "".to_owned())
         } else {
             self.check(&mut task, false).await?
@@ -713,7 +722,7 @@ impl Ingester {
         if let Some(FileScore { psid: mut pprevious, score, sid: mut previous, .. }) = cache_entry {
             debug!("cache hit on {}", task.submission.files[0].sha256);
             // Create a submission record based on the cache hit if enabled
-            if self.core.config.core.ingester.always_create_submission {
+            if self.always_create_submission {
                 debug!("should create submission based on {previous}");
 
                 match self.core.datastore.submission.get(&previous.to_string(), None).await {
