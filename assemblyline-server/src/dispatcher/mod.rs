@@ -1942,7 +1942,7 @@ impl Dispatcher {
                     dispatcher: self.instance_id.clone(),
                     dispatcher_address: self.instance_address.clone(),
                     metadata,
-                    min_classification: task.submission.classification.classification.clone(),
+                    min_classification: task.submission.classification.clone().into(),
                     service_name,
                     service_config: config,
                     fileinfo: (*file_info).clone(),
