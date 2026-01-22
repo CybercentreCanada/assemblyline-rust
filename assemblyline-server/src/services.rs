@@ -490,7 +490,7 @@ pub mod test {
         return (core, redis)
     }
 
- pub async fn setup_services(core: Core, test_guard: TestGuard, services: HashMap<ServiceName, Service>) -> (Core, TestGuard) {
+    pub async fn setup_services(core: Core, test_guard: TestGuard, services: HashMap<ServiceName, Service>) -> (Core, TestGuard) {
 
         let mut enabled_services = 0;
         for (name, service) in &services {

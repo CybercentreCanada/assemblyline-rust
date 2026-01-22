@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -273,13 +273,37 @@ impl TaskingClient {
 
         // Save service delta if it doesn't already exist
         debug!("Registering service: setting version");
-        if !self.datastore.service_delta.exists(&service.name, None).await? {
+        if let Some(mut service_delta) = self.datastore.service_delta.get(&service.name, None).await? {
+            // Check for any changes that should be merged into the service delta
+            debug!("Registering service: version already set");
+
+            // Check for any new configuration keys that should be added to the service delta
+            if let Some(existing_config) = &mut service_delta.config {
+                for (key, value) in service.config {
+                    if !existing_config.contains_key(&key) {
+                        existing_config.insert(key, value);
+                    }
+                }
+            }
+
+            // Check for any new submission parameters that should be added to the service delta
+            if let Some(existing_params) = &mut service_delta.submission_params {
+                let set_params: HashSet<String> = existing_params.iter().filter_map(|row| row.name.clone()).collect();
+                for param in service.submission_params {
+                    if !set_params.contains(&param.name) {
+                        // New parameter, add it to the old submission params
+                        existing_params.push(param.into());
+                    }
+                }
+            }
+
+            // Save any changes to the service delta
+            self.datastore.service_delta.save(&service.name, &service_delta, None, None).await?;
+        } else {
             let mut doc = [("version".to_string(), json!(service.version))].into_iter().collect();
             self.datastore.service_delta.save_json(&service.name, &mut doc, None, None).await?;
             self.datastore.service_delta.commit(None).await?;
             info!("{log_prefix}{} version ({}) registered", service.name, service.version);
-        } else {
-            debug!("Registering service: version already set");
         }
 
         let mut new_heuristics = vec![];

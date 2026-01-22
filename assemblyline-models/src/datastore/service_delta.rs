@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
+use crate::datastore::service::SubmissionParams;
 use crate::types::{NonZeroInteger, ServiceName};
 use crate::{ElasticMeta, Readable, types::{ClassificationString, JsonMap, Text}};
 
@@ -171,6 +172,19 @@ pub struct SubmissionParamsDelta {
     pub list: Option<serde_json::Value>,
     /// REF_SUBMISSION_PARAMS
     pub hide: Option<bool>,
+}
+
+impl From<SubmissionParams> for SubmissionParamsDelta {
+    fn from(value: SubmissionParams) -> Self {
+        Self {
+            default: Some(value.default),
+            name: Some(value.name),
+            _type: Some(value.param_type),
+            value: Some(value.value),
+            list: Some(serde_json::Value::Array(value.list)),
+            hide: Some(value.hide),
+        }
+    }
 }
 
 
