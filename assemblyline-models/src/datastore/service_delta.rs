@@ -263,7 +263,7 @@ pub struct ServiceDelta {
     /// REF_SERVICE
     pub docker_config: Option<DockerConfigDelta>,
     /// REF_SERVICE
-    pub dependencies: Option<HashMap<String, DependencyConfigDelta>>,
+    pub dependencies: HashMap<String, DependencyConfigDelta>,
 
     /// REF_SERVICE
     pub update_channel: Option<ChannelKinds>,
