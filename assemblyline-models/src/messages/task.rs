@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use log::info;
 use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
@@ -215,7 +214,6 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
 
         let service_tool_version = service_tool_version.unwrap_or("None");
         let total_str = format!("{service_tool_version}_{service_config}_{submission_params_str}_{ignore_salt}");
-        info!("Raw conf key for {}/{}/{}: {total_str}", task.sid, task.fileinfo.sha256, task.service_name);
 
         // get an md5 hash
         let mut hasher = md5::Md5::new();

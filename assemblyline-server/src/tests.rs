@@ -17,9 +17,10 @@ use assemblyline_models::types::{ClassificationString, ExpandingClassification, 
 use itertools::Itertools;
 use log::{debug, error, info};
 use parking_lot::Mutex;
+use serde::Deserialize;
 use sha2::Digest;
 use rand::Rng;
-use serde_json::{from_value, json};
+use serde_json::{Value, from_value, json};
 use tokio::sync::{mpsc, Notify};
 
 use assemblyline_models::messages::submission::{File, Notification, Submission as MessageSubmission};
@@ -226,13 +227,8 @@ impl MockService {
                 }
             }
 
-            let result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
+            let mut result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
 
-            let result_key = if let Some(key) = instructions.get("result_key") {
-                key.as_str().unwrap().to_owned()
-            } else {
-                result.build_key(Some(&task)).unwrap()
-            };
 
             // let mut result_key: String = instructions
             //     .get("result_key")
@@ -251,19 +247,75 @@ impl MockService {
                 None => Default::default()
             };
 
+            let mut children = HashMap::new();
+            if let Some(Value::Array(raw_children)) = instructions.get("children") {
+                for child in raw_children {
+                    let body = match child.as_str() {
+                        Some(body) => body,
+                        None => continue,
+                    };
+
+                    let hash = sha2::Sha256::digest(body.as_bytes());
+                    let hash: Sha256 = Sha256::try_from(&hash[..]).unwrap();
+                    children.insert(hash.clone(), body.to_owned());
+                    result.response.extracted.push(assemblyline_models::datastore::result::File::new(hash.clone(), hash.to_string()));
+                }
+            }
+
+            let result_key = if let Some(key) = instructions.get("result_key") {
+                key.as_str().unwrap().to_owned()
+            } else {
+                result.build_key(Some(&task)).unwrap()
+            };
+
             debug!("result: {result_key} -> {result:?}");
             let sha = task.fileinfo.sha256.to_string();
 
             let serde_json::Value::Object(mut result) = serde_json::to_value(result).unwrap() else { panic!() };
             result.insert("temp_submission_data".to_owned(), serde_json::Value::Object(temporary_data));
 
-            // self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None, vec![]).await.unwrap();
-            let response = client.post(format!("{address}/api/v1/task/")).json(&json!({
-                "task": task,
-                "freshen": false,
-                "result": result
-            })).send().await.unwrap();
-            response.error_for_status().unwrap();
+            let sha = loop {
+
+                // self.dispatch_client.service_finished(task, result_key, result, Some(temporary_data), None, vec![]).await.unwrap();
+                let response = client.post(format!("{address}/api/v1/task/")).json(&json!({
+                    "task": task,
+                    "freshen": true,
+                    "result": result
+                })).send().await.unwrap();
+                let response = response.error_for_status().unwrap();
+                let data = response.bytes().await.unwrap();
+
+                #[derive(Deserialize)]
+                struct Resp {
+                    success: bool,
+                    #[serde(default)]
+                    missing_files: Vec<Sha256>,
+                }
+
+                let response: APIResponse<Resp> = serde_json::from_slice(&data).unwrap();
+
+                if response.api_response.success {
+                    break sha
+                }
+                if response.api_response.missing_files.is_empty() {
+                    panic!("Result could not be uploaded");
+                }
+                for file in response.api_response.missing_files {
+                    let body = children.get(&file).unwrap().clone();
+                    let response = client
+                        .put(format!("{address}/api/v1/file/"))
+                        .header("sha256", file.to_string())
+                        .header("classification", "L0")
+                        .header("ttl", 100)
+                        .body(body)
+                        .send().await.unwrap();
+                    let data = response.bytes().await.unwrap();
+                    let response: APIResponse<Resp> = serde_json::from_slice(&data).unwrap();
+                    if !response.api_response.success {
+                        panic!("could not upload file: {}", response.api_error_message.unwrap_or("Unknown error"))
+                    }
+                }
+            };
 
             *self.finish.lock().entry(sha).or_default() += 1;
         }
@@ -660,13 +712,8 @@ async fn test_deduplication() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_ingest_retry() {
 
-    // let attempts = Arc::new(Mutex::new(vec![]));
-    // let failures = Arc::new(Mutex::new(vec![]));
-
     // install a worker task between the ingester and the dispatcher that drops the first message it sees
     let context = setup_custom({
-        // let attempts = attempts.clone();
-        // let failures = failures.clone();
         |mut ingester| {
             ingester.set_retry_delay(chrono::Duration::seconds(1));
             *ingester.test_hook_fail_submit.lock() = 1;
@@ -942,35 +989,105 @@ async fn test_service_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_extracted_file() {
     let context = setup().await;
-    let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
+    let (sha, size) = ready_extract(&context.core, &[
+        ready_body(&context.core, json!({})).await.0
+    ]).await;
 
-    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
-        .set_description("file abc123")
-        .set_services_selected(&[])
-        .set_submitter("user")
-        .set_groups(&["user"]))
-    .set_files(vec![File {
-    sha256: sha.clone(),
-    size: Some(size as u64),
-    name: "abc123".to_string()
-    }])
-    .set_notification(Notification {
-        queue: Some("text-extracted-file".to_string()),
-        threshold: None,
-    });
+    let mut tasks = vec![];
+    for _ in 0..2 {
+        let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_ignore_cache(true)
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]))
+            .set_files(vec![File {
+                sha256: sha.clone(),
+                size: Some(size as u64),
+                name: "abc123".to_string()
+            }])
+            .set_notification(Notification {
+                queue: Some("text-extracted-file".to_string()),
+                threshold: None,
+            });
 
-    context.ingest_queue.push(&sub_message).await.unwrap();
+        context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("text-extracted-file");
-    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+        let notification_queue = context.core.notification_queue("text-extracted-file");
+        tasks.push(notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap());
+        context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
+        context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 2)]).await;
+        context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
+    }
 
-    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
-    assert_eq!(sub.files.len(), 1);
-    assert_eq!(sub.results.len(), 8);
-    assert_eq!(sub.errors.len(), 0);
+    let mut subs = vec![];
+    for task in tasks {
+        let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+        assert_eq!(sub.files.len(), 1);
+        assert_eq!(sub.results.len(), 8);
+        assert_eq!(sub.errors.len(), 0);
+        subs.push(sub);
+    }
 
-    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
-    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1)]).await;
+    assert_ne!(subs[0].sid, subs[1].sid);
+}
+
+
+// MARK: extracted file
+#[tokio::test(flavor = "multi_thread")]
+async fn test_extracted_dynamic_file() {
+    let context = setup().await;
+    let child = json!({
+        "salt": rand::rng().random::<u128>().to_string(),
+    }).to_string();
+    let (sha, size) = ready_body(&context.core, json!({
+        "pre": {
+            "children": [child],
+        }
+    })).await;
+
+    let mut tasks = vec![];
+    for round in 0..2 {
+        let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_ignore_cache(true)
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_groups(&["user"]))
+            .set_files(vec![File {
+                sha256: sha.clone(),
+                size: Some(size as u64),
+                name: "abc123".to_string()
+            }])
+            .set_notification(Notification {
+                queue: Some("text-extracted-dynamic-file".to_string()),
+                threshold: None,
+            });
+
+        context.ingest_queue.push(&sub_message).await.unwrap();
+
+        let notification_queue = context.core.notification_queue("text-extracted-dynamic-file");
+        tasks.push(notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap());
+        context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
+        context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 2)]).await;
+        if round == 0 {
+            context.metrics.assert_metrics("service", &[("extracted_missing", 1)]).await;
+            context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
+        } else {
+            context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
+        }
+    }
+
+    let mut subs = vec![];
+    for task in tasks {
+        let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+        assert_eq!(sub.files.len(), 1);
+        assert_eq!(sub.results.len(), 8);
+        assert_eq!(sub.errors.len(), 0);
+        subs.push(sub);
+    }
+
+    assert_ne!(subs[0].sid, subs[1].sid);
 }
 
 // MARK: depth limit
@@ -1695,7 +1812,7 @@ async fn test_service_cache() {
     };
 
     let notification_queue = context.core.notification_queue("service-cache");
-    
+
     submit_once().await;
     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
     let mut first_submission: Submission = context.core.datastore.submission.get(&first_task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1712,7 +1829,7 @@ async fn test_service_cache() {
     assert_eq!(first_submission.results.len(), 4);
     for service_name in ["pre", "core-a", "core-b", "finish"] {
         assert!(first_submission.results.iter().any(|key| key.contains(service_name)));
-        context.metrics.assert_metrics("service", &[("execute", 2), ("cache_hit", 1), ("cache_miss", 1)]).await; 
+        context.metrics.assert_metrics("service", &[("execute", 2), ("cache_hit", 1), ("cache_miss", 1)]).await;
     }
 }
 
