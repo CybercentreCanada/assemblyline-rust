@@ -578,6 +578,35 @@ impl MetricsWatcher {
         self.counts.lock().clear();
     }
 
+    pub async fn assert_metric_zero(&self, service: &str, key: &str) {
+        let start = std::time::Instant::now();
+        loop {
+            if start.elapsed() > RESPONSE_TIMEOUT {
+                let counts = self.counts.lock();
+                match counts.get(service) {
+                    Some(count) => error!("Existing metrics for {service}: {count:?}"),
+                    None => error!("No metrics for {service} ({})", counts.keys().join(", ")),
+                };
+                panic!("No metrics for {service} by deadline");
+            }
+
+            {
+                let mut count = self.counts.lock();
+                let type_counts = match count.get_mut(service) {
+                    Some(count) => count,
+                    None => continue,
+                };
+
+                match type_counts.get(key) {
+                    Some(value) => assert_eq!(*value, 0),
+                    None => return,
+                }
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     /// wait for metrics messages with the given fields
     pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
         let start = std::time::Instant::now();
@@ -1075,6 +1104,7 @@ async fn test_extracted_dynamic_file() {
             context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
         } else {
             context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
+            context.metrics.assert_metric_zero("service", "extracted_missing").await;
         }
     }
 
