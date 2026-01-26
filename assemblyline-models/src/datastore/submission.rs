@@ -266,6 +266,10 @@ impl SubmissionParams {
         self.description = Some(text.into()); self
     }
 
+    pub fn set_ignore_cache(mut self, value: bool) -> Self {
+        self.ignore_cache = value; self
+    }
+
     pub fn set_services_selected(mut self, selected: &[&str]) -> Self {
         self.services.selected = selected.iter().map(|s|ServiceName::from_string(s.to_string())).collect(); self
     }

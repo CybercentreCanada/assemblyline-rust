@@ -26,6 +26,10 @@ pub struct Metrics {
     pub scored: i64,
     /// Number of tasks not scored
     pub not_scored: i64,
+    pub extracted_missing: i64,
+    pub extracted_found: i64,
+    pub supplementary_missing: i64,
+    pub supplementary_found: i64,
 }
 
 // @odm.model(description="Service Activity")
