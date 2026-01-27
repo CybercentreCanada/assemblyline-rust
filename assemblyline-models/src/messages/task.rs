@@ -215,18 +215,20 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
 
         let service_tool_version = service_tool_version.unwrap_or("None");
         let total_str = format!("{service_tool_version}_{service_config}_{submission_params_str}_{ignore_salt}");
-        info!("Unhashed result config value: {total_str}");
 
         // get an md5 hash
         let mut hasher = md5::Md5::new();
-        hasher.update(total_str);
+        hasher.update(&total_str);
         let hash = hasher.finalize();
 
         // truncate it to 8 bytes and interpret it as a number
         let number = u64::from_be_bytes(hash[0..8].try_into().unwrap());
 
+        let key = base62::encode(number);
+        info!("Unhashed result config value {}/{}: {total_str} -> {key}", task.fileinfo.sha256, task.service_name);
+
         // encode it as a string
-        Ok(base62::encode(number))
+        Ok(key)
     } else {
         Ok("0".to_string())
     }
