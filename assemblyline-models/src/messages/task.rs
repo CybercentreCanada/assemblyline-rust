@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use log::info;
+use log::debug;
 use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
@@ -225,7 +225,7 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
         let number = u64::from_be_bytes(hash[0..8].try_into().unwrap());
 
         let key = base62::encode(number);
-        info!("Unhashed result config value {}/{}: {total_str} -> {key}", task.fileinfo.sha256, task.service_name);
+        debug!("Unhashed result config value {}/{}: {total_str} -> {key}", task.fileinfo.sha256, task.service_name);
 
         // encode it as a string
         Ok(key)
