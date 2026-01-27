@@ -587,25 +587,29 @@ impl MetricsWatcher {
                     Some(count) => error!("Existing metrics for {service}: {count:?}"),
                     None => error!("No metrics for {service} ({})", counts.keys().join(", ")),
                 };
-                panic!("No metrics for {service} by deadline");
+                panic!("Timeout waiting for {service} metrics to see zero {key}");
             }
 
             {
-                let mut count = self.counts.lock();
-                let type_counts = match count.get_mut(service) {
-                    Some(count) => count,
-                    None => continue,
-                };
-
-                match type_counts.get(key) {
-                    Some(value) => assert_eq!(*value, 0),
-                    None => return,
+                let count = self.counts.lock();
+                if let Some(type_counts) = count.get(service) {
+                    if let Some(value) = type_counts.get(key) {
+                        assert_eq!(*value, 0, "metric {service}:{key} was not zero ({value})");
+                    }
+                    return;
                 }
             }
 
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
+
+    // pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
+    //     self.assert_metrics_at_least(service, values).await;
+    //     for (key, _) in values {
+    //         self.assert_metric_zero(service, key).await;
+    //     }
+    // }
 
     /// wait for metrics messages with the given fields
     pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
@@ -1099,13 +1103,20 @@ async fn test_extracted_dynamic_file() {
         tasks.push(notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap());
         context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
         context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 2)]).await;
+        context.metrics.assert_metric_zero("dispatcher", "submissions_completed").await;
+        context.metrics.assert_metric_zero("dispatcher", "files_completed").await;
+        context.metrics.assert_metric_zero("ingester", "submissions_ingested").await;
+        context.metrics.assert_metric_zero("ingester", "submissions_completed").await;
+        context.metrics.assert_metric_zero("ingester", "files_completed").await;
+
         if round == 0 {
             context.metrics.assert_metrics("service", &[("extracted_missing", 1)]).await;
             context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
         } else {
             context.metrics.assert_metrics("service", &[("extracted_found", 1)]).await;
-            context.metrics.assert_metric_zero("service", "extracted_missing").await;
         }
+        context.metrics.assert_metric_zero("service", "extracted_missing").await;
+        context.metrics.assert_metric_zero("service", "extracted_found").await;
     }
 
     let mut subs = vec![];
