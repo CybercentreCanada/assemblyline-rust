@@ -639,19 +639,23 @@ impl TaskingClient {
 #[error("The service you're asking task for does not exist, try later")]
 pub struct ServiceMissing;
 
+#[derive(Debug, Error)]
+#[error("Malformed task result: {0}")]
+pub struct MalformedResult(String);
+
 /// Some fields of the task object are new, in order to make the new code
 /// compatable with older code those fields are coppied to metadata.
 /// Here we will copy them back if they are missing
-fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
+fn finish_parsing_task(mut data: JsonMap) -> Result<Task, MalformedResult> {
     if !data.contains_key("task_id") {
         if let Some(Value::Object(metadata)) = data.get("metadata") {
             if let Some(id) = metadata.get("task_id__") {
                 let id: u64 = if let Some(id) = id.as_u64() {
                     id
                 } else if let Some(id) = id.as_str() {
-                    id.to_string().parse()?
+                    id.parse().map_err(|err| MalformedResult(format!("Could not parse id: {err}")))?
                 } else  {
-                    bail!("Could not parse id")
+                    return Err(MalformedResult("Could not parse id".to_string()))
                 };
                 data.insert("task_id".to_string(), json!(id));
             }
@@ -671,7 +675,7 @@ fn finish_parsing_task(mut data: JsonMap) -> Result<Task> {
             }
         }
     }
-    serde_json::from_value(Value::Object(data)).context("Couldn't parse Task")
+    serde_json::from_value(Value::Object(data)).map_err(|err| MalformedResult(format!("Could not parse task: {err}")))
 }
 
 impl TaskingClient {
@@ -709,7 +713,7 @@ impl TaskingClient {
                         "missing result".to_string()
                     },
                 };
-                anyhow::bail!("malformed task result: {cause}");
+                Err(MalformedResult(cause).into())
             }
         }
     }
