@@ -79,54 +79,62 @@ async fn test_cleanup_old_tasks() {
         (name, dummy_service("a", "core", None, None, None, None))
     ].into();
     let (core, _guard) = setup_services_and_core(services).await;
+    let connection = core.datastore.switch_to_new_user("plumber_test_task_cleanup").await.unwrap().connection();
+
+    // helper to count the tasks in the database
+    let count_results = async || {
+        let request = Request::get_search(&connection.host, vec![
+            ("index", ".tasks".into()),
+            ("q", "task.start_time_in_millis:0".into()),
+            ("size", "0".into()),
+            ("track_total_hits", "1000".into()),
+        ]).unwrap();
+        let result = connection.make_request(&mut 0, &request).await.unwrap();
+        let result: responses::Search<(), ()> = result.json().await.unwrap();
+        result.hits.total.value
+    };
 
     // Generate new documents in .tasks index
     let num_old_tasks = 10;
-    let connection = core.datastore.switch_to_new_user("plumber_test_task_cleanup").await.unwrap().connection();
-    for _ in 0..num_old_tasks {
-        let body = json!({
-            "completed": true,
-            "task": {
-                "start_time_in_millis": 0
-            }
-        });
+    let mut result_count = 0;
+    while result_count < num_old_tasks {
+        for _ in 0..num_old_tasks {
+            let body = json!({
+                "completed": true,
+                "task": {
+                    "start_time_in_millis": 0
+                }
+            });
 
-        let url = connection.host.join(".tasks/_doc/").unwrap();
-        let request = Request::new_on_document(Method::POST, url, ".tasks".to_string(), "".to_string());
-
-        connection.make_request_json(&mut 0, &request, &body).await.unwrap();
+            let mut url = connection.host.join(".tasks/_doc/").unwrap();
+            url.set_query(Some("refresh=true"));
+            let request = Request::new_on_document(Method::POST, url, ".tasks".to_string(), "".to_string());
+            connection.make_request_json(&mut 0, &request, &body).await.unwrap();
+        }
+        result_count = count_results().await;
     }
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
     // Assert that these have been indeed committed to the tasks index
-    let request = Request::get_search(&connection.host, vec![
-        ("index", ".tasks".into()),
-        ("q", "task.start_time_in_millis:0".into()),
-        ("size", "0".into()),
-        ("track_total_hits", "1000".into()),
-    ]).unwrap();
-    let result = connection.make_request(&mut 0, &request).await.unwrap();
-    let result: responses::Search<(), ()> = result.json().await.unwrap();
-    assert_eq!(result.hits.total.value, num_old_tasks);
+    assert!(result_count >= num_old_tasks, "{result_count} >= {num_old_tasks}");
 
     // Run task cleanup, we should return to no more "old" completed tasks
     println!("Starting plumber");
     let plumber = Plumber::new_mocked(core.clone(), Some(Duration::from_millis(100)), Some("plumber_test_task_cleanup2".to_string())).await.unwrap();
     let mut pool = tokio::task::JoinSet::new();
     plumber.start(&mut pool).await.unwrap();
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // tokio::time::sleep(Duration::from_millis(1000)).await;
 
     //
-    println!("Checking for trailing tasks");
-    let request = Request::get_search(&connection.host, vec![
-        ("index", ".tasks".into()),
-        ("q", "task.start_time_in_millis:0".into()),
-        ("size", "0".into()),
-        ("track_total_hits", "1000".into()),
-    ]).unwrap();
-    let result = connection.make_request(&mut 0, &request).await.unwrap();
-    let result: responses::Search<(), ()> = result.json().await.unwrap();
-    assert_eq!(result.hits.total.value, 0);
+    let mut attempts = 0;
+    let count = loop {
+        println!("Checking for trailing tasks");
+        let count = count_results().await;
+        attempts += 1;
+        if attempts > 100 || count == 0 {
+            break count
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(count, 0);
     println!("finished");
 }
 

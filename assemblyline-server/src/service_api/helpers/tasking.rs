@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -273,13 +273,37 @@ impl TaskingClient {
 
         // Save service delta if it doesn't already exist
         debug!("Registering service: setting version");
-        if !self.datastore.service_delta.exists(&service.name, None).await? {
+        if let Some(mut service_delta) = self.datastore.service_delta.get(&service.name, None).await? {
+            // Check for any changes that should be merged into the service delta
+            debug!("Registering service: version already set");
+
+            // Check for any new configuration keys that should be added to the service delta
+            if let Some(existing_config) = &mut service_delta.config {
+                for (key, value) in service.config {
+                    if !existing_config.contains_key(&key) {
+                        existing_config.insert(key, value);
+                    }
+                }
+            }
+
+            // Check for any new submission parameters that should be added to the service delta
+            if let Some(existing_params) = &mut service_delta.submission_params {
+                let set_params: HashSet<String> = existing_params.iter().filter_map(|row| row.name.clone()).collect();
+                for param in service.submission_params {
+                    if !set_params.contains(&param.name) {
+                        // New parameter, add it to the old submission params
+                        existing_params.push(param.into());
+                    }
+                }
+            }
+
+            // Save any changes to the service delta
+            self.datastore.service_delta.save(&service.name, &service_delta, None, None).await?;
+        } else {
             let mut doc = [("version".to_string(), json!(service.version))].into_iter().collect();
             self.datastore.service_delta.save_json(&service.name, &mut doc, None, None).await?;
             self.datastore.service_delta.commit(None).await?;
             info!("{log_prefix}{} version ({}) registered", service.name, service.version);
-        } else {
-            debug!("Registering service: version already set");
         }
 
         let mut new_heuristics = vec![];
@@ -711,6 +735,7 @@ impl TaskingClient {
         } else {
             None
         };
+        let metric_factory = self.get_metrics_factory(service_name);
 
         async fn freshen_file(
             datastore: Arc<Elastic>, 
@@ -769,17 +794,32 @@ impl TaskingClient {
             for (file_entry, is_supplementary) in extracted.into_iter().chain(supplementary) {
                 if !file_exists_check.get(&file_entry.sha256).copied().unwrap_or_default() {
                     missing_files.push(file_entry.sha256.clone());
+                    if is_supplementary {
+                        increment!(metric_factory, supplementary_missing);
+                    } else {
+                        increment!(metric_factory, extracted_missing);
+                    }
                     continue
                 }
 
                 let mut file_info = match file_infos.get(&file_entry.sha256.to_string()) {
                     Some(info) => info.clone(),
                     None => {
+                        if is_supplementary {
+                            increment!(metric_factory, supplementary_missing);
+                        } else {
+                            increment!(metric_factory, extracted_missing);
+                        }
                         missing_files.push(file_entry.sha256.clone());
                         continue
                     }
                 };
 
+                if is_supplementary {
+                    increment!(metric_factory, supplementary_found);
+                } else {
+                    increment!(metric_factory, extracted_found);
+                }
                 file_info.expiry_ts = expiry_ts;
                 pool.spawn(freshen_file(self.datastore.clone(), self.classification_engine.clone(), file_info, file_entry.clone(), is_supplementary));
             }
@@ -985,7 +1025,6 @@ impl TaskingClient {
         self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, all_extra_errors).await.context("service_finished")?;
 
         // Metrics
-        let metric_factory = self.get_metrics_factory(service_name);
         if score > 0 {
             increment!(metric_factory, scored);
         } else {

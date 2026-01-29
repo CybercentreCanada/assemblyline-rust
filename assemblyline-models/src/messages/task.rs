@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
+use log::debug;
 use md5::Digest;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
 
 use crate::datastore::tagging::TagValue;
 use crate::random_word;
-use crate::types::{JsonMap, SSDeepHash, ServiceName, Sha1, Sha256, Sid, Wildcard, MD5};
+use crate::types::{ClassificationString, JsonMap, MD5, SSDeepHash, ServiceName, Sha1, Sha256, Sid, Wildcard};
 use crate::{datastore::file::URIInfo, config::ServiceSafelist};
 
 
@@ -94,7 +95,7 @@ pub struct Task {
     /// Metadata associated to the submission
     pub metadata: HashMap<String, Wildcard>,
     /// Minimum classification of the file being scanned
-    pub min_classification: String,
+    pub min_classification: ClassificationString,
     /// File info block
     pub fileinfo: FileInfo,
     /// File name
@@ -144,7 +145,7 @@ impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
             dispatcher_address: "localhost:8080".to_string(),
             sid: rng.random(),
             metadata: Default::default(),
-            min_classification: Default::default(),
+            min_classification: ClassificationString::default_unrestricted(),
             fileinfo: rng.random(),
             filename: random_word(rng),
             service_name: ServiceName::from_string(random_word(rng)),
@@ -217,14 +218,17 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
 
         // get an md5 hash
         let mut hasher = md5::Md5::new();
-        hasher.update(total_str);
+        hasher.update(&total_str);
         let hash = hasher.finalize();
 
         // truncate it to 8 bytes and interpret it as a number
         let number = u64::from_be_bytes(hash[0..8].try_into().unwrap());
 
+        let key = base62::encode(number);
+        debug!("Unhashed result config value {}/{}: {total_str} -> {key}", task.fileinfo.sha256, task.service_name);
+
         // encode it as a string
-        Ok(base62::encode(number))
+        Ok(key)
     } else {
         Ok("0".to_string())
     }

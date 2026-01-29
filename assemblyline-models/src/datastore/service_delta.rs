@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
+use crate::datastore::service::SubmissionParams;
 use crate::types::{NonZeroInteger, ServiceName};
 use crate::{ElasticMeta, Readable, types::{ClassificationString, JsonMap, Text}};
 
@@ -173,6 +174,19 @@ pub struct SubmissionParamsDelta {
     pub hide: Option<bool>,
 }
 
+impl From<SubmissionParams> for SubmissionParamsDelta {
+    fn from(value: SubmissionParams) -> Self {
+        Self {
+            default: Some(value.default),
+            name: Some(value.name),
+            _type: Some(value.param_type),
+            value: Some(value.value),
+            list: Some(serde_json::Value::Array(value.list)),
+            hide: Some(value.hide),
+        }
+    }
+}
+
 
 /// Service Delta relative to Initial Service Configuration
 #[derive(Serialize, Deserialize, Described, Default)]
@@ -249,7 +263,7 @@ pub struct ServiceDelta {
     /// REF_SERVICE
     pub docker_config: Option<DockerConfigDelta>,
     /// REF_SERVICE
-    pub dependencies: Option<HashMap<String, DependencyConfigDelta>>,
+    pub dependencies: HashMap<String, DependencyConfigDelta>,
 
     /// REF_SERVICE
     pub update_channel: Option<ChannelKinds>,
