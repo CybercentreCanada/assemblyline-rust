@@ -3,7 +3,7 @@ FROM python:3.11 AS pybuilder
 RUN pip install --target /packages msoffcrypto-tool
 
 
-FROM rust:1.89.0-bookworm AS builder
+FROM rust:1.90.0-bookworm AS builder
 
 # Add more build tools
 RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev libpython3-dev
@@ -25,5 +25,6 @@ COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/
 ENV PYTHONPATH=/usr/local/lib/python3/dist-packages/
 
 # Build the executable
-RUN cargo build 
+RUN cargo build --target-dir /out
+RUN cargo build --release --target-dir /out
 CMD ["cargo"]

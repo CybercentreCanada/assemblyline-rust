@@ -83,7 +83,7 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Ingester {
-        
+
     },
     Dispatcher {
 
@@ -158,7 +158,7 @@ async fn main() -> ExitCode {
         Commands::Plumber {  } => {
             crate::plumber::main(core).await
         }
-        Commands::ServiceAPI { } => {  
+        Commands::ServiceAPI { } => {
             crate::service_api::main(core).await
         }
     };
@@ -218,25 +218,31 @@ impl Core {
     /// Initialize connections to resources that everything uses
     pub async fn setup(config: Arc<Config>, elastic_prefix: &str, secure: bool) -> Result<Self> {
         // connect to redis one
-        let redis_persistant = if secure {
-            RedisObjects::open_host_native_tls(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?            
-        } else {
-            RedisObjects::open_host(&config.core.redis.persistent.host, config.core.redis.persistent.port, config.core.redis.persistent.db)?
-        };
+        let redis_persistant = RedisObjects::builder()
+            .host(config.core.redis.persistent.host.clone())
+            .port(config.core.redis.persistent.port)
+            .db(config.core.redis.persistent.db)
+            .pubsub_prefix(elastic_prefix.to_owned())
+            .native_tls(secure)
+            .build()?;
 
         // connect to redis two
-        let redis_volatile = if secure { 
-            RedisObjects::open_host_native_tls(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?
-        } else {
-            RedisObjects::open_host(&config.core.redis.nonpersistent.host, config.core.redis.nonpersistent.port, config.core.redis.nonpersistent.db)?
-        };
+        let redis_volatile = RedisObjects::builder()
+            .host(config.core.redis.nonpersistent.host.clone())
+            .port(config.core.redis.nonpersistent.port)
+            .db(config.core.redis.nonpersistent.db)
+            .pubsub_prefix(elastic_prefix.to_owned())
+            .native_tls(secure)
+            .build()?;
 
         // connect to redis three
-        let redis_metrics = if secure {
-            RedisObjects::open_host_native_tls(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?
-        } else {
-            RedisObjects::open_host(&config.core.metrics.redis.host, config.core.metrics.redis.port, config.core.metrics.redis.db)?
-        };
+        let redis_metrics = RedisObjects::builder()
+            .host(config.core.metrics.redis.host.clone())
+            .port(config.core.metrics.redis.port)
+            .db(config.core.metrics.redis.db)
+            .pubsub_prefix(elastic_prefix.to_owned())
+            .native_tls(secure)
+            .build()?;
 
         // connect to elastic
         let datastore_ca = get_datastore_ca().await?;
@@ -290,7 +296,7 @@ impl Core {
             identify,
         })
     }
-    
+
     #[cfg(test)]
     pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, TestGuard) {
         use rand::Rng;
@@ -305,38 +311,24 @@ impl Core {
         let redis = RedisObjects::open_host(host, port, db).unwrap();
         println!("Redis wipe");
         redis.wipe().await.unwrap();
-    
+
 
         let filestore = tempfile::TempDir::new().unwrap();
 
-        let mut config: Config = serde_json::from_value(serde_json::json!({
-            "core": {
-                "redis": {
-                    "persistent": {
-                        "host": host,
-                        "port": port,
-                        "db": db,
-                    },
-                    "nonpersistent": {
-                        "host": host,
-                        "port": port,
-                        "db": db,
-                    }
-                },
-                "metrics": {
-                    "redis": {
-                        "host": host,
-                        "port": port,
-                        "db": db,
-                    }
-                }
-            },
-            "filestore": {
-                "storage": vec![format!("file://{}", filestore.path().to_string_lossy())],
-                "cache": vec![format!("file://{}", filestore.path().to_string_lossy())],
-                "archive": vec![format!("file://{}", filestore.path().to_string_lossy())],
-            }
-        })).unwrap();
+        let mut config: Config = Default::default();
+        config.core.redis.persistent.host = host.to_string();
+        config.core.redis.persistent.port = port;
+        config.core.redis.persistent.db = db;
+        config.core.redis.nonpersistent.host = host.to_string();
+        config.core.redis.nonpersistent.port = port;
+        config.core.redis.nonpersistent.db = db;
+        config.core.metrics.redis.host = host.to_string();
+        config.core.metrics.redis.port = port;
+        config.core.metrics.redis.db = db;
+        config.core.metrics.export_interval = 1;
+        config.filestore.storage = vec![format!("file://{}", filestore.path().to_string_lossy())];
+        config.filestore.cache = vec![format!("file://{}", filestore.path().to_string_lossy())];
+        config.filestore.archive = vec![format!("file://{}", filestore.path().to_string_lossy())];
 
         callback(&mut config);
         config.classification.config = Some(serde_json::to_string(&assemblyline_markings::classification::sample_config()).unwrap());
@@ -351,7 +343,7 @@ impl Core {
         let guard = TestGuard { elastic, _filestore: filestore, running: core.running.clone(), cleaned: false };
         (core, guard)
     }
-    
+
     /// Produce a set of core resources suitable for testing
     #[cfg(test)]
     pub async fn test_setup() -> (Self, TestGuard) {
@@ -369,7 +361,7 @@ impl Core {
     }
 
     // pub async fn while_running(&self, duration: Duration) {
-        
+
     // }
 
     pub async fn sleep(&self, duration: std::time::Duration) -> bool {
