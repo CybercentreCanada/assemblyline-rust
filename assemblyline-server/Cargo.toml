@@ -67,7 +67,7 @@ tlsh2 = "0.4"
 ffuzzy = "0.3"
 
 # Database tools
-redis-objects = { version = "1", path = "../redis-objects" }
+redis-objects = { version = "1.2", path = "../redis-objects" }
 
 # Data managing
 assemblyline-markings = { version = "0.1.13", path = "../assemblyline-markings" }

@@ -41,6 +41,7 @@ pub struct RedisObjects {
     pool: deadpool_redis::Pool,
     client: redis::Client,
     hostname: String,
+    pubsub_prefix: String,
 }
 
 impl std::fmt::Debug for RedisObjects {
@@ -60,14 +61,14 @@ impl RedisObjects {
             },
         })
     }
-   
+
     /// Open a connection using the local tls configuration
     pub fn open_host_native_tls(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
         Self::open(redis::ConnectionInfo{
-            addr: redis::ConnectionAddr::TcpTls { 
-                host: host.to_string(), 
-                port, 
-                insecure: false, 
+            addr: redis::ConnectionAddr::TcpTls {
+                host: host.to_string(),
+                port,
+                insecure: false,
                 tls_params: None,
             },
             redis: redis::RedisConnectionInfo {
@@ -77,8 +78,18 @@ impl RedisObjects {
         })
     }
 
+    /// Construct a builder to construct a redis connection
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
+
     /// Open a connection pool
     pub fn open(config: redis::ConnectionInfo) -> Result<Arc<Self>, ErrorTypes> {
+        Self::_open(config, Default::default())
+    }
+
+    /// Open a connection pool
+    fn _open(config: redis::ConnectionInfo, pubsub_prefix: String) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");
         // configuration for the pool manager itself
         let hostname = config.addr.to_string();
@@ -90,10 +101,11 @@ impl RedisObjects {
         cfg.pool = Some(pool_cfg);
         let pool = cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
         let client = redis::Client::open(config)?;
-        Ok(Arc::new(Self{ 
+        Ok(Arc::new(Self{
             pool,
             client,
-            hostname
+            hostname,
+            pubsub_prefix,
         }))
     }
 
@@ -125,7 +137,7 @@ impl RedisObjects {
     /// Write a message directly to the channel given
     #[instrument]
     pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
-        retry_call!(self.pool, publish, channel, data)
+        retry_call!(self.pool, publish, self.pubsub_prefix.clone() + channel, data)
     }
 
     /// Write a json message directly to the channel given
@@ -195,6 +207,84 @@ impl RedisObjects {
     }
 
 }
+
+/// Utility class to simplify setting up a redis object
+pub struct Builder {
+    host: String,
+    port: u16,
+    db: i64,
+    native_tls: bool,
+    pubsub_prefix: String
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_string(),
+            port: 6379,
+            db: 0,
+            native_tls: true,
+            pubsub_prefix: Default::default()
+        }
+    }
+}
+
+impl Builder {
+    /// Set the host for the connection being built
+    pub fn host(mut self, host: String) -> Self {
+        self.host = host; self
+    }
+
+    /// Set the port for the connection being built
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = port; self
+    }
+
+    /// Set the database index for the connection being built
+    pub fn db(mut self, db: i64) -> Self {
+        self.db = db; self
+    }
+
+    /// Set whether the connection being built should be configured
+    pub fn native_tls(mut self, native_tls: bool) -> Self {
+        self.native_tls = native_tls; self
+    }
+
+    /// Set a prefix that should be applied to all pubsub listening and publishing.
+    /// This is intended for namespacing pubsub operations for testing.
+    pub fn pubsub_prefix(mut self, pubsub_prefix: String) -> Self {
+        self.pubsub_prefix = pubsub_prefix; self
+    }
+
+    /// finalize the building process and create the redis object
+    pub fn build(self) -> Result<Arc<RedisObjects>, ErrorTypes> {
+        let config = if self.native_tls {
+            redis::ConnectionInfo{
+                addr: redis::ConnectionAddr::TcpTls {
+                    host: self.host,
+                    port: self.port,
+                    insecure: false,
+                    tls_params: None,
+                },
+                redis: redis::RedisConnectionInfo {
+                    db: self.db,
+                    ..Default::default()
+                },
+            }
+        } else {
+            redis::ConnectionInfo{
+                addr: redis::ConnectionAddr::Tcp(self.host, self.port),
+                redis: redis::RedisConnectionInfo {
+                    db: self.db,
+                    ..Default::default()
+                },
+            }
+        };
+
+        RedisObjects::_open(config, self.pubsub_prefix)
+    }
+}
+
 
 /// Enumeration over all possible errors
 #[derive(Debug)]
@@ -326,7 +416,7 @@ macro_rules! retry_call {
                     },
                     Err(err) => break Err(err.into())
                 };
-                
+
                 // execute the method given with the argments specified
                 retry_call!(handle_output, $obj.$method(&mut con).await, exponent, maximum)
             }
@@ -356,7 +446,7 @@ pub (crate) mod test {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
-    // simple function to help test that reconnect is working. 
+    // simple function to help test that reconnect is working.
     // Enable and run this then turn your redis server on and off.
     // #[tokio::test]
     // async fn reconnect() {
@@ -370,12 +460,12 @@ pub (crate) mod test {
     //             connection.publish("abc123", b"100").await.unwrap();
     //         }
     //     });
-        
+
     //     while let Some(msg) = listener.recv().await {
     //         println!("{msg:?}");
     //     }
     // }
-    
+
     #[tokio::test]
     async fn test_sets() {
         init();
@@ -414,14 +504,14 @@ pub (crate) mod test {
         assert!(s.pop().await.unwrap().is_none());
         assert_eq!(s.length().await.unwrap(), 0);
     }
-    
-    
+
+
     // def test_expiring_sets(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.set import ExpiringSet
     //         with ExpiringSet('test-expiring-set', ttl=1) as es:
     //             es.delete()
-    
+
     //             values = ['a', 'b', 1, 2]
     //             assert es.add(*values) == 4
     //             assert es.length() == 4
@@ -431,23 +521,23 @@ pub (crate) mod test {
     //             time.sleep(1.1)
     //             assert es.length() == 0
     //             assert not es.exist(values[2])
-    
-    
+
+
     // # noinspection PyShadowingNames
     // def test_lock(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.lock import Lock
-    
+
     //         def locked_execution(next_thread=None):
     //             with Lock('test', 10):
     //                 if next_thread:
     //                     next_thread.start()
     //                 time.sleep(2)
-    
+
     //         t2 = Thread(target=locked_execution)
     //         t1 = Thread(target=locked_execution, args=(t2,))
     //         t1.start()
-    
+
     //         time.sleep(1)
     //         assert t1.is_alive()
     //         assert t2.is_alive()
@@ -457,7 +547,7 @@ pub (crate) mod test {
     //         time.sleep(2)
     //         assert not t1.is_alive()
     //         assert not t2.is_alive()
-    
+
     #[tokio::test]
     async fn priority_queue() -> Result<(), ErrorTypes> {
         let redis = redis_connection().await;
@@ -517,26 +607,26 @@ pub (crate) mod test {
         assert_eq!(pq.dequeue_range(Some(-100), Some(0), None, None).await?, ["second"]);
         Ok(())
     }
-    
-    
+
+
     // # noinspection PyShadowingNames,PyUnusedLocal
     // def test_unique_priority_queue(redis_connection):
     //     from assemblyline.remote.datatypes.queues.priority import UniquePriorityQueue
     //     with UniquePriorityQueue('test-priority-queue') as pq:
     //         pq.delete()
-    
+
     //         for x in range(10):
     //             pq.push(100, x)
     //         assert pq.length() == 10
-    
+
     //         # Values should be unique, this should have no effect on the length
     //         for x in range(10):
     //             pq.push(100, x)
     //         assert pq.length() == 10
-    
+
     //         pq.push(101, 'a')
     //         pq.push(99, 'z')
-    
+
     //         assert pq.pop() == 'a'
     //         assert pq.unpush() == 'z'
     //         assert pq.count(100, 100) == 10
@@ -546,10 +636,10 @@ pub (crate) mod test {
     //         assert pq.pop(4) == [1, 2, 3, 4]
     //         assert pq.unpush(3) == [8, 7, 6]
     //         assert pq.length() == 1  # Should be [<100, 5>] at this point
-    
+
     //         for x in range(5):
     //             pq.push(100 + x, x)
-    
+
     //         assert pq.length() == 6
     //         assert pq.dequeue_range(lower_limit=106) == []
     //         assert pq.length() == 6
@@ -558,13 +648,13 @@ pub (crate) mod test {
     //         assert sorted(pq.dequeue_range(upper_limit=100, num=10)) == [0, 5]  # Take some off the other end
     //         assert pq.length() == 2
     //         pq.pop(2)
-    
+
     //         pq.push(50, 'first')
     //         pq.push(-50, 'second')
-    
+
     //         assert pq.dequeue_range(0, 100) == ['first']
-    //         assert pq.dequeue_range(-100, 0) == ['second']   
-    
+    //         assert pq.dequeue_range(-100, 0) == ['second']
+
     #[tokio::test]
     async fn named_queue() {
         let redis = redis_connection().await;
@@ -620,84 +710,84 @@ pub (crate) mod test {
     //         mq = MultiQueue()
     //         mq.delete('test-multi-q1')
     //         mq.delete('test-multi-q2')
-    
+
     //         for x in range(5):
     //             mq.push('test-multi-q1', x+1)
     //             mq.push('test-multi-q2', x+6)
-    
+
     //         assert mq.length('test-multi-q1') == 5
     //         assert mq.length('test-multi-q2') == 5
-    
+
     //         assert mq.pop('test-multi-q1') == 1
     //         assert mq.pop('test-multi-q2') == 6
-    
+
     //         assert mq.length('test-multi-q1') == 4
     //         assert mq.length('test-multi-q2') == 4
-    
+
     //         mq.delete('test-multi-q1')
     //         mq.delete('test-multi-q2')
-    
+
     //         assert mq.length('test-multi-q1') == 0
     //         assert mq.length('test-multi-q2') == 0
-    
-    
+
+
     // # noinspection PyShadowingNames
     // def test_comms_queue(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.queues.comms import CommsQueue
-    
+
     //         def publish_messages(message_list):
     //             time.sleep(0.1)
     //             with CommsQueue('test-comms-queue') as cq_p:
     //                 for message in message_list:
     //                     cq_p.publish(message)
-    
+
     //         msg_list = ["bob", 1, {"bob": 1}, [1, 2, 3], None, "Nice!", "stop"]
     //         t = Thread(target=publish_messages, args=(msg_list,))
     //         t.start()
-    
+
     //         with CommsQueue('test-comms-queue') as cq:
     //             x = 0
     //             for msg in cq.listen():
     //                 if msg == "stop":
     //                     break
-    
+
     //                 assert msg == msg_list[x]
-    
+
     //                 x += 1
-    
+
     //         t.join()
     //         assert not t.is_alive()
-    
-    
+
+
     // # noinspection PyShadowingNames
     // def test_user_quota_tracker(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.user_quota_tracker import UserQuotaTracker
-    
+
     //         max_quota = 3
     //         timeout = 2
     //         name = get_random_id()
     //         uqt = UserQuotaTracker('test-quota', timeout=timeout)
-    
+
     //         # First 0 to max_quota items should succeed
     //         for _ in range(max_quota):
     //             assert uqt.begin(name, max_quota) is True
-    
+
     //         # All other items should fail until items timeout
     //         for _ in range(max_quota):
     //             assert uqt.begin(name, max_quota) is False
-    
+
     //         # if you remove and item only one should be able to go in
     //         uqt.end(name)
     //         assert uqt.begin(name, max_quota) is True
     //         assert uqt.begin(name, max_quota) is False
-    
+
     //         # if you wait the timeout, all items can go in
     //         time.sleep(timeout+1)
     //         for _ in range(max_quota):
     //             assert uqt.begin(name, max_quota) is True
-    
+
 
 // def test_exact_event(redis_connection: Redis[Any]):
 //     calls: list[dict[str, Any]] = []

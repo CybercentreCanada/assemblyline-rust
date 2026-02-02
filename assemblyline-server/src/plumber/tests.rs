@@ -1,11 +1,10 @@
 use std::time::Duration;
 
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::types::{JsonMap, ServiceName};
+use assemblyline_models::types::ServiceName;
 use reqwest::Method;
 use serde_json::json;
 
-use crate::elastic::collection::Collection;
 use crate::elastic::request::Request;
 use crate::elastic::responses;
 use crate::plumber::Plumber;

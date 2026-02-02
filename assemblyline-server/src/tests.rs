@@ -229,16 +229,6 @@ impl MockService {
 
             let mut result: assemblyline_models::datastore::Result = from_value(result_data).unwrap();
 
-
-            // let mut result_key: String = instructions
-            //     .get("result_key")
-            //     .and_then(|x|x.as_str())
-            //     .map(|x|x.to_string())
-            //     .unwrap_or_else(|| rand::rng().random::<u64>().to_string());
-            // if !instructions.contains_key("result_key") && result.is_empty() {
-            //     result_key = result_key +
-            // }
-
             let temporary_data = match instructions.get("temporary_data") {
                 Some(data) => match data.as_object() {
                     Some(data) => data.clone(),
@@ -604,15 +594,15 @@ impl MetricsWatcher {
         }
     }
 
-    // pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
-    //     self.assert_metrics_at_least(service, values).await;
-    //     for (key, _) in values {
-    //         self.assert_metric_zero(service, key).await;
-    //     }
-    // }
+    pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
+        self.assert_metrics_at_least(service, values).await;
+        for (key, _) in values {
+            self.assert_metric_zero(service, key).await;
+        }
+    }
 
     /// wait for metrics messages with the given fields
-    pub async fn assert_metrics(&self, service: &str, values: &[(&str, i64)]) {
+    pub async fn assert_metrics_at_least(&self, service: &str, values: &[(&str, i64)]) {
         let start = std::time::Instant::now();
         let mut values: HashMap<&str, i64> = HashMap::from_iter(values.iter().cloned());
         while !values.is_empty() {
@@ -786,7 +776,7 @@ async fn test_ingest_retry() {
     assert_eq!(first_submission.results.len(), 4);
 
     // metrics.expect('ingester', 'duplicates', 0)
-    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 1), ("retries", 1)]).await;
+    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 2), ("submissions_completed", 1), ("files_completed", 1), ("retries", 1)]).await;
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
 
 }
@@ -1163,10 +1153,6 @@ async fn test_depth_limit() {
     let notification_queue = context.core.notification_queue("test-depth-limit");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
-    // start = time.time()
-    // task = notification_queue.pop(timeout=RESPONSE_TIMEOUT)
-    // print("notification time waited", time.time() - start)
-
     let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
     assert_eq!(sub.files.len(), 1);
     // We should only get results for each file up to the max depth
@@ -1174,7 +1160,7 @@ async fn test_depth_limit() {
     assert_eq!(sub.errors.len(), 1);
 
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", context.core.config.submission.max_extraction_depth.into())]).await;
-    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", context.core.config.submission.max_extraction_depth.into())]).await;
+    context.metrics.assert_metrics_at_least("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", context.core.config.submission.max_extraction_depth.into())]).await;
 }
 
 // MARK: extract in one
@@ -1183,7 +1169,8 @@ async fn test_max_extracted_in_one() {
     let context = setup().await;
     // Make a set of files that is bigger than max_extracted (3 in this case)
     let mut children = vec![];
-    for _ in 0..5 {
+    let total_children = 5;
+    for _ in 0..total_children {
         children.push(ready_body(&context.core, json!({})).await.0);
     }
     let (sha, size) = ready_extract(&context.core, &children).await;
@@ -1217,7 +1204,7 @@ async fn test_max_extracted_in_one() {
     assert_eq!(sub.errors.len(), 2);  // The number of children that errored out
 
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", max_extracted as i64 + 1)]).await;
-    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", max_extracted as i64 + 1)]).await;
+    context.metrics.assert_metrics_at_least("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", max_extracted as i64 + 1)]).await;
 }
 
 // MARK: extract in N
@@ -1264,7 +1251,7 @@ async fn test_max_extracted_in_several() {
     assert_eq!(sub.errors.len(), 3);  // The number of children that errored out
 
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 4)]).await;
-    context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 4)]).await;
+    context.metrics.assert_metrics_at_least("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 4)]).await;
 }
 
 // MARK: caching
@@ -1782,7 +1769,7 @@ async fn test_complex_extracted() {
     context.ingest_queue.push(&sub_message).await.unwrap();
 
     // Wait for the extract file to finish
-    context.metrics.assert_metrics("dispatcher", &[("files_completed", 1)]).await;
+    context.metrics.assert_metrics_at_least("dispatcher", &[("files_completed", 1)]).await;
     // check that there is a pending result in the dispatcher
     // task = next(iter(core.dispatcher.tasks.values()))
     // assert 1 == sum(int(summary.partial) for summary in task.service_results.values())
@@ -1805,7 +1792,7 @@ async fn test_complex_extracted() {
 
     // Wait until we get feedback from the metrics channel
     context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
-    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await; // only one file completed because we asserted one earlier
+    context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
 
     let mut partial_results = 0;
     for res in sub.results {
@@ -1870,8 +1857,11 @@ async fn test_service_cache() {
     assert_eq!(first_submission.results.len(), 4);
     for service_name in ["pre", "core-a", "core-b", "finish"] {
         assert!(first_submission.results.iter().any(|key| key.contains(service_name)));
-        context.metrics.assert_metrics("service", &[("execute", 2), ("cache_hit", 1), ("cache_miss", 1)]).await;
+        context.metrics.assert_metrics_at_least("service", &[("execute", 2), ("cache_hit", 1), ("cache_miss", 1)]).await;
     }
+    context.metrics.assert_metric_zero("service", "execute").await;
+    context.metrics.assert_metric_zero("service", "cache_hit").await;
+    context.metrics.assert_metric_zero("service", "cache_miss").await;
 }
 
 

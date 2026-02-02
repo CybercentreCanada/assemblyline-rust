@@ -1,4 +1,4 @@
-//! Objects and helpers for publishing metrics in an efficent manner. 
+//! Objects and helpers for publishing metrics in an efficent manner.
 
 use std::{borrow::BorrowMut, sync::Arc};
 use std::marker::PhantomData;
@@ -13,12 +13,12 @@ use serde_json::json;
 
 use crate::{retry_call, ErrorTypes, RedisObjects};
 
-/// Trait for metric messages being exported 
+/// Trait for metric messages being exported
 pub trait MetricMessage: Serialize + Default + Send + Sync + 'static {}
 impl<T: Serialize + Default + Send + Sync + 'static> MetricMessage for T {}
 
 /// A builder to help configure a metrics counter that exports regularly to redis
-/// 
+///
 /// This struct also acts as the internal config object for the counter once built.
 pub struct AutoExportingMetricsBuilder<Message: MetricMessage> {
     channel_name: String,
@@ -60,7 +60,7 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
         self.host = value; self
     }
 
-    /// Set the export interval 
+    /// Set the export interval
     pub fn export_interval(mut self, value: Duration) -> Self {
         self.export_interval = value; self
     }
@@ -81,9 +81,9 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
         // start the background exporter
         metrics.clone().exporter();
 
-        // return the original as metric interface 
+        // return the original as metric interface
         metrics
-    }   
+    }
 
     // /// build an empty message with current exporter settings
     // fn empty_message(&self) -> Message {
@@ -117,7 +117,7 @@ pub use increment;
 
 /// A wrapper around a Message class that adds periodic backup.
 ///
-/// At the specified interval and (best efforts) program exit, the current message will be 
+/// At the specified interval and (best efforts) program exit, the current message will be
 /// exported to the given channel and reset with the message Default.
 pub struct AutoExportingMetrics<Message: MetricMessage> {
     config: Arc<AutoExportingMetricsBuilder<Message>>,
@@ -146,18 +146,18 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
             if number == 0 {
                 return true
             }
-        } 
+        }
         if let Some(number) = obj.as_u64() {
             if number == 0 {
                 return true
             }
-        } 
+        }
         if let Some(number) = obj.as_f64() {
             if number == 0.0 {
                 return true
             }
-        } 
-        false 
+        }
+        false
     }
 
     fn is_all_zero(&self, obj: &serde_json::Value) -> bool {
@@ -191,7 +191,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
 
             // send the message
             let data = serde_json::to_string(&outgoing)?;
-            let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.channel_name.as_str(), data.as_str())?;                
+            let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.store.pubsub_prefix.clone() + self.config.channel_name.as_str(), data.as_str())?;
         }
         Ok(())
     }
@@ -211,13 +211,13 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
         }
     }
 
-    /// Get a writeable guard holding the message that will next be exported 
+    /// Get a writeable guard holding the message that will next be exported
     /// Rather than using this directly the increment macro can be used
     pub fn lock(&'_ self) -> parking_lot::MutexGuard<'_, Message> {
         self.current.lock()
     }
 
-    /// Replace the current outgoing message with an empty one 
+    /// Replace the current outgoing message with an empty one
     /// returns the replaced message
     pub fn reset(&self) -> Message {
         let mut message: Message = Default::default();
@@ -290,7 +290,7 @@ async fn auto_exporting_counter() {
     // Subscribe on the pubsub being used
     let mut subscribe = connection.subscribe_json::<MetricKind>("test_metrics_channel".to_owned()).await;
 
-    {   
+    {
         info!("Fast export");
         // setup an exporter that sends metrics automatically very fast
         let counter = connection.auto_exporting_metrics::<MetricKind>("test_metrics_channel".to_owned(), "component-x".to_owned())
@@ -304,7 +304,7 @@ async fn auto_exporting_counter() {
         assert_eq!(subscribe.recv().await.unwrap().unwrap(), MetricKind{started: 5, finished: 0});
     }
 
-    {   
+    {
         info!("slow export");
         // setup a slow export
         let counter = connection.auto_exporting_metrics::<MetricKind>("test_metrics_channel".to_owned(), "component-x".to_owned())
@@ -333,14 +333,14 @@ async fn auto_exporting_counter() {
     assert_eq!(result.unwrap().unwrap(), MetricKind{started: 0, finished: 6});
 }
 
-    
+
     // # noinspection PyShadowingNames
     // def test_basic_counters(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.counters import Counters
     //         with Counters('test-counter') as ct:
     //             ct.delete()
-    
+
     //             for x in range(10):
     //                 ct.inc('t1')
     //             for x in range(20):
@@ -354,15 +354,15 @@ async fn auto_exporting_counter() {
     //             ct.reset_queues()
     //             assert ct.get_queues_sizes() == {'test-counter-t1': 0,
     //                                              'test-counter-t2': 0}
-    
-    
+
+
     // # noinspection PyShadowingNames
     // def test_tracked_counters(redis_connection):
     //     if redis_connection:
     //         from assemblyline.remote.datatypes.counters import Counters
     //         with Counters('tracked-test-counter', track_counters=True) as ct:
     //             ct.delete()
-    
+
     //             for x in range(10):
     //                 ct.inc('t1')
     //             for x in range(20):

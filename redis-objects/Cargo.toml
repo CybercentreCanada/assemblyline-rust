@@ -1,6 +1,6 @@
 [package]
 name = "redis-objects"
-version = "1.1.2"
+version = "1.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -8,7 +8,7 @@ homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
 description = """Object oriented wrapper around redis client for the Assemblyline malware analysis platform."""
 
 [dependencies]
-# Async Runtime 
+# Async Runtime
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 
@@ -24,7 +24,7 @@ rand = "0.9"
 tracing = "0.1"
 
 # Redis libraries
-# The versions of these two packages are tied togeather, don't change one without 
+# The versions of these two packages are tied togeather, don't change one without
 # making sure the pool is using the same redis version
 redis = { version = "0.32", features = ["tokio-native-tls-comp", "connection-manager", "keep-alive", "tls"] }
 deadpool-redis = { version = "0.22.0", features = ["serde"] }
