@@ -27,4 +27,15 @@ ENV PYTHONPATH=/usr/local/lib/python3/dist-packages/
 # Build the executable
 RUN cargo build --target-dir /out
 RUN cargo build --release --target-dir /out
+
+# Remove the code so we don't accidentally use it again
+RUN rm Cargo.toml Cargo.lock
+RUN rm -rf ./assemblyline-client
+RUN rm -rf ./assemblyline-filestore
+RUN rm -rf ./assemblyline-markings
+RUN rm -rf ./assemblyline-models
+RUN rm -rf ./assemblyline-server
+RUN rm -rf ./environment_template
+RUN rm -rf ./redis-objects
+
 CMD ["cargo"]
