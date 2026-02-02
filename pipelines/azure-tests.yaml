@@ -1,0 +1,78 @@
+name: tests
+
+trigger: ["*"]
+pr: ["*"]
+
+pool:
+  vmImage: "ubuntu-latest"
+
+# variables:
+#   # Try to checkout the matching branch, if the command fails, don't care.
+#   BRANCH_NAME: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
+
+jobs:
+  - job: test_filestore
+    dependsOn: []
+    displayName: Test Filestore
+    steps:
+      - checkout: self
+      # - script: |
+      #     curl https://sh.rustup.rs -sSf | sh -s -- -y
+      #     echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
+      #   displayName: Install rust
+      - script: |
+          set -e
+          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          (cd assemblyline-filestore; docker compose up -d --wait)
+          docker run -v ${PWD}:/usr/src/ \
+                     --network=host \
+                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     bash -c 'cd assemblyline-filestore; cargo test --target-dir /out'
+        workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
+        displayName: Test Filestore
+  # - job: test_markings
+  #   dependsOn: []
+  #   displayName: Test Markings
+  #   steps:
+  #     - checkout: self
+  #     - script: |
+  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
+  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
+  #       displayName: Install rust
+  #     - script: |
+  #         set -e
+  #         cd assemblyline-markings
+  #         cargo test
+  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
+  #       displayName: Test Markings
+  # - job: test_redis_objects
+  #   dependsOn: []
+  #   displayName: Test Redis Objects
+  #   steps:
+  #     - checkout: self
+  #     - script: |
+  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
+  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
+  #       displayName: Install rust
+  #     - script: |
+  #         set -e
+  #         cd redis-objects
+  #         docker compose up -d --wait
+  #         cargo test
+  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
+  #       displayName: Test Redis Objects
+  # - job: test_environment_template
+  #   dependsOn: []
+  #   displayName: Test Environment Template
+  #   steps:
+  #     - checkout: self
+  #     - script: |
+  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
+  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
+  #       displayName: Install rust
+  #     - script: |
+  #         set -e
+  #         cd environment_template
+  #         cargo test
+  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
+  #       displayName: Test Environment Template

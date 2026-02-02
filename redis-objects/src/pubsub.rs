@@ -25,7 +25,7 @@ impl ListenerBuilder {
         ListenerBuilder { store, channels: vec![], patterns: vec![] }
     }
 
-    /// Subscribe to a fixed channel 
+    /// Subscribe to a fixed channel
     pub fn subscribe(mut self, channel: String) -> Self {
         self.channels.push(channel); self
     }
@@ -63,12 +63,12 @@ impl ListenerBuilder {
                 };
 
                 for channel in &self.channels {
-                    if pubsub.subscribe(channel).await.is_err() {
+                    if pubsub.subscribe(self.store.pubsub_prefix.clone() + channel).await.is_err() {
                         continue 'reconnect;
                     }
                 }
                 for pattern in &self.patterns {
-                    if pubsub.psubscribe(pattern).await.is_err() {
+                    if pubsub.psubscribe(self.store.pubsub_prefix.clone() + pattern).await.is_err() {
                         continue 'reconnect;
                     }
                 }
@@ -76,8 +76,8 @@ impl ListenerBuilder {
 
                 let mut stream = pubsub.on_message();
                 while let Some(message) = stream.next().await {
-                    // if the send fails it means the other end of the channel has dropped 
-                    // and we can stop listening 
+                    // if the send fails it means the other end of the channel has dropped
+                    // and we can stop listening
                     if message_sender.send(Some(message)).await.is_err() {
                         break 'reconnect
                     }
@@ -111,7 +111,7 @@ impl<Message: DeserializeOwned + Send + 'static> JsonListenerBuilder<Message> {
         JsonListenerBuilder { store, channels: vec![], patterns: vec![], _data: Default::default() }
     }
 
-    /// Subscribe to a fixed channel 
+    /// Subscribe to a fixed channel
     pub fn subscribe(mut self, channel: String) -> Self {
         self.channels.push(channel); self
     }
@@ -188,6 +188,6 @@ impl Publisher {
     /// Publish raw data as a pubsub message
     #[instrument(skip(data))]
     pub async fn publish_data(&self, data: &[u8]) -> Result<(), ErrorTypes> {
-        retry_call!(self.store.pool, publish, &self.channel, data)
+        retry_call!(self.store.pool, publish, self.store.pubsub_prefix.clone() + &self.channel, data)
     }
 }

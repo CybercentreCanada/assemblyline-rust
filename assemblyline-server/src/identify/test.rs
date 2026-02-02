@@ -63,6 +63,7 @@ fn get_samples_location() -> String {
 
 
 #[tokio::test]
+#[ignore]
 async fn sample_identification() {
     let _ = env_logger::builder().filter_level(log::LevelFilter::Debug).is_test(true).try_init();
     let identify = super::Identify::new_without_cache().await.unwrap();

@@ -2,8 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-#[cfg(test)]
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,8 +12,6 @@ use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, Watc
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
 use assemblyline_models::types::{JsonMap, ServiceName, Sid};
 use log::{debug, error, info, warn};
-#[cfg(test)]
-use redis_objects::RedisObjects;
 use reqwest::StatusCode;
 use tokio::sync::Mutex;
 
