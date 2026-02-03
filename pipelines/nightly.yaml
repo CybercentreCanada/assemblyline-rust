@@ -21,5 +21,4 @@ jobs:
           set -e
           docker build . -f assemblyline-server/test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker push cccstemp.azurecr.io/assemblyline-rust-builder:latest
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Build and push container
