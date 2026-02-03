@@ -1,4 +1,5 @@
-FROM rust:1.90.0-bookworm AS builder
+ARG build_image=rust:1.90.0-bookworm
+FROM ${build_image} AS builder
 
 # Add more build tools
 RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev libpython3-dev
@@ -18,10 +19,10 @@ COPY ./redis-objects ./redis-objects
 # Build the executable
 RUN cargo build --bin assemblyline-server --release --target-dir /out/
 RUN test -f "/out/release/assemblyline-server"
-RUN ls -lah /out 
+RUN ls -lah /out
 
 # Download python packages we need
-# When changing the python version it needs to be kept in sync between 
+# When changing the python version it needs to be kept in sync between
 #  - the debian image
 #  - pyo3
 #  - the python image here
