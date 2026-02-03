@@ -11,15 +11,30 @@ pool:
 #   BRANCH_NAME: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
 
 jobs:
+  # - job: test_client
+  #   dependsOn: []
+  #   displayName: Test Client
+  #   steps:
+  #     - checkout: self
+  #     - script: |
+  #         set -e
+  #         docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+  #         docker run -v ${PWD}:/usr/src/ \
+  #                    --network=host \
+  #                    cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+  #                    bash -c 'cd assemblyline-client; cargo test --target-dir /out'
+  #       workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+  #       displayName: Test Client
   - job: test_filestore
     dependsOn: []
     displayName: Test Filestore
     steps:
       - checkout: self
-      # - script: |
-      #     curl https://sh.rustup.rs -sSf | sh -s -- -y
-      #     echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
-      #   displayName: Install rust
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
       - script: |
           set -e
           docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
@@ -28,51 +43,97 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd assemblyline-filestore; cargo test --target-dir /out'
-        workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Filestore
-  # - job: test_markings
+  - job: test_markings
+    dependsOn: []
+    displayName: Test Markings
+    steps:
+      - checkout: self
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
+      - script: |
+          set -e
+          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker run -v ${PWD}:/usr/src/ \
+                     --network=host \
+                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     bash -c 'cd assemblyline-markings; cargo test --target-dir /out'
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+        displayName: Test Markings
+  # - job: test_models
   #   dependsOn: []
-  #   displayName: Test Markings
+  #   displayName: Test Models
   #   steps:
   #     - checkout: self
   #     - script: |
-  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
-  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
-  #       displayName: Install rust
-  #     - script: |
   #         set -e
-  #         cd assemblyline-markings
-  #         cargo test
-  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
-  #       displayName: Test Markings
-  # - job: test_redis_objects
-  #   dependsOn: []
-  #   displayName: Test Redis Objects
-  #   steps:
-  #     - checkout: self
-  #     - script: |
-  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
-  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
-  #       displayName: Install rust
-  #     - script: |
-  #         set -e
-  #         cd redis-objects
-  #         docker compose up -d --wait
-  #         cargo test
-  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
-  #       displayName: Test Redis Objects
-  # - job: test_environment_template
-  #   dependsOn: []
-  #   displayName: Test Environment Template
-  #   steps:
-  #     - checkout: self
-  #     - script: |
-  #         curl https://sh.rustup.rs -sSf | sh -s -- -y
-  #         echo "##vso[task.setvariable variable=PATH;]$PATH:$HOME/.cargo/bin"
-  #       displayName: Install rust
-  #     - script: |
-  #         set -e
-  #         cd environment_template
-  #         cargo test
-  #       workingDirectory: $(Pipeline.Workspace)/assemblyline-rust
-  #       displayName: Test Environment Template
+  #         docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+  #         docker run -v ${PWD}:/usr/src/ \
+  #                    --network=host \
+  #                    cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+  #                    bash -c 'cd assemblyline-models; cargo test --target-dir /out'
+  #       workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+  #       displayName: Test Models
+  - job: test_server
+    dependsOn: []
+    displayName: Test Server
+    steps:
+      - checkout: self
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
+      - script: |
+          set -e
+          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          (cd assemblyline-server; docker compose up -d --wait)
+          docker run -v ${PWD}:/usr/src/ \
+                     --network=host \
+                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     bash -c 'cd assemblyline-server; cargo test --target-dir /out'
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+        displayName: Test Server
+  - job: test_environment_template
+    dependsOn: []
+    displayName: Test Environment Template
+    steps:
+      - checkout: self
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
+      - script: |
+          set -e
+          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker run -v ${PWD}:/usr/src/ \
+                     --network=host \
+                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     bash -c 'cd environment_template; cargo test --target-dir /out'
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+        displayName: Test Environment Template
+  - job: test_redis
+    dependsOn: []
+    displayName: Test Redis
+    steps:
+      - checkout: self
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
+      - script: |
+          set -e
+          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          (cd redis-objects; docker compose up -d --wait)
+          docker run -v ${PWD}:/usr/src/ \
+                     --network=host \
+                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     bash -c 'cd redis-objects; cargo test --target-dir /out'
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
+        displayName: Test Redis
