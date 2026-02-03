@@ -1,4 +1,6 @@
 
+# Don't run this on pull requests, just on a schedule
+pr: none
 schedules:
 - cron: '0 0 * * *'
   displayName: Daily midnight build

@@ -23,7 +23,6 @@ jobs:
   #                    --network=host \
   #                    cccstemp.azurecr.io/assemblyline-rust-builder:latest \
   #                    bash -c 'cd assemblyline-client; cargo test --target-dir /out'
-  #       workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
   #       displayName: Test Client
   - job: test_filestore
     dependsOn: []
@@ -43,7 +42,6 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd assemblyline-filestore; cargo test --target-dir /out'
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Filestore
   - job: test_markings
     dependsOn: []
@@ -62,7 +60,6 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd assemblyline-markings; cargo test --target-dir /out'
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Markings
   # - job: test_models
   #   dependsOn: []
@@ -76,7 +73,6 @@ jobs:
   #                    --network=host \
   #                    cccstemp.azurecr.io/assemblyline-rust-builder:latest \
   #                    bash -c 'cd assemblyline-models; cargo test --target-dir /out'
-  #       workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
   #       displayName: Test Models
   - job: test_server
     dependsOn: []
@@ -96,7 +92,6 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd assemblyline-server; cargo test --target-dir /out'
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Server
   - job: test_environment_template
     dependsOn: []
@@ -115,7 +110,6 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd environment_template; cargo test --target-dir /out'
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Environment Template
   - job: test_redis
     dependsOn: []
@@ -135,5 +129,4 @@ jobs:
                      --network=host \
                      cccstemp.azurecr.io/assemblyline-rust-builder:latest \
                      bash -c 'cd redis-objects; cargo test --target-dir /out'
-        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
         displayName: Test Redis
