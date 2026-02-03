@@ -134,6 +134,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 100] = [
     ("shortcut/windows", "^MS Windows shortcut"),
     ("document/email", "Mime entity text"),
     ("document/email", "MIME entity, ASCII text"),
+    ("document/email", "^message/rfc822"),
     ("metadata/sysmon/evt", "MS Windows Vista(-8\\.1)? Event Log"),
     ("metadata/sysmon/evt", "MS Windows 10-11 Event Log"),
     ("metadata/minidump", "Mini DuMP crash report"),
