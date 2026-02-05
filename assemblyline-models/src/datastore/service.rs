@@ -125,7 +125,7 @@ pub enum FetchMethods {
     Get,
     Post,
     Git,
-} 
+}
 
 
 /// Update Source Configuration
@@ -307,7 +307,7 @@ pub struct Service {
     pub rejects: Option<String>,
     /// Should the service be auto-updated?
     #[serde(default)]
-    pub auto_update: bool,
+    pub auto_update: Option<bool>,
     /// Which category does this service belong to?
     #[metadata(store=true, copyto="__text__")]
     #[serde(default="default_category")]
@@ -399,7 +399,7 @@ pub struct Service {
     pub update_channel: ChannelKinds,
     /// Update configuration for fetching external resources
     pub update_config: Option<UpdateConfig>,
-    
+
     /// List of service names/categories where recursion is prevented.
     #[serde(default)]
     pub recursion_prevention: Vec<ServiceName>,
