@@ -9,7 +9,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use redis_objects::quota::UserQuotaTracker;
 use strum::IntoEnumIterator;
 
@@ -27,7 +27,7 @@ use parking_lot::Mutex;
 use rand::Rng;
 use redis_objects::queue::MultiQueue;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::oneshot;
 
 use crate::common::metrics::CPUTracker;
@@ -70,22 +70,35 @@ pub struct IngestTask {
     pub submission: MessageSubmission,
 
     // Information about the ingestion itself, parameters irrelevant
+    #[serde(default)]
     retries: u32,
 
     // Fields added after a submission is complete for notification/bookkeeping processes
 
     /// If the ingestion has failed for some reason, what is it?
+    #[serde(default)]
     failure: String,
     // Score from previous processing of this file
     score: Option<i32>,
     // Status of the extended scan
     extended_scan: ExtendedScanValues,
     // Ingestion Identifier
+    #[serde(deserialize_with="load_id_or_random")]
     ingest_id: Sid,
     // Time at which the file was ingested
+    #[serde(default="chrono::Utc::now")]
     ingest_time: DateTime<Utc>,
     // Time at which the user is notify the submission is finished
+    #[serde(default)]
     notify_time: Option<DateTime<Utc>>,
+}
+
+fn load_id_or_random<'de, D>(deserializer: D) -> Result<Sid, D::Error> where D: Deserializer<'de> {
+    let value = Option::<Sid>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(value) => value,
+        None => rand::random()
+    })
 }
 
 impl IngestTask {
@@ -196,7 +209,7 @@ macro_rules! retry {
             let ingester: Arc<Ingester> = $ingester.clone();
             async move {
                 while let Err(err) = ingester.clone().$method().await {
-                    error!("Error in {name}: {err}");
+                    error!("Error in {name}: {err:?}");
                     ingester.core.sleep(ERROR_BACKOFF).await;
                 }
                 info!("{name} worker stopped");
@@ -410,12 +423,12 @@ impl Ingester {
 
         // try to get a new task
         let mut task = if block_on_redis {
-            match self.unique_queue.blocking_pop(Duration::from_secs(3), false).await? {
+            match self.unique_queue.blocking_pop(Duration::from_secs(3), false).await.context("Popping message from queue")? {
                 Some(task) => Box::new(task),
                 None => return Ok(()),
             }
         } else {
-            match self.unique_queue.pop(1).await?.pop() {
+            match self.unique_queue.pop(1).await.context("Popping message from queue")?.pop() {
                 Some(task) => Box::new(task),
                 None => match self.pop_internal_unique_queue().await {
                     Some(task) => task,

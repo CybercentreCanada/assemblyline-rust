@@ -109,6 +109,13 @@ impl PostprocessAction {
         self.raise_alert = true; self
     }
 
+    pub fn resubmit(mut self, services: &[&str]) -> Self {
+        self.resubmit = Some(ResubmitOptions {
+            additional_services: services.iter().map(|x|ServiceName::from_string(x.to_string())).collect(),
+            random_below: None
+        }); self
+    }
+
     pub fn on_completed(mut self) -> Self {
         self.run_on_completed = true; self
     }
@@ -1007,7 +1014,7 @@ pub struct Plumber {
     /// If task cleanup is enabled what user to use for that task (if not set a user will be created)
     /// The task_cleanup_password must also be set.
     pub task_cleanup_user: Option<String>,
-    /// Password for the task cleanup user, in kubernetes deployments should probably be set to 
+    /// Password for the task cleanup user, in kubernetes deployments should probably be set to
     /// an environment variable defined in coreEnv where the password is being set from a secret.
     pub task_cleanup_password: Option<String>,
 }

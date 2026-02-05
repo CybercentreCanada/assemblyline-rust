@@ -17,6 +17,7 @@ use assemblyline_models::types::{ClassificationString, ExpandingClassification, 
 use itertools::Itertools;
 use log::{debug, error, info};
 use parking_lot::Mutex;
+use redis_objects::Hashmap;
 use serde::Deserialize;
 use sha2::Digest;
 use rand::Rng;
@@ -25,7 +26,7 @@ use tokio::sync::{mpsc, Notify};
 
 use assemblyline_models::messages::submission::{File, Notification, Submission as MessageSubmission};
 
-use crate::constants::{ServiceStage, INGEST_QUEUE_NAME, METRICS_CHANNEL};
+use crate::constants::{CONFIG_HASH_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL, ServiceStage};
 use crate::dispatcher::Dispatcher;
 
 use crate::ingester::{IngestTask, Ingester, SCANNING_TABLE_NAME};
@@ -1428,7 +1429,8 @@ async fn test_filter() {
     context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
 
     let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
-    assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string())
+    assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string());
+    assert_eq!(alert.as_object().unwrap().get("extended_scan").unwrap().as_str().unwrap(), "skipped");
 }
 
 // MARK: tag filter
@@ -1864,4 +1866,70 @@ async fn test_service_cache() {
     context.metrics.assert_metric_zero("service", "cache_miss").await;
 }
 
+// MARK: resubmit
+#[tokio::test(flavor = "multi_thread")]
+async fn test_resubmit() {
+    let context = setup().await;
+    let filter_string = "params.submitter: user";
 
+    {
+        let mut actions: HashMap<String, (_, _)> = Default::default();
+        actions.insert("test_process".to_string(), (
+            SubmissionFilter::new(filter_string).unwrap(),
+            PostprocessAction::new(filter_string.to_string()).enable().alert().resubmit(&["core-a", "core-b"]).on_completed()
+        ));
+
+        *context.dispatcher.postprocess_worker.actions.write().await = Arc::new(actions);
+    }
+
+    let (sha, size) = ready_body(&context.core, json!({})).await;
+    // let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
+    // let (sha, size) = ready_extract(&context.core, &[ready_body(&context.core, json!({})).await.0]).await;
+
+    let sub_message = MessageSubmission::new(rand::rng().random(), chrono::Utc::now(), SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
+            .set_description("file abc123")
+            .set_services_selected(&[])
+            .set_submitter("user")
+            .set_services_selected(&["pre"])
+            .set_groups(&["user"])
+            .set_generate_alert(true))
+        .set_files(vec![File {
+        sha256: sha.clone(),
+        size: Some(size as u64),
+        name: "abc123".to_string()
+        }])
+        .set_notification(Notification {
+            queue: Some("text-filter".to_string()),
+            threshold: None,
+        });
+
+    context.ingest_queue.push(&sub_message).await.unwrap();
+
+    let notification_queue = context.core.notification_queue("text-filter");
+    let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
+
+    let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 1);
+    assert_eq!(sub.errors.len(), 0);
+
+    context.metrics.assert_metrics_at_least("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics_at_least("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+
+    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
+    assert_eq!(alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap(), sub.sid.to_string());
+    assert_eq!(alert.as_object().unwrap().get("extended_scan").unwrap().as_str().unwrap(), "submitted");
+
+    let alert = context.dispatcher.postprocess_worker.alert_queue.pop_timeout(Duration::from_secs(5)).await.unwrap().unwrap();
+    assert_eq!(alert.as_object().unwrap().get("extended_scan").unwrap().as_str().unwrap(), "skipped");
+
+    let sid2 = alert.as_object().unwrap().get("submission").unwrap().as_object().unwrap().get("sid").unwrap().as_str().unwrap();
+    assert_ne!(sub.sid.to_string(), sid2);
+    let sub = context.core.datastore.submission.get(sid2, None).await.unwrap().unwrap();
+    assert_eq!(sub.files.len(), 1);
+    assert_eq!(sub.results.len(), 3);
+    assert_eq!(sub.errors.len(), 0);
+
+    context.metrics.assert_metrics_at_least("ingester", &[("submissions_completed", 1)]).await;
+    context.metrics.assert_metrics_at_least("dispatcher", &[("submissions_completed", 1), ("files_completed", 1)]).await;
+}
