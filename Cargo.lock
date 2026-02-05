@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "assemblyline-models"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "assemblyline-markings 0.1.13",
  "base62",
