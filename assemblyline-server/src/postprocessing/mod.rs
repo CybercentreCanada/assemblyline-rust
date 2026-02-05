@@ -171,7 +171,7 @@ impl ActionWorker {
                 Ok(fltr) => fltr,
                 Err(err) => {
                     error!("Failed to load submission filter: {err}");
-                    continue    
+                    continue
                 }
             };
 
@@ -269,12 +269,7 @@ impl ActionWorker {
         let sid = submission_msg.sid;
 
         // Trigger resubmit
-        let mut extended_scan = if submission_msg.params.psid.is_none() {
-            "skipped"
-        } else {
-            // We are the extended scan
-            "submitted"
-        };
+        let mut extended_scan = "skipped";
         let mut did_resubmit = false;
 
         if let Some(resubmit) = resubmit {
