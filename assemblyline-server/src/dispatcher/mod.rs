@@ -65,9 +65,6 @@ const QUEUE_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 // ERROR_BATCH_SIZE = int(os.environ.get('DISPATCHER_ERROR_BATCH_SIZE', '50'))
 
-
-pub const ERROR_BACKOFF: std::time::Duration = std::time::Duration::from_secs(10);
-
 const DISPATCH_TASK_ASSIGNMENT: &str = "dispatcher-tasks-assigned-to-";
 const TASK_ASSIGNMENT_PATTERN: &str = "dispatcher-tasks-assigned-to-*";
 const DISPATCH_START_EVENTS: &str = "dispatcher-start-events-";
@@ -102,7 +99,6 @@ macro_rules! retry {
             async move {
                 while let Err(err) = dispatcher.clone().$method().await {
                     error!("Error in {name}: {err:?}");
-                    dispatcher.core.sleep(ERROR_BACKOFF).await;
                 }
                 info!("Stopped {name} worker");
             }
