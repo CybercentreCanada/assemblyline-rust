@@ -92,7 +92,9 @@ enum Commands {
 
     },
     ServiceAPI {
-
+        /// If set and no tls configuration is provided revert to http rather than using a self signed certificate
+        #[arg(default_value_t=false)]
+        allow_http_mode: bool
     }
 }
 
@@ -158,8 +160,8 @@ async fn main() -> ExitCode {
         Commands::Plumber {  } => {
             crate::plumber::main(core).await
         }
-        Commands::ServiceAPI { } => {
-            crate::service_api::main(core).await
+        Commands::ServiceAPI { allow_http_mode } => {
+            crate::service_api::main(core, allow_http_mode).await
         }
     };
 

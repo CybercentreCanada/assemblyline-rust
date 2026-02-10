@@ -30,21 +30,31 @@ pub async fn api(core: Arc<Core>) -> Result<impl Endpoint> {
     )
 }
 
-pub async fn main(core: Core) -> Result<()> {
-    // Bind the HTTP interface
-    let bind_address = crate::config::load_bind_address()?;
-    let tls_config = crate::config::TLSConfig::load().await?;
-    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await?;
-    
+pub async fn main(core: Core, allow_http_mode: bool) -> Result<()> {
     // Build the interface
     let running = core.running.clone();
     let core = Arc::new(core);
     let app = api(core).await?;
 
-    // launch the interface
-    Server::new_with_acceptor(tcp)
-        .run_with_graceful_shutdown(app, running.wait_for(false), None)
-        .await?;
+    // Figure out what address to bind
+    let bind_address = crate::config::load_bind_address()?;
+    let tls_config = crate::config::TLSConfig::load().await?;
+
+    if allow_http_mode && tls_config.is_none() {
+        // launch the interface on bare http
+        Server::new(poem::listener::TcpListener::bind(bind_address))
+            .run_with_graceful_shutdown(app, running.wait_for(false), None)
+            .await?;
+    } else {
+        // Bind a TLS socket
+        let acceptor = crate::http::create_tls_binding(bind_address, tls_config).await?;
+
+        // launch the https interface
+        Server::new_with_acceptor(acceptor)
+            .run_with_graceful_shutdown(app, running.wait_for(false), None)
+            .await?;
+    };
+
     Ok(())
 }
 
