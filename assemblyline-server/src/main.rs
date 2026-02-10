@@ -93,7 +93,7 @@ enum Commands {
     },
     ServiceAPI {
         /// If set and no tls configuration is provided revert to http rather than using a self signed certificate
-        #[arg(default_value_t=false)]
+        #[arg(long, default_value_t=false)]
         allow_http_mode: bool
     }
 }
