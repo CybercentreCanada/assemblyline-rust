@@ -17,7 +17,6 @@ use assemblyline_models::types::{ClassificationString, ExpandingClassification, 
 use itertools::Itertools;
 use log::{debug, error, info};
 use parking_lot::Mutex;
-use redis_objects::Hashmap;
 use serde::Deserialize;
 use sha2::Digest;
 use rand::Rng;
@@ -26,7 +25,7 @@ use tokio::sync::{mpsc, Notify};
 
 use assemblyline_models::messages::submission::{File, Notification, Submission as MessageSubmission};
 
-use crate::constants::{CONFIG_HASH_NAME, INGEST_QUEUE_NAME, METRICS_CHANNEL, ServiceStage};
+use crate::constants::{INGEST_QUEUE_NAME, METRICS_CHANNEL, ServiceStage};
 use crate::dispatcher::Dispatcher;
 
 use crate::ingester::{IngestTask, Ingester, SCANNING_TABLE_NAME};
@@ -326,15 +325,15 @@ fn test_services() -> HashMap<ServiceName, Service> {
 
 struct TestContext {
     core: Core,
-    guard: TestGuard,
+    _guard: TestGuard,
     metrics: MetricsWatcher,
     dispatcher: Arc<Dispatcher>,
     ingester: Arc<Ingester>,
     ingest_queue: redis_objects::Queue<MessageSubmission>,
-    components: tokio::task::JoinSet<()>,
+    _components: tokio::task::JoinSet<()>,
     signal: Arc<Notify>,
     services: Vec<Arc<MockService>>,
-    service_server: tokio::task::JoinHandle<()>,
+    _service_server: tokio::task::JoinHandle<()>,
 }
 
 impl TestContext {
@@ -459,13 +458,13 @@ async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
         metrics,
         ingest_queue: core.redis_persistant.queue(INGEST_QUEUE_NAME.to_owned(), None),
         core,
-        guard,
+        _guard: guard,
         dispatcher,
         ingester,
-        components,
+        _components: components,
         signal,
         services,
-        service_server
+        _service_server: service_server,
     }
 }
 
