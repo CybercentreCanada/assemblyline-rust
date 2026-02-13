@@ -372,7 +372,7 @@ impl TaskingClient {
             self.datastore.heuristic.commit(None).await?;
 
             // Notify components watching for heuristic config changes
-            self.redis_volatile.publish_json("heuristics", &HeuristicChange {
+            self.redis_volatile.publish_json("changes.heuristics", &HeuristicChange {
                 operation: Operation::Modified,
                 service_name: service.name
             }).await?;
@@ -384,7 +384,7 @@ impl TaskingClient {
         };
 
         // Notify components watching for service config changes
-        self.redis_volatile.publish_json(&("services.".to_owned() + &service.name), &ServiceChange{
+        self.redis_volatile.publish_json(&("changes.services.".to_owned() + &service.name), &ServiceChange{
             operation: Operation::Added,
             name: service.name,
             reason: Some("register_service".to_owned())
