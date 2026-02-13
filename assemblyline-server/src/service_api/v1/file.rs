@@ -70,9 +70,9 @@ async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo
                 .header("Content-Length", size.to_string())
                 .header("Content-Disposition", format!("attachment; filename=file.bin; filename*={filename}"))
                 .body(body))
-        }, 
+        },
         Err(err) => {
-            error!("[{}] {} couldn't find file {sha256} requested by service: {err}", 
+            error!("[{}] {} couldn't find file {sha256} requested by service: {err}",
                 client_info.client_id, client_info.service_name);
             Err(make_empty_api_error(StatusCode::NOT_FOUND, "The file was not found in the system."))
         }
@@ -100,7 +100,7 @@ async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo
 /// {"success": true}
 #[handler]
 async fn upload_file(
-    client_info: Data<&ClientInfo>, 
+    client_info: Data<&ClientInfo>,
     tasking: Data<&Arc<TaskingClient>>,
     headers: &HeaderMap,
     multipart_body: Option<Multipart>,
@@ -145,15 +145,14 @@ async fn upload_file(
         Err(err) => return Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("Could not move file to temporary storage: {err}"))),
     };
 
-    let upload_result = tasking.upload_file(temp_file.path(), classification, ttl, is_section_image, is_supplementary, Some(sha256.to_owned())).await;
+    let upload_result = tasking.upload_file(temp_file.path(), classification, ttl, is_section_image, is_supplementary, sha256).await;
 
     if let Err(err) = upload_result {
         warn!("{} - {}: {err}", client_info.client_id, client_info.service_name);
         return Err(make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({"success": false})));
     }
 
-    info!("{} - {}: Successfully uploaded file (SHA256: {sha256})", 
-        client_info.client_id, client_info.service_name);
+    info!("{} - {}: Successfully uploaded file (SHA256: {sha256})", client_info.client_id, client_info.service_name);
 
     return Ok(make_api_response(json!({"success": true})))
 }
