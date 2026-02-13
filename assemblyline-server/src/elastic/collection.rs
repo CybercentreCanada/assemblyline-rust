@@ -946,7 +946,7 @@ pub enum InvalidOperationError {
     Value { field: String, value: String, kind: String }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct OperationBatch {
     operations: Vec<(UpdateOperation, String, serde_json::Value)>,
 }

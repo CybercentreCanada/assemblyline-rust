@@ -50,7 +50,7 @@ use crate::Core;
 //     use crate::constants::METRICS_CHANNEL;
 
 
- 
+
 // }
 
 
@@ -86,10 +86,10 @@ impl TaskingClient {
         // # If we're performing service registration, we only need a connection to the datastore
         // if not register_only:
         // self.dispatch_client = DispatchClient(self.datastore, redis=redis, redis_persist=redis_persist)
-        
+
         // self.reload_heuristics({})
-        
-        
+
+
         let mut event_listener = core.redis_volatile.pubsub_json_listener::<JsonMap>()
             .subscribe("changes.heuristics".to_owned())
             .listen().await;
@@ -102,7 +102,7 @@ impl TaskingClient {
         tokio::spawn({
             let datastore = core.datastore.clone();
             let heuristics = heuristics.clone();
-            
+
             async move {
                 while Arc::strong_count(&heuristics) > 1 {
                     let message = match event_listener.recv().await {
@@ -142,13 +142,13 @@ impl TaskingClient {
                     }
                 }
             }
-        });   
+        });
 
         Ok(Self {
             config: core.config.clone(),
             redis_volatile: core.redis_volatile.clone(),
             redis_metrics: core.redis_metrics.clone(),
-            identify: core.identify.clone(),            
+            identify: core.identify.clone(),
             datastore: core.datastore.clone(),
             filestore: core.filestore.clone(),
             classification_engine: core.classification_parser.clone(),
@@ -162,17 +162,15 @@ impl TaskingClient {
         })
     }
 
-    pub async fn upload_file(&self, file: &Path, classification: &str, ttl: u32, is_section_image: bool, is_supplementary: bool, expected_sha256: Option<String>) -> Result<()> {
+    pub async fn upload_file(&self, file: &Path, classification: &str, ttl: u32, is_section_image: bool, is_supplementary: bool, expected_sha256: &str) -> Result<()> {
         // Identify the file info of the uploaded file
         let file_info = self.identify.fileinfo(file.to_path_buf(), true, None, None).await?;
 
         let sha256 = match &file_info.sha256 {
             Some(generated) => {
-                if let Some(expected) = expected_sha256 {
-                    if generated.to_string() != expected {
-                        bail!("Uploaded file does not match expected file hash. [{generated} != {expected}]")
-                    }
-                };
+                if generated.to_string() != expected_sha256 {
+                    bail!("Uploaded file does not match expected file hash. [{generated} != {expected_sha256}]")
+                }
                 generated.clone()
             },
             None => bail!("Expected hash not found"),
@@ -216,7 +214,7 @@ impl TaskingClient {
         if !service_data.contains_key("default_result_classification") {
             service_data.insert("default_result_classification".to_string(), json!(self.classification_engine.unrestricted()));
         }
-        
+
         // Get heuristics list
         let heuristics = service_data.remove("heuristics");
 
@@ -336,7 +334,7 @@ impl TaskingClient {
                         if !heuristic.contains_key("classification") {
                             heuristic.insert("classification".to_string(), json!(ce.unrestricted()));
                         }
-                
+
                     } else {
                         return Err(RegisterError::Formatting("Heuristic data must be an object".to_string()))
                     }
@@ -391,8 +389,8 @@ impl TaskingClient {
         }).await?;
 
         Ok(RegisterResponse{
-            keep_alive, 
-            new_heuristics, 
+            keep_alive,
+            new_heuristics,
             service_config
         })
     }
@@ -418,7 +416,7 @@ fn fix_docker_config(docker_config: &mut JsonMap, registry_type: &Value) -> serd
     if !docker_config.contains_key("registry_type") {
         docker_config.insert("registry_type".to_owned(), registry_type.clone());
     }
-    
+
     if let Some(Value::Array(env)) = docker_config.get_mut("environment") {
         for row in env {
             if let Some(row) = row.as_object_mut() {
@@ -472,7 +470,7 @@ impl From<serde_json::Error> for RegisterError {
     fn from(value: serde_json::Error) -> Self {
         Self::Formatting(value.to_string())
     }
-} 
+}
 
 impl From<crate::elastic::error::ElasticError> for RegisterError {
     fn from(value: crate::elastic::error::ElasticError) -> Self {
@@ -482,7 +480,7 @@ impl From<crate::elastic::error::ElasticError> for RegisterError {
             Self::Other(Box::new(value))
         }
     }
-} 
+}
 
 impl From<redis_objects::ErrorTypes> for RegisterError {
     fn from(value: redis_objects::ErrorTypes) -> Self {
@@ -492,7 +490,7 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
             Self::Other(Box::new(value))
         }
     }
-} 
+}
 
 impl TaskingClient {
     pub async fn get_task(&self, client_id: &str, service_name: ServiceName, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
@@ -514,11 +512,11 @@ impl TaskingClient {
 
         // Getting a new task
         let task = self.dispatch_client.request_work(
-            client_id, 
-            service_name, 
-            service_version, 
-            Some(timeout), 
-            true, 
+            client_id,
+            service_name,
+            service_version,
+            Some(timeout),
+            true,
             Some(false)
         ).await?;
         let task = match task {
@@ -592,9 +590,9 @@ impl TaskingClient {
             // Freshen the files
             for sha256 in freshen_hashes {
                 self.datastore.save_or_freshen_file(
-                    &sha256, 
-                    Default::default(), 
-                    result.expiry_ts, 
+                    &sha256,
+                    Default::default(),
+                    result.expiry_ts,
                     result.classification.as_str().to_owned(),
                     &self.classification_engine
                 ).await?;
@@ -696,7 +694,7 @@ impl TaskingClient {
                 let task = finish_parsing_task(task)?;
                 // let error = service_task['error']
                 self._handle_task_error(exec_time, task, error, client_id, service_name).await?;
-                return Ok(json!({"success": true}))    
+                return Ok(json!({"success": true}))
             },
             FinishedBody::Other { content } => {
                 error!("Malformed task result: {}", serde_json::to_string(&content)?);
@@ -718,10 +716,10 @@ impl TaskingClient {
         }
     }
 
-    async fn _handle_task_result(&self, 
-        task: Task, 
+    async fn _handle_task_result(&self,
+        task: Task,
         success: Box<TaskSuccess>,
-        client_id: &str, 
+        client_id: &str,
         service_name: ServiceName,
     ) -> Result<Vec<Sha256>> {
         let sid = task.sid;
@@ -742,9 +740,9 @@ impl TaskingClient {
         let metric_factory = self.get_metrics_factory(service_name);
 
         async fn freshen_file(
-            datastore: Arc<Elastic>, 
-            cl_engine: Arc<ClassificationParser>, 
-            mut file_info: assemblyline_models::datastore::file::File, 
+            datastore: Arc<Elastic>,
+            cl_engine: Arc<ClassificationParser>,
+            mut file_info: assemblyline_models::datastore::file::File,
             item: assemblyline_models::datastore::result::File,
             is_supplementary: bool,
         ) -> Result<()> {
@@ -752,15 +750,15 @@ impl TaskingClient {
             file_info.archive_ts = None;
             file_info.is_section_image |= item.is_section_image;
             file_info.is_supplementary |= is_supplementary;
-            
+
             let Value::Object(info) = serde_json::to_value(&file_info).context("freshen_file::to_value")? else {
                 bail!("Object must serialize to object");
             };
-    
+
             datastore.save_or_freshen_file(
-                &item.sha256, 
+                &item.sha256,
                 info,
-                file_info.expiry_ts, 
+                file_info.expiry_ts,
                 file_info.classification.as_str().to_owned(),
                 &cl_engine,
             ).await.context("save_or_freshen_file")?;
@@ -873,7 +871,7 @@ impl TaskingClient {
                                 None => {
                                     all_dropped_tags.push((tag_key, tag_value))
                                 },
-                            }                            
+                            }
                         }
                     },
                     Err(err) => {
@@ -924,7 +922,7 @@ impl TaskingClient {
             }
 
             if !big_temp_data.is_empty() {
-                warn!("[{sid}] The following temporary submission keys were ignored because they are bigger then the maximum data size allowed [{}]: {}", 
+                warn!("[{sid}] The following temporary submission keys were ignored because they are bigger then the maximum data size allowed [{}]: {}",
                       self.config.submission.max_temp_data_length, big_temp_data.join(" | "));
             }
         }
@@ -999,7 +997,7 @@ impl TaskingClient {
                 .map(|(key, value)| key + "=" + &value)
                 .join(" | ");
 
-            warn!("[{sid}] Invalid tag data from {service_name}: {error_message}");
+            debug!("[{sid}] Invalid tag data from {service_name}: {error_message}");
 
             let error = Error::from_result(&result)
                 .status(Status::FailRecoverable)
@@ -1043,11 +1041,11 @@ impl TaskingClient {
     }
 
     async fn _handle_task_error(
-        &self, 
-        exec_time: u64, 
-        task: Task, 
+        &self,
+        exec_time: u64,
+        task: Task,
         mut error: assemblyline_models::datastore::error::Error,
-        client_id: &str, 
+        client_id: &str,
         service_name: ServiceName,
     ) -> Result<()> {
         info!("[{}] {client_id} - {service_name} failed to complete task in {exec_time}ms", task.sid);
