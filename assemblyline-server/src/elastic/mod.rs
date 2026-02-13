@@ -1254,7 +1254,14 @@ impl Elastic {
                         None
                     )?;
 
-                    if classification == server_classification {
+                    let uri_info_match = if let Some(uri_info) = fileinfo.remove("uri_info") {
+                        let info: assemblyline_models::datastore::file::URIInfo = serde_json::from_value(uri_info)?;
+                        current_fileinfo.uri_info == Some(info)
+                    } else {
+                        current_fileinfo.uri_info.is_none()
+                    };
+
+                    if classification == server_classification && uri_info_match {
 
                         let mut batch = OperationBatch::default();
 
@@ -1285,7 +1292,7 @@ impl Elastic {
                             }
                         }
                     } else {
-                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}");
+                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}, url info match {url_info_match}");
                     }
 
                     let value = serde_json::to_value(current_fileinfo)?;
