@@ -83,6 +83,7 @@ const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
 // MAX_RESULT_BUFFER = 64
 // RESULT_THREADS = max(1, int(os.getenv('DISPATCHER_RESULT_THREADS', '2')))
 // FINALIZE_THREADS = max(1, int(os.getenv('DISPATCHER_FINALIZE_THREADS', '2')))
+const DEFAULT_PULL_SUBMISSION_THREADS: u32 = 4;
 
 // After 20 minutes, check if a submission is still making progress.
 // In the case of a crash somewhere else in the system, we may not have
@@ -907,8 +908,14 @@ impl Dispatcher {
     pub fn start(self: &Arc<Self>, components: &mut tokio::task::JoinSet<()>) {
         components.spawn(self.clone().on_terminate());
 
-        // Pull in new submissions
-        components.spawn(retry!("Pull Submissions", self, pull_submissions));
+        // Pull in new submissions, make sure there is at least one thread
+        let pull_threads: u32 = match std::env::var("PULL_SUBMISSION_THREADS") {
+            Ok(value) => value.parse().unwrap_or(DEFAULT_PULL_SUBMISSION_THREADS),
+            Err(_) => DEFAULT_PULL_SUBMISSION_THREADS,
+        };
+        for thread_number in 0..pull_threads.max(1) {
+            components.spawn(retry!(format!("Pull Submissions {thread_number}"), self, pull_submissions));
+        }
 
         // pull start messages
         components.spawn(retry!("Pull Service Start", self, pull_service_starts));
