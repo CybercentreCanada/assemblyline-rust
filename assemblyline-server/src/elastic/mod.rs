@@ -1292,7 +1292,7 @@ impl Elastic {
                             }
                         }
                     } else {
-                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}, url info match {url_info_match}");
+                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}, url info match {uri_info_match}");
                     }
 
                     let value = serde_json::to_value(current_fileinfo)?;
