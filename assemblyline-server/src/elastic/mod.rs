@@ -96,7 +96,7 @@ fn strip_nulls(d: serde_json::Value) -> serde_json::Value {
                 if value.is_null() { continue }
                 out.insert(key, strip_nulls(value));
             }
-            json!(out)    
+            json!(out)
         },
         value => value
     }
@@ -157,9 +157,9 @@ fn recursive_update(mut d: serde_json::Value, u: serde_json::Value, stop_keys: O
                 if v.is_object() && allow_recursion {
                     let old_value = d.remove(&k).unwrap_or_else(|| serde_json::Value::Object(Default::default()));
                     let new_value = recursive_update(
-                        old_value, 
-                        v, 
-                        Some(stop_keys), 
+                        old_value,
+                        v,
+                        Some(stop_keys),
                         Some(!stop_keys.contains(&k.as_str()))
                     );
                     d.insert(k, new_value);
@@ -572,7 +572,7 @@ impl ElasticHelper {
         // At this point we have a response from the server, but it may be describing an error.
         let status = response.status();
         // debug!("elastic response status: {status}");
-        
+
         // handle non-errors
         if status.is_success() {
             return Ok(Some(response))
@@ -602,7 +602,7 @@ impl ElasticHelper {
                             index: index.to_string(),
                             id: doc.to_string(),
                         }.into())
-                    } 
+                    }
                     return Err(ElasticErrorInner::IndexNotFound(index.to_string()).into());
                 }
             }
@@ -631,7 +631,7 @@ impl ElasticHelper {
                         index: body._index,
                         id: body._id,
                     }.into())
-                }    
+                }
             }
 
             #[derive(Deserialize)]
@@ -654,7 +654,7 @@ impl ElasticHelper {
                 // "index_uuid": "_na_",
             }
 
-            // Response we might get for missing indices 
+            // Response we might get for missing indices
             #[derive(Deserialize)]
             struct IndexNotFoundResponse<'a> {
                 #[serde(borrow = "'a")]
@@ -665,7 +665,7 @@ impl ElasticHelper {
             if let Ok(body) = serde_json::from_slice::<IndexNotFoundResponse>(&body) {
                 if body.error.r#type == "index_not_found_exception" {
                     return Err(ElasticErrorInner::IndexNotFound(body.error.index.to_string()).into())
-                }    
+                }
             }
 
         } else if StatusCode::CONFLICT == status {
@@ -722,7 +722,7 @@ impl ElasticHelper {
         //     error!("Server error in datastore: {body}");
         //     let delay = MAX_RETRY_DELAY.min(Duration::from_secs_f64((*attempt as f64).powf(2.0)/5.0));
         //     tokio::time::sleep(delay).await;
-        //     return Ok(None)                        
+        //     return Ok(None)
         // } else if status.is_client_error() {
         //     let path = response.url().path().to_owned();
         //     let body = response.text().await.unwrap_or(status.to_string());
@@ -749,7 +749,7 @@ impl ElasticHelper {
                 Some(response) => return Ok(response),
                 None => continue,
             }
-        }     
+        }
     }
 
     /// start an http request with a json body
@@ -762,13 +762,13 @@ impl ElasticHelper {
             let result = self.client.request(request.method.clone(), request.url.clone())
                 .json(body)
                 .send().await;
-            
+
             // Handle connection errors with a retry, let other non http errors bubble up
             match Self::handle_result(attempt, request, result).await? {
                 Some(response) => return Ok(response),
                 None => continue,
             }
-        }     
+        }
     }
 
     /// start an http request with a binary body
@@ -783,13 +783,13 @@ impl ElasticHelper {
                 .header("Content-Type", "application/x-ndjson")
                 .body(body.to_owned())
                 .send().await;
-            
+
             // Handle connection errors with a retry, let other non http errors bubble up
             match Self::handle_result(attempt, request, result).await? {
                 Some(response) => return Ok(response),
                 None => continue,
             }
-        }     
+        }
     }
 
     /// checking if an index of the given name exists
@@ -829,7 +829,7 @@ impl ElasticHelper {
     fn get_index_settings(&self, index: &str, archive: bool) -> serde_json::Value {
         default_settings(json!({
             "number_of_shards": index_shards(index, archive), // self.shards if not archive else self.archive_shards,
-            "number_of_replicas": index_replicas(index, archive), // self.replicas if not archive else self.archive_replicas    
+            "number_of_replicas": index_replicas(index, archive), // self.replicas if not archive else self.archive_replicas
         }))
     }
 
@@ -850,7 +850,7 @@ impl ElasticHelper {
                 Err(error)
             }
         }
-    } 
+    }
 
     // retry_function=None
     #[instrument]
@@ -883,7 +883,7 @@ impl ElasticHelper {
         let response = self.make_request(&mut 0, &request).await?;
         let body: DescribeIndex = response.json().await?;
         Ok(body.indices.into_keys().collect())
-    } 
+    }
 }
 
 
@@ -1051,7 +1051,7 @@ impl Elastic {
     #[instrument]
     pub async fn list_indices(&self) -> Result<Vec<String>> {
         self.es.list_indices(&self.prefix).await
-    } 
+    }
 
     #[cfg(test)]
     pub async fn wipe_all(&self) -> Result<()> {
@@ -1059,7 +1059,7 @@ impl Elastic {
             self.es.remove_index(&index).await?;
         }
         Ok(())
-    } 
+    }
 
     pub async fn switch_to_user(&self, username: &str, password: &str) -> Result<Arc<Elastic>> {
         // Modify the client details for next reconnect
@@ -1088,8 +1088,8 @@ impl Elastic {
             let request = Request::put_role(&self.es.host, "manage_tasks")?;
             self.es.make_request_json(&mut 0, &request, &json!({
                 "indices": [{
-                    "names": [".tasks"], 
-                    "privileges": ["all"], 
+                    "names": [".tasks"],
+                    "privileges": ["all"],
                     "allow_restricted_indices": true,
                 }]
             })).await?;
@@ -1200,9 +1200,9 @@ impl Elastic {
         for (key, delta) in service_keys.into_iter().zip(service_deltas) {
             if let Some(data) = service_data.remove(&key) {
                 let data = recursive_update(
-                    strip_nulls(json!(data)), 
-                    strip_nulls(json!(delta)), 
-                    Some(&["config"]), 
+                    strip_nulls(json!(data)),
+                    strip_nulls(json!(delta)),
+                    Some(&["config"]),
                     None
                 );
                 let error_string = format!("Could not convert json into service: {data}");
@@ -1254,8 +1254,15 @@ impl Elastic {
                         None
                     )?;
 
-                    if classification == server_classification {
-                        
+                    let uri_info_match = if let Some(uri_info) = fileinfo.remove("uri_info") {
+                        let info: assemblyline_models::datastore::file::URIInfo = serde_json::from_value(uri_info)?;
+                        current_fileinfo.uri_info == Some(info)
+                    } else {
+                        current_fileinfo.uri_info.is_none()
+                    };
+
+                    if classification == server_classification && uri_info_match {
+
                         let mut batch = OperationBatch::default();
 
                         for (key, value) in &fileinfo {
@@ -1268,24 +1275,24 @@ impl Elastic {
                         if current_fileinfo.expiry_ts.is_some() {
                             if let Some(expiry) = expiry {
                                 batch.max("expiry_ts".to_owned(), json!(expiry.to_rfc3339()));
-                            } 
+                            }
                         }
-                        
+
                         attempts += 1;
-                        match self.file.update(sha256, batch, None, Some(8)).await {
+                        match self.file.update(sha256, batch.clone(), None, Some(8)).await {
                             Ok(true) => {
                                 debug!("freshened via fast call");
                                 return Ok(attempts)
                             },
                             Ok(false) => {
-                                warn!("fast save_or_freshen failed");
+                                debug!("fast save_or_freshen failed");
                             },
                             Err(err) => {
-                                error!("fast save_or_freshen failed: {err:?}");
+                                error!("fast save_or_freshen [{sha256}] failed: {err:?}; {:?}", batch);
                             }
                         }
                     } else {
-                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}");
+                        debug!("Skipping fast save_or_freshen {classification} != {server_classification}, url info match {uri_info_match}");
                     }
 
                     let value = serde_json::to_value(current_fileinfo)?;
@@ -1304,7 +1311,7 @@ impl Elastic {
                     current_fileinfo.insert("expiry_ts".to_owned(), serde_json::Value::Null);
                 }
             }
-                
+
             // Add new fileinfo to current from database
             current_fileinfo.append(&mut fileinfo);
 
