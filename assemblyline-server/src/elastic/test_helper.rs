@@ -3,10 +3,11 @@ use std::sync::Arc;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ready_classification;
 use assemblyline_models::datastore::{File, Service};
-use assemblyline_models::types::{ServiceName, Sha256};
+use assemblyline_models::types::{JsonMap, ServiceName, Sha256};
 use log::debug;
 use rand::Rng;
 
+use crate::Core;
 use crate::elastic::create_empty_result_from_key;
 
 use super::Elastic;
@@ -24,15 +25,11 @@ fn create_service(name: &str) -> Service {
     })).unwrap()
 }
 
-async fn init() -> Arc<Elastic> {
-    let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
-    let prefix = rand::rng().random::<u128>().to_string();
-    Elastic::connect("http://elastic:devpass@localhost:9200", false, None, false, &prefix).await.unwrap()
-}
 
 #[tokio::test]
 async fn list_services() {
-    let elastic = init().await;
+    let (core, _redis_lock) = Core::test_setup().await;
+    let elastic = core.datastore.clone();
     use serde_json::json;
     // connect to database
 
@@ -85,16 +82,21 @@ async fn list_services() {
     }
 }
 
+
+
+
+
 #[tokio::test]
 async fn test_save_or_freshen_file() {
-    let ds = init().await;
+    let (core, _redis_lock) = Core::test_setup().await;
+    let ds = core.datastore.clone();
 
     let classification = assemblyline_markings::classification::sample_config();
     let ce = Arc::new(assemblyline_markings::classification::ClassificationParser::new(classification).unwrap());
     assemblyline_models::types::classification::set_global_classification(ce.clone());
 
     // Generate random data
-    let mut data: Vec<u8> = vec![]; 
+    let mut data: Vec<u8> = vec![];
     for _ in 0..64 {
         data.extend(b"asfd");
     }
@@ -149,6 +151,188 @@ async fn test_save_or_freshen_file() {
     assert!(freshened_file.seen.first < freshened_file.seen.last);
     assert_eq!(freshened_file.classification, ce.unrestricted());
 }
+
+
+
+
+#[tokio::test]
+async fn test_get_service_with_delta_handle_nulls() {
+
+    // When service api returns service information, it removes all null values from service and service_delta object
+    // before service_delta is applied to the service object and returned.
+    // This test documents and checks that strips nulls behaves correctly and consistently.
+    // Notably, the null objects are still stored in elasticsearch
+    // but they are ignored and removed in the get_service_with delta function
+
+
+    // connect to database and create new elastic index
+    let (core, _redis_lock) = Core::test_setup().await;
+    let elastic = core.datastore.clone();
+    use serde_json::json;
+
+    // create base service
+    let mut test_service = create_service("servicea");
+
+    // get_service_with_delta strips null when we try to grab the setting so c2 is removed
+    // by get_service_with_delta
+    test_service.config = serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": "r2_value",
+        "r3": {
+            "c1": "c1_value",
+            "c2": null
+        }
+    })).unwrap();
+
+    // when we save service to elasticsearch, we also save a initial version of service_delta
+    elastic.service.save(&test_service.key(), &test_service, None, None).await.unwrap();
+    elastic.service_delta.save_json(&test_service.name, &mut [("version".to_owned(), json!(test_service.version))].into_iter().collect(), None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+
+    {
+        let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+        let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+            "r1": "r1_value",
+            "r2": "r2_value",
+            "r3": {
+                "c1": "c1_value",
+            }
+        })).unwrap();
+
+        assert_eq!(cur_service.config, expected_config, "Original Service configuration should not change.");
+
+    }
+
+    {
+    let mut delta = elastic.service_delta.get(&test_service.name, None).await.unwrap().unwrap();
+
+
+    // when we have service_delta with a key value pair, the specific value gets replaced
+    delta.config =  serde_json::from_value(serde_json::json!({
+        "r1": "TEST1"
+    })).unwrap();
+
+    elastic.service_delta.save(&test_service.name, &delta, None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+
+    let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+    let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+        "r1": "TEST1",
+        "r2": "r2_value",
+        "r3": {
+            "c1": "c1_value",
+        }
+    })).unwrap();
+
+    assert_eq!(cur_service.config, expected_config);
+
+    }
+
+    {
+    let mut delta = elastic.service_delta.get(&test_service.name, None).await.unwrap().unwrap();
+
+    // this delta will change nothing of the original configuration.
+    // r2 = null in delta means that it will do nothing to the original
+    delta.config =  serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": null,
+    })).unwrap();
+
+    elastic.service_delta.save(&test_service.name, &delta, None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+
+    let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+    let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": "r2_value",
+        "r3": {
+            "c1": "c1_value",
+        }
+    })).unwrap();
+
+    assert_eq!(cur_service.config, expected_config);
+
+    }
+
+    {
+    let mut delta = elastic.service_delta.get(&test_service.name, None).await.unwrap().unwrap();
+
+    // strip nulls in this case removes c1 and c2 because these two keys have null value
+    // however, r3 = {} will be applied to the original configuration
+    delta.config =  serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r3": {
+            "c1": null,
+            "c2": null
+        }
+    })).unwrap();
+
+    elastic.service_delta.save(&test_service.name, &delta, None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+    let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+    let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": "r2_value",
+        "r3": {}
+    })).unwrap();
+
+    assert_eq!(cur_service.config, expected_config);
+
+    }
+
+    {
+    let mut delta = elastic.service_delta.get(&test_service.name, None).await.unwrap().unwrap();
+
+    // strip nulls in this case will change r3 to the empty object {}
+    delta.config =  serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r3": {}
+    })).unwrap();
+
+    elastic.service_delta.save(&test_service.name, &delta, None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+    let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+    let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": "r2_value",
+        "r3": {}
+    })).unwrap();
+
+    assert_eq!(cur_service.config, expected_config);
+    }
+
+    {
+    let mut delta = elastic.service_delta.get(&test_service.name, None).await.unwrap().unwrap();
+
+
+    // strip nulls in this case will not add the new key r4 because it has a null value
+    delta.config =  serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r4": null
+    })).unwrap();
+
+    elastic.service_delta.save(&test_service.name, &delta, None, None).await.unwrap();
+    elastic.service_delta.commit(None).await.unwrap();
+    let cur_service = elastic.get_service_with_delta(&test_service.name, None).await.unwrap().unwrap();
+
+    let expected_config: JsonMap  = serde_json::from_value(serde_json::json!({
+        "r1": "r1_value",
+        "r2": "r2_value",
+        "r3": {
+            "c1": "c1_value",
+        }
+    })).unwrap();
+
+    assert_eq!(cur_service.config, expected_config);
+    }
+
+}
+
 
 // import hashlib
 // from assemblyline.common.isotime import now_as_iso
@@ -256,9 +440,9 @@ async fn test_create_empty_result() {
 
     // Build result key
     let result_key = assemblyline_models::datastore::Result::help_build_key(
-        &sha256, 
-        &svc_name, 
-        svc_version, 
+        &sha256,
+        &svc_name,
+        svc_version,
         true,
         false,
         None,
@@ -679,4 +863,3 @@ async fn test_create_empty_result() {
 
 //     # Confirm that user switch did happen
 //     assert list(ds.ds.client.security.get_user().keys()) != ["plumber"]
-
