@@ -191,7 +191,7 @@ pub struct UpdateSource {
     /// Update check interval, in seconds, for this source
     #[serde(default)]
     #[metadata(mapping="integer")]
-    update_interval: Option<NonZeroInteger>,
+    pub update_interval: Option<NonZeroInteger>,
     /// Ignore source caching and forcefully fetch from source
     #[serde(default)]
     pub ignore_cache: bool,
@@ -220,6 +220,7 @@ pub struct UpdateConfig {
     #[serde(default="default_signature_delimiter")]
     pub signature_delimiter: SignatureDelimiter,
     /// Custom delimiter definition
+    #[serde(default)]
     pub custom_delimiter: Option<String>,
     /// Default pattern used for matching files
     #[serde(default="default_default_pattern")]
