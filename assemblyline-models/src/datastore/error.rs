@@ -309,10 +309,3 @@ pub mod builder {
     }
 
 }
-
-
-#[test]
-fn severity_stored() {
-    let mapping = crate::meta::build_mapping::<Error>().unwrap();
-    println!("{mapping:#?}");
-}
