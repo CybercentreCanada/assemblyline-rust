@@ -197,13 +197,13 @@ impl Error {
             archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts: context.expiry_ts,
-            response: Response { 
-                message: Text("".to_owned()), 
-                service_debug_info: None, 
-                service_name: "".into(), 
-                service_tool_version: None, 
-                service_version: "".to_owned(), 
-                status: Status::FailNonrecoverable 
+            response: Response {
+                message: Text("".to_owned()),
+                service_debug_info: None,
+                service_name: "".into(),
+                service_tool_version: None,
+                service_version: "".to_owned(),
+                status: Status::FailNonrecoverable
             },
             sha256: context.files[0].sha256.clone(),
             error_type: ErrorTypes::Exception,
@@ -216,13 +216,13 @@ impl Error {
             archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts: if context.ttl > 0 { Some(Utc::now() + TimeDelta::days(context.ttl as i64)) } else { None },
-            response: Response { 
-                message: Text("".to_owned()), 
-                service_debug_info: None, 
-                service_name: context.service_name, 
-                service_tool_version: None, 
-                service_version: "0".to_owned(), 
-                status: Status::FailNonrecoverable 
+            response: Response {
+                message: Text("".to_owned()),
+                service_debug_info: None,
+                service_name: context.service_name,
+                service_tool_version: None,
+                service_version: "0".to_owned(),
+                status: Status::FailNonrecoverable
             },
             sha256: context.fileinfo.sha256.clone(),
             error_type: ErrorTypes::Exception,
@@ -235,13 +235,13 @@ impl Error {
             archive_ts: None,
             created: chrono::Utc::now(),
             expiry_ts: context.expiry_ts,
-            response: Response { 
-                message: Text("".to_owned()), 
-                service_debug_info: context.response.service_debug_info.clone(), 
-                service_name: context.response.service_name, 
-                service_tool_version: context.response.service_tool_version.clone(), 
-                service_version: context.response.service_version.clone(), 
-                status: Status::FailNonrecoverable 
+            response: Response {
+                message: Text("".to_owned()),
+                service_debug_info: context.response.service_debug_info.clone(),
+                service_name: context.response.service_name,
+                service_tool_version: context.response.service_tool_version.clone(),
+                service_version: context.response.service_version.clone(),
+                status: Status::FailNonrecoverable
             },
             sha256: context.sha256.clone(),
             error_type: ErrorTypes::Exception,
