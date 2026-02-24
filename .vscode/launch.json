@@ -1,0 +1,50 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "[RUST] Run Dispatcher",
+      "request": "launch",
+      "type": "lldb",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/assemblyline-rust/assemblyline-server/.bin/debug/assemblyline-server",
+      "args": ["dispatcher"],
+      "sourceLanguages": [
+        "rust"
+      ],
+      "env": {
+        "BIND_ADDRESS": "0.0.0.0:5004",
+      },
+      "console": "internalConsole"
+    },
+    {
+      "name": "[RUST] Run Ingester",
+      "request": "launch",
+      "type": "lldb",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/assemblyline-rust/assemblyline-server/.bin/debug/assemblyline-server",
+      "args": ["ingester"],
+      "sourceLanguages": [
+        "rust"
+      ],
+      "env": {
+        "BIND_ADDRESS": "0.0.0.0:5005",
+      },
+      "console": "internalConsole"
+    },
+        {
+      "name": "[RUST] Run Service Server",
+      "request": "launch",
+      "type": "lldb",
+      "cwd": "${workspaceFolder}",
+      "program": "${workspaceFolder}/assemblyline-rust/assemblyline-server/.bin/debug/assemblyline-server",
+      "args": ["service-api"],
+      "sourceLanguages": [
+        "rust"
+      ],
+      "env": {
+        "BIND_ADDRESS": "127.0.0.1:5003",
+      },
+      "console": "internalConsole"
+    }
+  ]
+}

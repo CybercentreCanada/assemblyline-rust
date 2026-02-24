@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "[RUST] cargo build al-server bin",
+            "type": "shell",
+            "command": "cargo build --target-dir .bin",
+            "options": {
+                "cwd": "${workspaceFolder}/assemblyline-rust/assemblyline-server"
+            }
+        },
+                {
+            "label": "[RUST] cargo clean  al-server",
+            "type": "shell",
+            "command": "cargo clean --target-dir .bin",
+            "options": {
+                "cwd": "${workspaceFolder}/assemblyline-rust/assemblyline-server"
+            }
+        },
+    ]
+}
