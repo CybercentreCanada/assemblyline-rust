@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::{Serialize, Deserialize};
 use assemblyline_markings::classification::{ClassificationParser, NormalizeOptions};
@@ -29,10 +29,21 @@ pub fn set_global_classification(config: Arc<ClassificationParser>) {
     *GLOBAL_CLASSIFICATION.lock().unwrap() = ClassificationMode::Configured(config);
 }
 
+fn unrestricted_when_disabled<const USER: bool>() -> ExpandingClassification<USER> {
+    let lock: LazyLock<ExpandingClassification<USER>> = LazyLock::new(|| {
+        let config = assemblyline_markings::config::ready_classification(None)
+            .expect("Could not load default classification configuration");
+        let parser = ClassificationParser::new(config)
+            .expect("Could not load default classification parser");
+        ExpandingClassification::<USER>::unrestricted(&parser)
+    });
+    lock.clone()
+}
+
 pub fn unrestricted_classification() -> String {
     match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
         ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
-        ClassificationMode::Disabled => "".to_string(),
+        ClassificationMode::Disabled => unrestricted_when_disabled::<false>().classification,
         ClassificationMode::Configured(parser) => parser.unrestricted().to_owned(),
     }
 }
@@ -40,7 +51,7 @@ pub fn unrestricted_classification() -> String {
 pub fn unrestricted_classification_string() -> ClassificationString {
     match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
         ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
-        ClassificationMode::Disabled => ClassificationString(Default::default()),
+        ClassificationMode::Disabled => ClassificationString(unrestricted_when_disabled::<false>().classification),
         ClassificationMode::Configured(parser) => ClassificationString::unrestricted(parser),
     }
 }
@@ -48,13 +59,7 @@ pub fn unrestricted_classification_string() -> ClassificationString {
 pub fn unrestricted_expanding_classification() -> ExpandingClassification {
     match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
         ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
-        ClassificationMode::Disabled => ExpandingClassification {
-            classification: Default::default(),
-            __access_lvl__: Default::default(),
-            __access_req__: Default::default(),
-            __access_grp1__: Default::default(),
-            __access_grp2__: Default::default(),
-        },
+        ClassificationMode::Disabled => unrestricted_when_disabled(),
         ClassificationMode::Configured(parser) => ExpandingClassification::unrestricted(parser),
     }
 }
@@ -69,7 +74,7 @@ pub fn unrestricted_expanding_classification() -> ExpandingClassification {
 
 /// Expanding classification type
 #[derive(Debug, Clone, Eq)]
-pub struct ExpandingClassification<const USER: bool=false> { 
+pub struct ExpandingClassification<const USER: bool=false> {
     pub classification: String,
     pub __access_lvl__: i32,
     pub __access_req__: Vec<String>,
@@ -79,35 +84,24 @@ pub struct ExpandingClassification<const USER: bool=false> {
 
 impl<const USER: bool> ExpandingClassification<USER> {
     pub fn new(classification: String, parser: &ClassificationParser) -> Result<Self, ModelError> {
-        if parser.original_definition.enforce {
+        let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
+        let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
 
-            let parts = parser.get_classification_parts(&classification, false, true, !USER)?;
-            let classification = parser.get_normalized_classification_text(parts.clone(), false, false)?;
-
-            Ok(Self {
-                classification,
-                __access_lvl__: parts.level,
-                __access_req__: parts.required,
-                __access_grp1__: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
-                __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
-            })
-        } else {
-            Ok(Self {
-                classification,
-                __access_lvl__: Default::default(),
-                __access_req__: Default::default(),
-                __access_grp1__: vec!["__EMPTY__".to_owned()],
-                __access_grp2__: vec!["__EMPTY__".to_owned()],
-            })
-        }
+        Ok(Self {
+            classification,
+            __access_lvl__: parts.level,
+            __access_req__: parts.required,
+            __access_grp1__: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
+            __access_grp2__: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups },
+        })
     }
 
     pub fn try_unrestricted() -> Option<Self> {
-        if let ClassificationMode::Configured(parser) = &*GLOBAL_CLASSIFICATION.lock().unwrap() {
-            Some(Self::unrestricted(parser))
-        } else {
-            None
-        }   
+        match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
+            ClassificationMode::Uninitialized => None,
+            ClassificationMode::Disabled => Some(unrestricted_when_disabled::<USER>()),
+            ClassificationMode::Configured(parser) => Some(Self::unrestricted(parser)),
+        }
     }
 
     pub fn unrestricted(parser: &ClassificationParser) -> Self {
@@ -120,29 +114,20 @@ impl<const USER: bool> ExpandingClassification<USER> {
 
     pub fn insert(parser: &ClassificationParser, output: &mut JsonMap, classification: &str) -> Result<(), ModelError> {
         use serde_json::json;
-        if parser.original_definition.enforce {
-            let parts = parser.get_classification_parts(classification, true, true, !USER)?;
-            let classification = parser.get_normalized_classification_text(parts.clone(), true, false)?;
+        let parts = parser.get_classification_parts(classification, true, true, !USER)?;
+        let classification = parser.get_normalized_classification_text(parts.clone(), true, false)?;
 
-            output.insert("classification".to_string(), json!(classification));
-            output.insert("__access_lvl__".to_string(), json!(parts.level));
-            output.insert("__access_req__".to_string(), json!(parts.required));
-            output.insert("__access_grp1__".to_string(), json!(if parts.groups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.groups }));
-            output.insert("__access_grp2__".to_string(), json!(if parts.subgroups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.subgroups }));
-            Ok(())
-        } else {
-            output.insert("classification".to_string(), json!(classification));
-            output.insert("__access_lvl__".to_string(), json!(0));
-            output.insert("__access_req__".to_string(), serde_json::Value::Array(Default::default()));
-            output.insert("__access_grp1__".to_string(), json!(&["__EMPTY__"]));
-            output.insert("__access_grp2__".to_string(), json!(&["__EMPTY__"]));
-            Ok(())
-        }
+        output.insert("classification".to_string(), json!(classification));
+        output.insert("__access_lvl__".to_string(), json!(parts.level));
+        output.insert("__access_req__".to_string(), json!(parts.required));
+        output.insert("__access_grp1__".to_string(), json!(if parts.groups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.groups }));
+        output.insert("__access_grp2__".to_string(), json!(if parts.subgroups.is_empty() { vec!["__EMPTY__".to_string()] } else { parts.subgroups }));
+        Ok(())
     }
 }
 
 #[derive(Serialize, Deserialize)]
-struct RawClassification { 
+struct RawClassification {
     pub classification: String,
     #[serde(default)]
     pub __access_lvl__: i32,
@@ -181,7 +166,7 @@ impl<const U: bool> From<RawClassification> for ExpandingClassification<U> {
 
 impl<const U: bool> Serialize for ExpandingClassification<U> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer 
+    where S: serde::Serializer
     {
         match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             ClassificationMode::Uninitialized => return Err(serde::ser::Error::custom("classification engine not initalized")),
@@ -196,7 +181,7 @@ impl<const U: bool> Serialize for ExpandingClassification<U> {
 
 impl<'de, const U: bool> Deserialize<'de> for ExpandingClassification<U> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de> 
+    where D: serde::Deserializer<'de>
     {
         let parser = match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             ClassificationMode::Uninitialized => return Err(serde::de::Error::custom("classification engine not initalized")),
@@ -210,8 +195,13 @@ impl<'de, const U: bool> Deserialize<'de> for ExpandingClassification<U> {
             let raw = RawClassification::deserialize(deserializer)?;
             Self::new(raw.classification, &parser).map_err(serde::de::Error::custom)
         } else {
-            Ok(RawClassification::deserialize(deserializer)?.into())
-        }        
+            let raw = RawClassification::deserialize(deserializer)?;
+            if raw.classification.is_empty() {
+                Ok(unrestricted_when_disabled())
+            } else {
+                Ok(raw.into())
+            }
+        }
     }
 }
 
@@ -224,9 +214,9 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
         //     ..Default::default()
         // };
 
-        struct_metadata::Descriptor { 
-            docs: None, 
-            metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, 
+        struct_metadata::Descriptor {
+            docs: None,
+            metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()},
             kind: struct_metadata::Kind::new_struct("ExpandingClassification", vec![
                 struct_metadata::Entry { label: "classification", docs: None, metadata: ElasticMeta{mapping: Some("classification"), ..Default::default()}, type_info: String::metadata(), has_default: false, aliases: &["classification"] },
                 // struct_metadata::Entry { label: "__access_lvl__", docs: None, metadata: Default::default(), type_info: i32::metadata(), has_default: false, aliases: &["__access_lvl__"] },
@@ -234,8 +224,8 @@ impl<const USER: bool> Described<ElasticMeta> for ExpandingClassification<USER> 
                 // struct_metadata::Entry { label: "__access_grp1__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp1__"] },
                 // struct_metadata::Entry { label: "__access_grp2__", docs: None, metadata: Default::default(), type_info: Vec::<String>::metadata(), has_default: false, aliases: &["__access_grp2__"] },
             ], &mut [], &mut[]),
-            // kind: struct_metadata::Kind::Aliased { 
-            //     name: "ExpandingClassification", 
+            // kind: struct_metadata::Kind::Aliased {
+            //     name: "ExpandingClassification",
             //     kind: Box::new(String::metadata())
             // },
         }
@@ -309,9 +299,9 @@ impl ClassificationString {
             Some(Self::unrestricted(parser))
         } else {
             None
-        }   
+        }
     }
-    
+
     pub fn unrestricted(parser: &ClassificationParser) -> Self {
         Self(parser.normalize_classification_options(parser.unrestricted(), NormalizeOptions::short()).unwrap())
     }
@@ -323,7 +313,7 @@ impl ClassificationString {
     pub fn default_unrestricted() -> ClassificationString {
         match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             ClassificationMode::Uninitialized => panic!("classification handling without defining parser"),
-            ClassificationMode::Disabled => ClassificationString(Default::default()),
+            ClassificationMode::Disabled => ClassificationString(unrestricted_when_disabled::<false>().classification),
             ClassificationMode::Configured(parser) => ClassificationString::unrestricted(parser),
         }
     }
@@ -348,7 +338,7 @@ impl From<RawClassificationString> for ClassificationString {
 
 impl Serialize for ClassificationString {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where S: serde::Serializer 
+    where S: serde::Serializer
     {
         match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             ClassificationMode::Uninitialized => return Err(serde::ser::Error::custom("classification engine not initalized")),
@@ -382,7 +372,7 @@ impl Serialize for ClassificationString {
 
 impl<'de> Deserialize<'de> for ClassificationString {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where D: serde::Deserializer<'de> 
+    where D: serde::Deserializer<'de>
     {
         let parser = match &*GLOBAL_CLASSIFICATION.lock().unwrap() {
             ClassificationMode::Uninitialized => return Err(serde::de::Error::custom("classification engine not initalized")),
@@ -396,7 +386,12 @@ impl<'de> Deserialize<'de> for ClassificationString {
             let raw = RawClassificationString::deserialize(deserializer)?;
             Self::new(raw.0, &parser).map_err(serde::de::Error::custom)
         } else {
-            Ok(RawClassificationString::deserialize(deserializer)?.into())
+            let raw = RawClassificationString::deserialize(deserializer)?;
+            if raw.0.is_empty() {
+                Ok(ClassificationString(unrestricted_when_disabled::<false>().classification))
+            } else {
+                Ok(raw.into())
+            }
         }
     }
 }
@@ -417,4 +412,12 @@ impl PartialEq for ClassificationString {
             self.0 == other.0
         }
     }
+}
+
+
+#[test]
+fn disabled_classification_not_empty() {
+    let value = unrestricted_when_disabled::<false>();
+    assert!(!value.classification.is_empty());
+    assert!(value.__access_lvl__ > 0);
 }

@@ -234,7 +234,7 @@ pub struct ClassificationLevel {
 
     /// Short name of the classification item
     pub short_name: NameString,
-    
+
     /// Should the classification be skipped building UI options
     #[serde(default)]
     pub is_hidden: bool,
@@ -532,12 +532,12 @@ fn check_default_configurations() {
     assert!(!default_config.enforce);
 
     println!("{:?}", serde_yaml::to_value(DEFAULT_CLASSIFICATION_DATA).unwrap());
-       
+
     let config = ready_classification(Some("enforce: true")).unwrap();
     assert!(config.enforce);
 
     use crate::classification::ClassificationParser;
     let ce = ClassificationParser::new(default_config).unwrap();
 
-    assert_eq!(ce.normalize_classification("ABC123").unwrap(), "");
+    assert_eq!(ce.normalize_classification("ABC123").unwrap(), ce.unrestricted());
 }
