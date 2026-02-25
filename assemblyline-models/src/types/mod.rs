@@ -11,6 +11,8 @@ pub mod json_validation;
 pub mod ids;
 pub mod net_static;
 
+use std::ops::Deref;
+
 pub use ssdeep::{SSDeepHash};
 pub use strings::{Wildcard, ServiceName, UpperString, Text, Domain, Email, Uri};
 pub use md5::MD5;
@@ -41,9 +43,24 @@ pub struct NonZeroInteger(u64);
 impl<'de> Deserialize<'de> for NonZeroInteger {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> 
+        D: serde::Deserializer<'de>
     {
         let raw: i64 = i64::deserialize(deserializer)?;
-        Ok(NonZeroInteger(raw.min(1) as u64))
+        Ok(NonZeroInteger(raw.max(1) as u64))
     }
+}
+
+impl Deref for NonZeroInteger {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[test]
+fn non_zero() {
+    assert_eq!(*serde_json::from_str::<NonZeroInteger>("0").unwrap(), 1);
+    assert_eq!(*serde_json::from_str::<NonZeroInteger>("-1").unwrap(), 1);
+    assert_eq!(*serde_json::from_str::<NonZeroInteger>("100").unwrap(), 100);
 }

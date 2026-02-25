@@ -210,6 +210,9 @@ impl ClassificationParser {
             return Err(Errors::InvalidDefinition("Classification definition's restricted classification is invalid.".to_owned()));
         }
 
+        new.unrestricted = definition.unrestricted.clone();
+        new.restricted = definition.restricted.clone();
+
         new.unrestricted = new.normalize_classification(&definition.unrestricted)?;
         new.restricted = new.normalize_classification(&definition.restricted)?;
 
@@ -1320,7 +1323,7 @@ mod test {
     fn setup() -> ClassificationParser {
         ClassificationParser::new(setup_config()).unwrap()
     }
-    
+
     #[test]
     fn load_yaml() {
         let yaml = serde_yaml::to_string(&setup_config()).unwrap();

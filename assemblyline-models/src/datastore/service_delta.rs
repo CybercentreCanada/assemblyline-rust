@@ -105,10 +105,11 @@ pub struct UpdateSourceDelta {
     #[metadata(mapping="integer")]
     pub update_interval: Option<NonZeroInteger>,
     /// REF_UPDATE_SOURCE
-    pub ignore_cache: Option<bool>,    
+    pub ignore_cache: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
+#[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct PersistentVolumeDelta {
@@ -122,7 +123,8 @@ pub struct PersistentVolumeDelta {
     pub access_mode: Option<AccessMode>,
 }
 
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
+#[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct DependencyConfigDelta {
@@ -134,7 +136,8 @@ pub struct DependencyConfigDelta {
     pub run_as_core: Option<bool>,
 }
 
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
+#[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct UpdateConfigDelta {
@@ -155,7 +158,8 @@ pub struct UpdateConfigDelta {
     pub default_pattern: Option<Text>,
 }
 
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Default)]
+#[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct SubmissionParamsDelta {
@@ -241,7 +245,7 @@ pub struct ServiceDelta {
 
     /// REF_SERVICE
     #[metadata(store=true)]
-    pub name: Option<ServiceName>, 
+    pub name: Option<ServiceName>,
     /// REF_SERVICE
     #[metadata(store=true)]
     pub version: String,
@@ -253,7 +257,7 @@ pub struct ServiceDelta {
 
     /// REF_SERVICE
     #[metadata(store=true)]
-    pub stage: Option<String>, 
+    pub stage: Option<String>,
     /// REF_SERVICE
     #[metadata(index=false)]
     pub submission_params: Option<Vec<SubmissionParamsDelta>>,
