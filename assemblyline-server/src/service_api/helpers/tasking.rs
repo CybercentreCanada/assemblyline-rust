@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
-use assemblyline_models::datastore::error::ErrorSeverity;
+use assemblyline_models::datastore::error::{ErrorSeverity, ErrorTypes};
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
@@ -568,30 +568,58 @@ impl TaskingClient {
             }
 
             // Create a list of files to freshen
-            let mut freshen_hashes = vec![task.fileinfo.sha256.clone()];
+            let mut freshen_hashes = HashMap::new();
+            if let Some(file_info) = self.datastore.file.get(&task.fileinfo.sha256, None).await? {
+                if self.filestore.exists(&task.fileinfo.sha256).await? {
+                    freshen_hashes.insert(task.fileinfo.sha256.clone(), file_info);
+                }
+            }
+
+            // The file to analyse isn't found. Mark this task as an error
+            if freshen_hashes.is_empty() {
+                // save error
+                let error = assemblyline_models::datastore::Error::from_task(&task)
+                    .error_type(ErrorTypes::TaskPreempted)
+                    .message(format!("Service not tasked. Target file not found in system ({}).", task.fileinfo.sha256));
+                let error_key = error.build_key(None, Some(&task))?;
+                self.dispatch_client.service_failed(task, &error_key, error).await?;
+                return Ok((None, true))
+            }
 
             // Test each extracted and supplementary files
             for file_item in result.response.extracted.iter().chain(result.response.supplementary.iter()) {
-                if freshen_hashes.contains(&file_item.sha256) {
+                if freshen_hashes.contains_key(&file_item.sha256) {
                     // We've already decided to freshen this file, moving on..
                     continue
                 }
 
-                freshen_hashes.push(file_item.sha256.clone());
+                let mut file_info = None;
+                if let Some(read_file_info) = self.datastore.file.get(&file_item.sha256, None).await? {
+                    if self.filestore.exists(&file_item.sha256).await? {
+                        file_info = Some(read_file_info);
+                    }
+                }
 
-                // Bail out if file does not exists
-                if !self.filestore.exists(&file_item.sha256).await? {
-                    info!("We have a cache hit with some related files missing, ignoring it...");
-                    increment!(metric_factory, cache_miss);
-                    return Ok((Some(task), false))
+                match file_info {
+                    Some(file_info) => {
+                        freshen_hashes.insert(file_item.sha256.clone(), file_info);
+                    },
+                    None => {
+                        // Bail out if file does not exists
+                        info!("We have a cache hit with some related files missing, ignoring it...");
+                        increment!(metric_factory, cache_miss);
+                        return Ok((Some(task), false))
+                    }
                 }
             }
 
             // Freshen the files
-            for sha256 in freshen_hashes {
+            for (sha256, file_info) in freshen_hashes {
+                let file_info = serde_json::to_value(file_info)?;
+                let Value::Object(file_info) = file_info else { panic!("Object not stored as object?") };
                 self.datastore.save_or_freshen_file(
                     &sha256,
-                    Default::default(),
+                    file_info,
                     result.expiry_ts,
                     result.classification.as_str().to_owned(),
                     &self.classification_engine
