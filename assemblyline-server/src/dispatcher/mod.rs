@@ -1153,7 +1153,7 @@ impl Dispatcher {
             // count the current dispatchers
             let mut active_ids = 0;
             for id in last_seen.keys() {
-                if finalizing.contains_key(id) {
+                if !finalizing.contains_key(id) {
                     active_ids += 1;
                 }
             }
