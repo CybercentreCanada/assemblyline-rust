@@ -58,12 +58,12 @@ pub struct S3Parameters {
 
 impl Default for S3Parameters {
     fn default() -> Self {
-        Self { 
-            aws_region: None, 
-            s3_bucket: "al-storage".to_string(), 
-            use_ssl: true, 
+        Self {
+            aws_region: None,
+            s3_bucket: "al-storage".to_string(),
+            use_ssl: true,
             verify: true,
-            boto_defaults: false 
+            boto_defaults: false
         }
     }
 }
@@ -134,7 +134,7 @@ impl TransportS3 {
                     .with_safe_defaults()
                     .with_root_certificates(root_store.clone())
                     .with_no_client_auth();
-                                    
+
                 tls_config
                     .dangerous()
                     .set_certificate_verifier(Arc::new(verifier::NoCertificateVerification::new()));
@@ -151,7 +151,7 @@ impl TransportS3 {
             // doesn't support custimizing the tls configurations
             // let https_connector = if !parameters.verify {
             //     let root_store = rustls::RootCertStore::empty();
-            //     let mut tls_config = rustls::ClientConfig::builder()    
+            //     let mut tls_config = rustls::ClientConfig::builder()
             //         .with_root_certificates(root_store.clone())
             //         .with_no_client_auth();
             //     let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(root_store)).build()?;
@@ -186,7 +186,7 @@ impl TransportS3 {
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
         // make sure the bucket exists
-        let head_result = retry!(connection_attempts, { 
+        let head_result = retry!(connection_attempts, {
             client.head_bucket().bucket(&parameters.s3_bucket).send().await
         });
 
@@ -236,10 +236,6 @@ impl TransportS3 {
 impl std::fmt::Debug for TransportS3 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("s3://")?;
-        if let Some(access) = &self.accesskey {
-            f.write_str(access)?;
-            f.write_str("@")?;
-        }
         f.write_fmt(format_args!("{}:{}/{}", self.host, self.port, self.parameters.s3_bucket))?;
         if !self.base.is_empty() {
             if !self.base.starts_with("/") {
@@ -284,7 +280,7 @@ impl Transport for TransportS3 {
 
     async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let label = self.normalize(name)?;
-        
+
         fn is_not_found(err: &SdkError<aws_sdk_s3::operation::get_object::GetObjectError>) -> bool {
             if let Some(err) = err.as_service_error() {
                 if err.is_no_such_key() {
@@ -303,7 +299,7 @@ impl Transport for TransportS3 {
             match request {
                 Ok(request) => {
                     let bytes = request.body.collect().await?;
-                    Ok(Some(bytes.to_vec()))        
+                    Ok(Some(bytes.to_vec()))
                 },
                 Err(err) if is_not_found(&err) => Ok(None),
                 Err(err) => Err(err)
@@ -602,7 +598,7 @@ macro_rules! retry {
                             if error.downcast_ref::<std::io::Error>().is_some() {
                                 log::warn!("Filestore IO error: {err:?}");
                                 continue 'outer
-                            }    
+                            }
                             match error.source() {
                                 Some(parent) => error = Box::new(parent),
                                 None => break,
