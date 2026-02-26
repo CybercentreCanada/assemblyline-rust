@@ -95,7 +95,7 @@ pub fn get_digests_for_file_blocking(path: &Path, blocksize: Option<usize>, calc
 
     let (tlsh, ssdeep) = match fuzzy_hashes {
         Some((tlsh, ssdeep)) => {
-            let tlsh = tlsh.build().map(|hash| hex::encode(hash.hash().as_slice()));
+            let tlsh = tlsh.build().map(|hash| String::from_utf8_lossy(hash.hash().as_slice()).to_string());
             let ssdeep = ssdeep.finalize()?.to_string();
             (tlsh, Some(ssdeep))
         },
@@ -103,7 +103,7 @@ pub fn get_digests_for_file_blocking(path: &Path, blocksize: Option<usize>, calc
     };
 
     debug!("entropy {:?}", entropy.as_ref().map(|calculator| calculator.entropy()));
-    
+
     Ok(Digests {
         md5: hex::encode(md5.finalize()),
         sha1: hex::encode(sha1.finalize()),
