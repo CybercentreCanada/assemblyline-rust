@@ -586,23 +586,31 @@ impl TaskingClient {
                 return Ok((None, true))
             }
 
-            // Test each extracted and supplementary files
+            // Check that extracted files are all still accounted for, do the work in separate tasks
+            let mut lookup_work = HashMap::new();
             for file_item in result.response.extracted.iter().chain(result.response.supplementary.iter()) {
-                if freshen_hashes.contains_key(&file_item.sha256) {
-                    // We've already decided to freshen this file, moving on..
+                if lookup_work.contains_key(&file_item.sha256) || freshen_hashes.contains_key(&file_item.sha256) {
                     continue
                 }
 
-                let mut file_info = None;
-                if let Some(read_file_info) = self.datastore.file.get(&file_item.sha256, None).await? {
-                    if self.filestore.exists(&file_item.sha256).await? {
-                        file_info = Some(read_file_info);
+                let sha256 = file_item.sha256.clone();
+                let datastore = self.datastore.clone();
+                let filestore = self.filestore.clone();
+                lookup_work.insert(file_item.sha256.clone(), tokio::spawn(async move {
+                    if let Some(read_file_info) = datastore.file.get(&sha256, None).await? {
+                        if filestore.exists(&sha256).await? {
+                            return anyhow::Ok(Some(read_file_info))
+                        }
                     }
-                }
+                    anyhow::Ok(None)
+                }));
+            }
 
-                match file_info {
+            // Gather the results from the tasks
+            for file_task in lookup_work.into_values() {
+                match file_task.await?? {
                     Some(file_info) => {
-                        freshen_hashes.insert(file_item.sha256.clone(), file_info);
+                        freshen_hashes.insert(file_info.sha256.clone(), file_info);
                     },
                     None => {
                         // Bail out if file does not exists
