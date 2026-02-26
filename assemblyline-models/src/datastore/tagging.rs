@@ -187,7 +187,7 @@ impl TagInformation {
 // MARK: Tag List
 /// The list of all tags we are willing to accept.
 /// This includes their path within a tagging dict, a textual description and how they should be processed for validation or normalization
-static ALL_VALID_TAGS: [TagInformation; 211] = [
+static ALL_VALID_TAGS: [TagInformation; 214] = [
     TagInformation::new(&["attribution", "actor"], "Attribution Actor", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "campaign"], "Attribution Campaign", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "category"], "Attribution Category", TagProcessor::Uppercase),
@@ -220,6 +220,9 @@ static ALL_VALID_TAGS: [TagInformation; 211] = [
     TagInformation::new(&["dynamic", "registry_key"], "Registy Keys", TagProcessor::String),
     TagInformation::new(&["dynamic", "process", "command_line"], "Commandline", TagProcessor::String),
     TagInformation::new(&["dynamic", "process", "file_name"], "Filename", TagProcessor::String),
+    TagInformation::new(&["dynamic", "process", "file_path"], "Filepath", TagProcessor::String),
+    TagInformation::new(&["dynamic", "process", "module_name"], "Module name", TagProcessor::String),
+    TagInformation::new(&["dynamic", "process", "module_path"], "Module path", TagProcessor::String),
     TagInformation::new(&["dynamic", "process", "shortcut"], "Shortcut", TagProcessor::String),
     TagInformation::new(&["dynamic", "signature", "category"], "Signature Category", TagProcessor::String),
     TagInformation::new(&["dynamic", "signature", "family"], "Signature Family", TagProcessor::String),
