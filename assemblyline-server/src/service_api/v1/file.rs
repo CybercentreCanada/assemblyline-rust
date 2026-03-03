@@ -148,7 +148,7 @@ async fn upload_file(
     let upload_result = tasking.upload_file(temp_file.path(), classification, ttl, is_section_image, is_supplementary, sha256).await;
 
     if let Err(err) = upload_result {
-        warn!("{} - {}: {err}", client_info.client_id, client_info.service_name);
+        warn!("{} - {}: {err:?}", client_info.client_id, client_info.service_name);
         return Err(make_api_error(StatusCode::BAD_REQUEST, &err.to_string(), json!({"success": false})));
     }
 
