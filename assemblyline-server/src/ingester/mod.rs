@@ -646,7 +646,7 @@ impl Ingester {
         let this = self.clone();
         tokio::spawn(async move {
             if let Err(err) = this.ingest(task).await {
-                error!("Error while ingesting a file: {err}");
+                error!("Error while ingesting a file: {err:?}");
             }
         })
     }

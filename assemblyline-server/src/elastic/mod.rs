@@ -1221,7 +1221,9 @@ impl Elastic {
     }
 
     #[instrument]
-    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> Result<usize> {
+    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> anyhow::Result<usize> {
+        use anyhow::Context;
+
         let mut attempts = 0;
 
         // Remove control fields from new file info
@@ -1240,13 +1242,29 @@ impl Elastic {
         fileinfo.insert("archive_ts".to_owned(), serde_json::Value::Null);
 
         loop {
-            let current = self.file.get_if_exists(sha256, None).await?;
+            let current = self.file.get_json_version(sha256, None).await
+                .map_err(anyhow::Error::from)
+                .context("get_if_exists")?;
 
             let (mut current_fileinfo, version) = match current {
-                None => (JsonMap::from_iter([("expiry_ts".to_owned(), json!(expiry))]), Version::Create),
+                None => (JsonMap::from_iter([
+                    ("expiry_ts".to_owned(), json!(expiry)),
+                    ("sha256".to_owned(), json!(sha256))
+                ]), Version::Create),
                 Some((current_fileinfo, version)) => {
+                    #[derive(Deserialize)]
+                    struct ParsedFile {
+                        #[serde(flatten)]
+                        pub classification: ExpandingClassification,
+                        #[serde(default)]
+                        pub uri_info: Option<assemblyline_models::datastore::file::URIInfo>,
+                        #[serde(default)]
+                        pub expiry_ts: Option<DateTime<Utc>>,
+                    }
+                    let parsed_fileinfo: ParsedFile = serde_json::from_value(serde_json::Value::Object(current_fileinfo.clone()))?;
+
                     // If the freshen we are doing won't change classification, we can do it via an update operation
-                    let server_classification = cl_engine.normalize_classification(&current_fileinfo.classification.classification)?;
+                    let server_classification = cl_engine.normalize_classification(&parsed_fileinfo.classification.classification)?;
 
                     classification = cl_engine.min_classification(
                         &server_classification,
@@ -1256,9 +1274,9 @@ impl Elastic {
 
                     let uri_info_match = if let Some(uri_info) = fileinfo.remove("uri_info") {
                         let info: assemblyline_models::datastore::file::URIInfo = serde_json::from_value(uri_info)?;
-                        current_fileinfo.uri_info == Some(info)
+                        parsed_fileinfo.uri_info == Some(info)
                     } else {
-                        current_fileinfo.uri_info.is_none()
+                        parsed_fileinfo.uri_info.is_none()
                     };
 
                     if classification == server_classification && uri_info_match {
@@ -1272,7 +1290,7 @@ impl Elastic {
                         batch.increment("seen.count".to_owned(), json!(1));
                         batch.max("seen.last".to_owned(), json!(chrono::Utc::now().to_rfc3339()));
 
-                        if current_fileinfo.expiry_ts.is_some() {
+                        if parsed_fileinfo.expiry_ts.is_some() {
                             if let Some(expiry) = expiry {
                                 batch.max("expiry_ts".to_owned(), json!(expiry.to_rfc3339()));
                             }
@@ -1295,9 +1313,9 @@ impl Elastic {
                         debug!("Skipping fast save_or_freshen {classification} != {server_classification}, url info match {uri_info_match}");
                     }
 
-                    let value = serde_json::to_value(current_fileinfo)?;
-                    let serde_json::Value::Object(obj) = value else { panic!("impossible to reach") };
-                    (obj, version)
+                    // let value = serde_json::to_value(current_fileinfo)?;
+                    // let serde_json::Value::Object(obj) = value else { panic!("impossible to reach") };
+                    (current_fileinfo, version)
                 }
             };
 
@@ -1339,7 +1357,7 @@ impl Elastic {
                     debug!("Retrying save or freshen due to version conflict: {err}");
                     continue
                 },
-                Err(err) => return Err(err)
+                Err(err) => return Err(anyhow::Error::from(err)).context("saving document")
             }
         }
     }
