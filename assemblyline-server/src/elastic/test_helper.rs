@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use assemblyline_markings::classification::ClassificationParser;
@@ -6,8 +7,10 @@ use assemblyline_models::datastore::{File, Service};
 use assemblyline_models::types::{JsonMap, ServiceName, Sha256};
 use log::debug;
 use rand::Rng;
+use serde_json::json;
 
 use crate::Core;
+use crate::common::sha256_data;
 use crate::elastic::create_empty_result_from_key;
 
 use super::Elastic;
@@ -84,6 +87,36 @@ async fn list_services() {
 
 
 
+#[tokio::test]
+async fn test_save_or_freshen_missing_file() {
+    let (core, _redis_lock) = Core::test_setup().await;
+    let ds = core.datastore.clone();
+
+    let classification = assemblyline_markings::classification::sample_config();
+    let ce = Arc::new(assemblyline_markings::classification::ClassificationParser::new(classification).unwrap());
+    assemblyline_models::types::classification::set_global_classification(ce.clone());
+
+    // Generate random data
+    let mut data: Vec<u8> = vec![];
+    for _ in 0..64 {
+        data.extend(b"asfd");
+    }
+    let expiry_create = chrono::Utc::now() + chrono::Duration::days(14).to_std().unwrap();
+    let sha256 = sha256_data(&data);
+
+    // Make sure file does not exists
+    ds.file.delete(&sha256, None).await.unwrap();
+
+    // Save the file
+    let sha256 = Sha256::from_str(&sha256).unwrap();
+    assert_eq!(ds.save_or_freshen_file(&sha256, Default::default(), Some(expiry_create), ce.restricted().to_owned(), &ce).await.unwrap(), 1);
+
+    // Validate created file
+    let saved_file = ds.file.get_json(&sha256, None).await.unwrap().unwrap();
+    assert_eq!(saved_file.get("sha256").unwrap(), &json!(sha256));
+    assert_eq!(saved_file.get("expiry_ts").unwrap(), &json!(expiry_create));
+    assert_eq!(saved_file.get("classification").unwrap(), ce.restricted());
+}
 
 
 #[tokio::test]
