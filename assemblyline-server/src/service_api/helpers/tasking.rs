@@ -164,7 +164,7 @@ impl TaskingClient {
 
     pub async fn upload_file(&self, file: &Path, classification: &str, ttl: u32, is_section_image: bool, is_supplementary: bool, expected_sha256: &str) -> Result<()> {
         // Identify the file info of the uploaded file
-        let file_info = self.identify.fileinfo(file.to_path_buf(), true, None, None).await?;
+        let file_info = self.identify.fileinfo(file.to_path_buf(), true, None, None).await.context("fileinfo")?;
 
         let sha256 = match &file_info.sha256 {
             Some(generated) => {
@@ -196,7 +196,7 @@ impl TaskingClient {
             expiry_ts,
             classification,
             &self.classification_engine,
-        ).await?;
+        ).await.context("save_or_freshen_file")?;
 
         // Upload file to the filestore (upload already checks if the file exists)
         self.filestore.upload(file, &sha256).await?;
