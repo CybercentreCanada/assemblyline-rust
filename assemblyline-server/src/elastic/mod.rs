@@ -1336,15 +1336,14 @@ impl Elastic {
 
             // write the file
             attempts += 1;
-            let written_fileinfo = serde_json::from_value(serde_json::Value::Object(current_fileinfo)).context("save before write")?;
-            let result = self.file.save(sha256, &written_fileinfo, Some(version), None).await;
+            let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(attempts),
                 Err(err) if err.is_version_conflict() => {
                     debug!("Retrying save or freshen due to version conflict: {err}");
                     continue
                 },
-                Err(err) => return Err(err.into())
+                Err(err) => return Err(anyhow::Error::from(err)).context("saving document")
             }
         }
     }
