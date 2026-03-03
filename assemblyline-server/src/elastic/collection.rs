@@ -613,6 +613,11 @@ impl<T: CollectionType> Collection<T> {
         Ok(self._get_version(key, index_type).await?.map(|(doc, _)| doc))
     }
 
+    #[instrument]
+    pub async fn get_json_version(&self, key: &str, index_type: Option<Index>) -> Result<Option<(JsonMap, Version)>> {
+        self._get_version(key, index_type).await
+    }
+
     /// fetch an object from elastic, retrying on missing, returning document version info
     #[instrument]
     pub async fn get_version(&self, key: &str, index_type: Option<Index>) -> Result<Option<(T, Version)>> {
