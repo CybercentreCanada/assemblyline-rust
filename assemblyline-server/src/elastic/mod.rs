@@ -1221,7 +1221,9 @@ impl Elastic {
     }
 
     #[instrument]
-    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> Result<usize> {
+    pub async fn save_or_freshen_file(&self, sha256: &Sha256, mut fileinfo: JsonMap, expiry: Option<DateTime<Utc>>, mut classification: String, cl_engine: &ClassificationParser) -> anyhow::Result<usize> {
+        use anyhow::Context;
+
         let mut attempts = 0;
 
         // Remove control fields from new file info
@@ -1240,7 +1242,9 @@ impl Elastic {
         fileinfo.insert("archive_ts".to_owned(), serde_json::Value::Null);
 
         loop {
-            let current = self.file.get_if_exists(sha256, None).await?;
+            let current = self.file.get_if_exists(sha256, None).await
+                .map_err(anyhow::Error::from)
+                .context("get_if_exists")?;
 
             let (mut current_fileinfo, version) = match current {
                 None => (JsonMap::from_iter([("expiry_ts".to_owned(), json!(expiry))]), Version::Create),
@@ -1332,14 +1336,15 @@ impl Elastic {
 
             // write the file
             attempts += 1;
-            let result = self.file.save_json(sha256, &mut current_fileinfo, Some(version), None).await;
+            let written_fileinfo = serde_json::from_value(serde_json::Value::Object(current_fileinfo)).context("save before write")?;
+            let result = self.file.save(sha256, &written_fileinfo, Some(version), None).await;
             match result {
                 Ok(_) => return Ok(attempts),
                 Err(err) if err.is_version_conflict() => {
                     debug!("Retrying save or freshen due to version conflict: {err}");
                     continue
                 },
-                Err(err) => return Err(err)
+                Err(err) => return Err(err.into())
             }
         }
     }

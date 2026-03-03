@@ -46,11 +46,11 @@ impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
                 Ok(resp)
             },
             Err(err) if err.status() == StatusCode::NOT_FOUND => {
-                debug!("error handling {uri} ({} ms) {err:?}", start.elapsed().as_millis());
+                debug!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
                 Err(err)
             },
             Err(err) => {
-                error!("error handling {uri} ({} ms) {err:?}", start.elapsed().as_millis());
+                error!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
                 Err(err)
             },
         }
