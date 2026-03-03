@@ -1313,7 +1313,9 @@ impl Elastic {
             }
 
             // Add new fileinfo to current from database
-            current_fileinfo.append(&mut fileinfo);
+            for (key, value) in fileinfo.iter() {
+                current_fileinfo.insert(key.clone(), value.clone());
+            }
 
             // Update seen counters
             let now = Utc::now().to_rfc3339();

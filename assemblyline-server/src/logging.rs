@@ -46,11 +46,11 @@ impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
                 Ok(resp)
             },
             Err(err) if err.status() == StatusCode::NOT_FOUND => {
-                debug!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
+                debug!("error handling {uri} ({} ms) {err:?}", start.elapsed().as_millis());
                 Err(err)
             },
             Err(err) => {
-                error!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
+                error!("error handling {uri} ({} ms) {err:?}", start.elapsed().as_millis());
                 Err(err)
             },
         }
@@ -65,7 +65,7 @@ static LOCAL_IP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     use flexi_logger::*;
     use flexi_logger::writers::{FileLogWriter, SyslogConnection, SyslogWriter};
-    
+
     // make sure we only init logging once
     {
         let mut init = INIT_LOGGING.lock().unwrap();
@@ -86,7 +86,7 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
         LogLevel::Warning => log::Level::Warn,
         LogLevel::Error => log::Level::Error,
         // nothing above error in this framework so we flatten it all to error
-        LogLevel::Critical => log::Level::Error, 
+        LogLevel::Critical => log::Level::Error,
         // if logging is disabled initilize the backend with the filter set to ignore all
         LogLevel::Disabled => {
             let logger = Logger::with(LogSpecification::off());
@@ -119,7 +119,7 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
 
         if log_level <= log::Level::Debug {
             builder = builder.add_writer(
-                "DebugFile", 
+                "DebugFile",
                 Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".dbg"))
                 .append()
                 .max_level(log::LevelFilter::Debug)
@@ -131,7 +131,7 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
 
         if log_level <= log::Level::Info {
             builder = builder.add_writer(
-                "LogFile", 
+                "LogFile",
                 Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".log"))
                 .append()
                 .max_level(log::LevelFilter::Info)
@@ -143,7 +143,7 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
 
         if log_level <= log::Level::Error {
             builder = builder.add_writer(
-                "ErrorFile", 
+                "ErrorFile",
                 Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".err"))
                 .append()
                 .max_level(log::LevelFilter::Error)
@@ -216,13 +216,13 @@ struct LogLineEvent<'b> {
 
 #[derive(Serialize)]
 struct LogLineHost<'b> {
-    ip: &'b str, 
+    ip: &'b str,
     hostname: &'b str,
 }
 
 #[derive(Serialize)]
 struct LogLineLevel<'b> {
-    level: &'static str, 
+    level: &'static str,
     logger: &'b str,
 }
 
@@ -234,11 +234,11 @@ struct LogLineProcess<'b> {
 #[derive(Serialize)]
 struct LogLine<'a, 'b> {
     #[serde(rename="@timestamp")]
-    timestamp: String, 
-    event: LogLineEvent<'b>, 
-    host: LogLineHost<'b>, 
-    log: LogLineLevel<'b>, 
-    process: LogLineProcess<'b>, 
+    timestamp: String,
+    event: LogLineEvent<'b>,
+    host: LogLineHost<'b>,
+    log: LogLineLevel<'b>,
+    process: LogLineProcess<'b>,
     message: &'a std::fmt::Arguments<'a>,
 }
 
@@ -265,7 +265,7 @@ fn json_format(
     Ok(())
 }
 
-/// A wrapper over a slice reference to print it as a comma separated list 
+/// A wrapper over a slice reference to print it as a comma separated list
 pub struct FormattedList<'a, I: std::fmt::Display> (pub &'a [I]);
 
 impl<I: std::fmt::Display> std::fmt::Display for FormattedList<'_, I> {
