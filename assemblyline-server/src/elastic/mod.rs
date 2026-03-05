@@ -1227,7 +1227,7 @@ impl Elastic {
         let mut attempts = 0;
 
         // Remove control fields from new file info
-        for x in ["classification", "__access_lvl__", "__access_req__", "__access_grp1__", "__access_grp2__", "expiry_ts", "seen", "archive_ts", "labels", "label_categories", "comments"] {
+        for x in ["classification", "__access_lvl__", "__access_req__", "__access_grp1__", "__access_grp2__", "expiry_ts", "seen", "archive_ts", "labels", "label_categories", "comments", "from_json"] {
             fileinfo.remove(x);
         }
 
