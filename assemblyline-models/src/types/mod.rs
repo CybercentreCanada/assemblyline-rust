@@ -31,9 +31,7 @@ use crate::{ElasticMeta, Readable};
 pub type JsonMap = serde_json::Map<String, serde_json::Value>;
 
 impl Readable for JsonMap {
-    fn set_from_archive(&mut self, from_archive: bool) {
-        self.insert("from_json".to_owned(), serde_json::json!(from_archive));
-    }
+    fn set_from_archive(&mut self, _from_archive: bool) {}
 }
 
 #[derive(Serialize, Described, Debug, Clone, Copy, PartialEq, Eq)]
