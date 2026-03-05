@@ -9,6 +9,7 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
+use log::warn;
 
 use super::Transport;
 
@@ -74,7 +75,7 @@ pub struct TransportS3 {
     client: aws_sdk_s3::Client,
 
     base: String,
-    accesskey: Option<String>,
+    _accesskey: Option<String>,
     host: String,
     port: u16,
 }
@@ -214,7 +215,7 @@ impl TransportS3 {
         Ok(Self {
             base,
             parameters,
-            accesskey,
+            _accesskey: accesskey,
             retry_limit: connection_attempts,
             client,
             host,
@@ -592,7 +593,15 @@ macro_rules! retry {
                         }
                         break Ok(value)
                     },
+                    // always retry on these error types
+                    Err(SdkError::TimeoutError(timeout)) => {
+                        warn!("Connection timeout for S3 transport, retrying. {timeout:?}");
+                    }
+                    Err(SdkError::DispatchFailure(failure)) => {
+                        warn!("Dispach failure for S3 transport, retrying. {failure:?}");
+                    }
                     Err(err) => {
+                        // Try to peel back nested errors to pull out any IO errors
                         let mut error: Box<&(dyn std::error::Error + 'static)> = Box::new(&err);
                         loop {
                             if error.downcast_ref::<std::io::Error>().is_some() {
@@ -604,7 +613,6 @@ macro_rules! retry {
                                 None => break,
                             }
                         }
-
                         break Err(err.into())
                     }
                 }

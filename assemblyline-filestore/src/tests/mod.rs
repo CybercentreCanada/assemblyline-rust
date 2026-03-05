@@ -1,5 +1,6 @@
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 
@@ -112,6 +113,21 @@ async fn test_s3() {
     common_actions(fs).await;
 }
 
+
+/// Test S3 FileStore using Minio by pushing and fetching back content from it.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_s3_retry() {
+    // show connection failure to nonsense address
+    assert!(FileStore::with_limit_retries("s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9111/?s3_bucket=test&use_ssl=False").await.is_err());
+
+    // connection should retry forever
+    let timeout = tokio::time::timeout(
+        Duration::from_secs(5),
+        FileStore::open(&["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9111/?s3_bucket=test&use_ssl=False".to_string()])
+    ).await;
+    assert!(timeout.is_err());
+}
+
 async fn common_actions(fs: Arc<FileStore>) {
     let temp_dir = tempfile::tempdir().unwrap();
 
@@ -208,7 +224,7 @@ async fn parallel_activity(fs: Arc<FileStore>) {
             'outer: for _ in 0..1_000 {
                 let index = rand::random_range(0..file_names.len());
                 for _ in 0..3 {
-                    if let Some(data) = fs.get(&file_names[index]).await.unwrap() { 
+                    if let Some(data) = fs.get(&file_names[index]).await.unwrap() {
                         if data == Bytes::copy_from_slice(file_names[index].as_bytes()) {
                             continue 'outer
                         }
