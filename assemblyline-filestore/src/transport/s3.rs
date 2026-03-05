@@ -9,6 +9,7 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
+use log::warn;
 
 use super::Transport;
 
@@ -74,7 +75,7 @@ pub struct TransportS3 {
     client: aws_sdk_s3::Client,
 
     base: String,
-    accesskey: Option<String>,
+    _accesskey: Option<String>,
     host: String,
     port: u16,
 }
@@ -214,7 +215,7 @@ impl TransportS3 {
         Ok(Self {
             base,
             parameters,
-            accesskey,
+            _accesskey: accesskey,
             retry_limit: connection_attempts,
             client,
             host,
@@ -592,19 +593,21 @@ macro_rules! retry {
                         }
                         break Ok(value)
                     },
+                    // always retry on these error types, they are usually networking or IO errors
+                    Err(SdkError::TimeoutError(timeout)) => {
+                        warn!("Connection timeout ({timeout:?}) for S3 transport, retrying...");
+                    }
+                    Err(SdkError::DispatchFailure(failure)) => {
+                        warn!("Dispach failure ({failure:?}) for S3 transport, retrying...");
+                    }
+                    Err(SdkError::ResponseError(_)) => {
+                        warn!("Corrupted response from S3 transport, retrying...");
+                    }
+                    // Server side error, genuinely unclear when we should retry on this one, could be lots of things
+                    // Err(SdkError::ServiceError(error)) =>
+                    // Never retry on these errors, they are probably deterministic validation/parsing errors that will repeat
+                    // Err(ConstructionFailure(ConstructionFailure)) =>
                     Err(err) => {
-                        let mut error: Box<&(dyn std::error::Error + 'static)> = Box::new(&err);
-                        loop {
-                            if error.downcast_ref::<std::io::Error>().is_some() {
-                                log::warn!("Filestore IO error: {err:?}");
-                                continue 'outer
-                            }
-                            match error.source() {
-                                Some(parent) => error = Box::new(parent),
-                                None => break,
-                            }
-                        }
-
                         break Err(err.into())
                     }
                 }
