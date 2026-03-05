@@ -24,14 +24,14 @@ impl FileStore {
         for url in urls {
             transports.push(Self::create_transport(url, None).await?)
         }
-        Ok(Arc::new(Self { 
-            transports 
+        Ok(Arc::new(Self {
+            transports
         }))
     }
 
     /// Open a single url with retrying disabled
     pub async fn with_limit_retries(url: &str) -> Result<Arc<FileStore>> {
-        Ok(Arc::new(Self { 
+        Ok(Arc::new(Self {
             transports: vec![Self::create_transport(url, Some(1)).await?]
         }))
     }
@@ -55,7 +55,7 @@ impl FileStore {
         });
 
         // user = parsed.username or ''
-    
+
 
         match url.scheme() {
             "file" => {
@@ -79,12 +79,12 @@ impl FileStore {
                 let mut parameters = AzureParameters::default();
                 for (name, value) in url.query_pairs() {
                     match name.as_ref() {
-                        "allow_directory_access" => parameters.allow_directory_access = read_bool(&value), 
+                        "allow_directory_access" => parameters.allow_directory_access = read_bool(&value),
                         "use_default_credentials" => parameters.use_default_credentials = read_bool(&value),
                         "emulator" => parameters.emulator = read_bool(&value),
-                        "access_key" => parameters.access_key = value.to_string(), 
-                        "tenant_id" => parameters.tenant_id = value.to_string(), 
-                        "client_id" => parameters.client_id = value.to_string(), 
+                        "access_key" => parameters.access_key = value.to_string(),
+                        "tenant_id" => parameters.tenant_id = value.to_string(),
+                        "client_id" => parameters.client_id = value.to_string(),
                         "client_secret" => parameters.client_secret = value.to_string(),
                         _ => {}
                     }
@@ -104,21 +104,21 @@ impl FileStore {
                 let mut parameters = S3Parameters::default();
                 for (name, value) in url.query_pairs() {
                     match name.as_ref() {
-                        "use_ssl" => parameters.use_ssl = read_bool(&value), 
+                        "use_ssl" => parameters.use_ssl = read_bool(&value),
                         "verify" => parameters.verify = read_bool(&value),
                         "boto_defaults" => parameters.boto_defaults = read_bool(&value),
-                        "aws_region" => parameters.aws_region = Some(value.to_string()), 
-                        "s3_bucket" => parameters.s3_bucket = value.to_string(), 
+                        "aws_region" => parameters.aws_region = Some(value.to_string()),
+                        "s3_bucket" => parameters.s3_bucket = value.to_string(),
                         _ => {}
                     }
                 }
-        
+
                 // If user/password not specified, access might be dictated by IAM roles
                 let user = match url.username() {
                     "" => None,
                     value => Some(value.to_owned())
                 };
-        
+
                 Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters).await?))
             }
             "ftp" | "ftps" => {
@@ -131,7 +131,7 @@ impl FileStore {
                     "" => None,
                     value => Some(value.to_owned())
                 };
-                
+
                 if url.scheme().eq_ignore_ascii_case("ftps") {
                     Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
                 } else {
@@ -148,14 +148,14 @@ impl FileStore {
                 let mut params = SftpParameters::default();
                 for (name, value) in url.query_pairs() {
                     match name.as_ref() {
-                        "private_key" => params.private_key = Some(value.to_string()), 
+                        "private_key" => params.private_key = Some(value.to_string()),
                         "private_key_password" => params.private_key_password = Some(value.to_string()),
                         "validate_host" => params.validate_host = read_bool(&value),
                         _ => {}
                     }
                 }
 
-                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params).await?))                
+                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params).await?))
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());
@@ -272,7 +272,7 @@ impl FileStore {
     }
 
     /// Remove a blob from the storage
-    pub async fn delete(&self, name: &str) -> Result<()> { 
+    pub async fn delete(&self, name: &str) -> Result<()> {
         for transport in &self.transports {
             transport.delete(name).await?;
         }
