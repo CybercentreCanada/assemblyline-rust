@@ -593,26 +593,21 @@ macro_rules! retry {
                         }
                         break Ok(value)
                     },
-                    // always retry on these error types
+                    // always retry on these error types, they are usually networking or IO errors
                     Err(SdkError::TimeoutError(timeout)) => {
-                        warn!("Connection timeout for S3 transport, retrying. {timeout:?}");
+                        warn!("Connection timeout ({timeout:?}) for S3 transport, retrying...");
                     }
                     Err(SdkError::DispatchFailure(failure)) => {
-                        warn!("Dispach failure for S3 transport, retrying. {failure:?}");
+                        warn!("Dispach failure ({failure:?}) for S3 transport, retrying...");
                     }
+                    Err(SdkError::ResponseError(_)) => {
+                        warn!("Corrupted response from S3 transport, retrying...");
+                    }
+                    // Server side error, genuinely unclear when we should retry on this one, could be lots of things
+                    // Err(SdkError::ServiceError(error)) =>
+                    // Never retry on these errors, they are probably deterministic validation/parsing errors that will repeat
+                    // Err(ConstructionFailure(ConstructionFailure)) =>
                     Err(err) => {
-                        // Try to peel back nested errors to pull out any IO errors
-                        let mut error: Box<&(dyn std::error::Error + 'static)> = Box::new(&err);
-                        loop {
-                            if error.downcast_ref::<std::io::Error>().is_some() {
-                                log::warn!("Filestore IO error: {err:?}");
-                                continue 'outer
-                            }
-                            match error.source() {
-                                Some(parent) => error = Box::new(parent),
-                                None => break,
-                            }
-                        }
                         break Err(err.into())
                     }
                 }
