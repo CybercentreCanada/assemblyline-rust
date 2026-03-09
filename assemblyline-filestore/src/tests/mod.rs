@@ -1,4 +1,5 @@
 
+use std::io::{BufWriter, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,7 +42,8 @@ async fn test_azure_emulator() {
     let fs = FileStore::with_limit_retries("azure://localhost/?emulator=true&allow_directory_access=true").await.unwrap();
     println!("{fs:?}");
 
-    common_actions(fs).await;
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -50,6 +52,7 @@ async fn test_sftp() {
     let server = start_temp_sftp_server().await;
     let fs = FileStore::with_limit_retries(&server).await.unwrap();
     common_actions(fs).await;
+    // big_file(fs).await; VERY SLOW
 }
 
 /// Run some operations against an in-process ftp server
@@ -58,7 +61,8 @@ async fn ftp() {
     init();
     let temp_ftp_server = start_temp_ftp_server(None).await;
     let fs = FileStore::with_limit_retries(&format!("ftp://{temp_ftp_server}")).await.unwrap();
-    common_actions(fs).await;
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
 }
 
 /// Run some operations against an in-process ftp server
@@ -68,7 +72,8 @@ async fn ftps() {
     let certs = random_tls_certificate().unwrap();
     let temp_ftps_server = start_temp_ftp_server(Some(certs)).await;
     let fs = FileStore::with_limit_retries(&format!("ftps://{temp_ftps_server}")).await.unwrap();
-    common_actions(fs).await;
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
 }
 
 /// Run many parallel operations against an in-process ftp server
@@ -96,7 +101,8 @@ async fn test_file() {
     let url = format!("file://{}", directory.path().to_string_lossy());
     println!("{url}");
     let fs = FileStore::with_limit_retries(&url).await.unwrap();
-    common_actions(fs).await;
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
 }
 
 /// Test S3 FileStore using Minio by pushing and fetching back content from it.
@@ -110,7 +116,8 @@ async fn test_s3() {
     assert!(fs.exists("al4_minio_pytest.txt").await.unwrap());
     assert_eq!(fs.get("al4_minio_pytest.txt").await.unwrap().unwrap(), content);
     assert!(fs.delete("al4_minio_pytest.txt").await.is_ok());
-    common_actions(fs).await;
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
 }
 
 
@@ -197,6 +204,29 @@ async fn common_actions(fs: Arc<FileStore>) {
     // }
 }
 
+async fn big_file(fs: Arc<FileStore>) {
+    // generate a large file
+    let big_file = tokio::task::spawn_blocking(|| {
+        let big_file = tempfile::NamedTempFile::new().unwrap();
+        let mut writer = BufWriter::new(big_file);
+        for _ in 0..10_000 {
+            for ii in 0u64..2000 {
+                writer.write_all(&ii.to_le_bytes()).unwrap();
+            }
+        }
+        writer.into_inner().unwrap()
+    }).await.unwrap();
+
+    // upload and download the big file
+    fs.upload(big_file.path(), "big_file").await.unwrap();
+    let big_copy = tempfile::NamedTempFile::new().unwrap();
+    fs.download("big_file", big_copy.path()).await.unwrap();
+
+    let data = tokio::fs::read(big_file.path()).await.unwrap();
+    assert!(data.len() > 1 << 25);
+    assert_eq!(tokio::fs::read(big_copy.path()).await.unwrap(), data);
+
+}
 
 async fn parallel_activity(fs: Arc<FileStore>) {
 
