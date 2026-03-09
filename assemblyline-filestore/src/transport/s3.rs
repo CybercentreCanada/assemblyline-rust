@@ -55,6 +55,7 @@ pub struct S3Parameters {
     pub use_ssl: bool,
     pub verify: bool,
     pub boto_defaults: bool,
+    pub compatability: bool,
 }
 
 impl Default for S3Parameters {
@@ -64,7 +65,8 @@ impl Default for S3Parameters {
             s3_bucket: "al-storage".to_string(),
             use_ssl: true,
             verify: true,
-            boto_defaults: false
+            boto_defaults: false,
+            compatability: true,
         }
     }
 }
@@ -181,9 +183,14 @@ impl TransportS3 {
 
         // Build the client
         let sdk_config = loader.load().await;
-        let s3_config = aws_sdk_s3::config::Builder::from(&sdk_config)
-            .force_path_style(true)
-            .build();
+        let s3_config = if parameters.compatability {
+            aws_sdk_s3::config::Builder::from(&sdk_config)
+                .force_path_style(true)
+                .request_checksum_calculation(aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired)
+                .build()
+        } else {
+            aws_sdk_s3::config::Builder::from(&sdk_config).build()
+        };
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
         // make sure the bucket exists
@@ -571,7 +578,7 @@ macro_rules! retry {
         {
             let mut backoff = MIN_BACKOFF;
             let mut retries = 0;
-            'outer: loop {
+            loop {
                 if retries > 0 {
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(MAX_BACKOFF);

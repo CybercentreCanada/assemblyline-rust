@@ -98,7 +98,7 @@ impl FileStore {
                 let base = url.path().to_owned();
 
                 Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts).await?))
-            }
+            },
             "s3" => {
                 use crate::transport::s3::{S3Parameters, TransportS3};
                 let mut parameters = S3Parameters::default();
@@ -109,6 +109,7 @@ impl FileStore {
                         "boto_defaults" => parameters.boto_defaults = read_bool(&value),
                         "aws_region" => parameters.aws_region = Some(value.to_string()),
                         "s3_bucket" => parameters.s3_bucket = value.to_string(),
+                        "compatability" => parameters.compatability = read_bool(&value),
                         _ => {}
                     }
                 }
