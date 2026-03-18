@@ -193,7 +193,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
                     let mut proccessed_tasks = 0;
                     loop {
                         let task = self.dispatch_client.request_work("plumber", *service_name, "0", None, false, None).await?;
-                        let task = match task { 
+                        let task = match task {
                             Some(task) => task,
                             None => break,
                         };
@@ -218,7 +218,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
                         worker.stop.set(true);
                     }
                 }
-                
+
                 // For services that are enabled but limited
                 else if let Some(service) = service {
                      if service.enabled && service.max_queue_length > 0 {
@@ -287,7 +287,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
                                     continue
                                 }
                                 Err(err) => return Err(err.into())
-                            }                            
+                            }
                         } else {
                             return Err(err.into())
                         }
@@ -432,7 +432,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
             #[serde(default)]
             pub roles: Vec<UserRole>,
         }
-        
+
         #[derive(Deserialize, Debug)]
         struct PartialUser {
             uname: String,
@@ -449,7 +449,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
             fn set_from_archive(&mut self, _from_archive: bool) { }
         }
 
-        let mut search = self.datastore.user.stream_search::<PartialUser>("*", "uname,apikeys,type,roles".to_string(), vec![], None, None, None).await?;        
+        let mut search = self.datastore.user.stream_search::<PartialUser>("*", "uname,apikeys,type,roles".to_string(), vec![], None, None, None).await?;
 
         while let Some(user) = search.next().await? {
             changes_made = true;

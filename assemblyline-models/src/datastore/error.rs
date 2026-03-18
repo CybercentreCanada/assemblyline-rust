@@ -181,7 +181,7 @@ impl Error {
             self.sha256.to_string(),
             self.response.service_name.replace('.', "_"),
             format!("v{}", self.response.service_version.replace('.', "_")),
-            format!("c{}", generate_conf_key(service_tool_version, task, None)?),
+            format!("c{}", generate_conf_key(service_tool_version, task, None, false)?),
             format!("e{}", self.error_type as u64),
         ];
 
