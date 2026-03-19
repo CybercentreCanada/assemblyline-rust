@@ -192,7 +192,7 @@ impl Task {
     }
 }
 
-pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>, partial: Option<bool>) -> Result<String, serde_json::Error> {
+pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>, partial: Option<bool>, force_ignore_cache: bool) -> Result<String, serde_json::Error> {
     if let Some(task) = task {
         let service_config = serde_json::to_string(&{
             let mut pairs: Vec<_> = task.service_config.iter().collect();
@@ -207,7 +207,7 @@ pub fn generate_conf_key(service_tool_version: Option<&str>, task: Option<&Task>
             ("min_classification", serde_json::json!(task.min_classification)),
         ])?;
 
-        let ignore_salt = if task.ignore_cache || partial.unwrap_or_default() {
+        let ignore_salt = if task.ignore_cache || force_ignore_cache || partial.unwrap_or_default() {
              &rand::rng().random::<u128>().to_string()
         } else {
             "None"

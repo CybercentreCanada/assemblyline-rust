@@ -29,7 +29,7 @@ const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
 
 pub trait DispatchCapable: 'static + Send + Sync {
     fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> impl Future<Output=Result<Option<ServiceTask>>> + Send;
-    fn service_finished(&self, task: ServiceTask, result_key: String, result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> impl Future<Output=Result<()>> + Send;
+    fn service_finished(&self, task: &ServiceTask, result_key: String, result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> impl Future<Output=Result<()>> + Send;
     fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> impl Future<Output=Result<()>> + Send;
 }
 
@@ -80,7 +80,7 @@ impl DispatchCapable for DispatchClient {
     }
 
     /// Notifies the dispatcher of service completion, and possible new files to dispatch.
-    async fn service_finished(&self, mut task: ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
+    async fn service_finished(&self, task: &ServiceTask, mut result_key: String, mut result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> Result<()> {
         let mut version = Some(version.unwrap_or(Version::Create));
 
         // Make sure the dispatcher knows we were working on this task
@@ -111,8 +111,10 @@ impl DispatchCapable for DispatchClient {
                         // Regenerate entire result key based on result and modified task (ignore caching)
                         version = Some(Version::Create);
                         result.created = chrono::Utc::now();
-                        task.ignore_cache = true;
-                        result_key = result.build_key(Some(&task))?;
+                        result_key = result
+                            .start_build_key(Some(task))
+                            .ignore_cache(true)
+                            .build()?;
                     }
                     Err(err) => {
                         return Err(err.into())
@@ -580,9 +582,9 @@ impl DispatchCapable for MockDispatchClient {
         }
     }
 
-    async fn service_finished(&self, task: ServiceTask, _result_key: String, _result: result::Result, _temporary_data: Option<JsonMap>, _version: Option<Version>, _errors: Vec<Error>) -> Result<()> {
+    async fn service_finished(&self, task: &ServiceTask, _result_key: String, _result: result::Result, _temporary_data: Option<JsonMap>, _version: Option<Version>, _errors: Vec<Error>) -> Result<()> {
         let mut buffer = self.finished.lock().await;
-        buffer.push(task);
+        buffer.push(task.clone());
         self.change.notify_waiters();
         Ok(())
     }

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assemblyline_models::types::JsonMap;
-use log::debug;
+use log::{debug, error};
 use poem::http::{HeaderMap, StatusCode};
 use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
 use poem::web::{Data, Json};
@@ -50,10 +50,10 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 /// Result example:
 /// {'keep_alive': true}
 #[handler]
-async fn get_task(    
+async fn get_task(
     tasking: Data<&Arc<TaskingClient>>,
     headers: &HeaderMap,
-    Data(client_info): Data<&ClientInfo>, 
+    Data(client_info): Data<&ClientInfo>,
 ) -> Result<Response> {
     let ClientInfo {
         service_name,
@@ -64,7 +64,7 @@ async fn get_task(
 
     debug!("Getting task for {service_name} {service_version} [{}]", service_tool_version.as_deref().unwrap_or("None"));
     let timeout_string = require_header!(headers, "timeout", "30");
-    
+
     let timeout = match timeout_string.parse() {
         Ok(timeout) => Duration::from_secs_f64(timeout),
         Err(_) => return Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("Could not parse [{timeout_string}] as number")))
@@ -83,11 +83,11 @@ async fn get_task(
         attempts += 1;
 
         let result = tasking.get_task(
-            client_id, 
-            *service_name, 
-            service_version, 
-            service_tool_version.as_deref(), 
-            Some(status_expiry), 
+            client_id,
+            *service_name,
+            service_version,
+            service_tool_version.as_deref(),
+            Some(status_expiry),
             remaining
         ).await;
 
@@ -129,7 +129,7 @@ async fn get_task(
 /// }
 #[handler]
 async fn task_finished(
-    Data(client_info): Data<&ClientInfo>, 
+    Data(client_info): Data<&ClientInfo>,
     tasking: Data<&Arc<TaskingClient>>,
     Json(body): Json<FinishedBody>,
 ) -> Result<Response> {
@@ -141,6 +141,7 @@ async fn task_finished(
         } else if let Some(err) = err.downcast_ref::<serde_json::Error>(){
             Err(make_empty_api_error(StatusCode::BAD_REQUEST, &format!("json error: {err:?}")))
         } else {
+            error!("task_finished error ({client_info:?}): {err:?}");
             Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &format!("{err:?}")))
         }
     }

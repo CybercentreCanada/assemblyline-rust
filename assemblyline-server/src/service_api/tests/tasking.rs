@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::{EmptyResult, Error, Service};
 use assemblyline_models::messages::changes::ServiceChange;
 use assemblyline_models::messages::task::Task;
@@ -204,15 +205,11 @@ async fn test_task_ignored_then_timeout() {
     queue.push(0.0, &task).await.unwrap();
 
     // add an empty result for that task to cache hit on
-    let result_key = assemblyline_models::datastore::Result::help_build_key(
-        &task.fileinfo.sha256,
-        &service.name,
-        &service.version,
-        true,
-        false,
-        Some(TOOL_VERSION),
-        Some(&task)
-    ).unwrap();
+    let result_key = ResultKeyBuilder::new(&task.fileinfo.sha256, &service.name, &service.version)
+        .is_empty(true)
+        .service_tool_version(Some(TOOL_VERSION))
+        .task(Some(&task))
+        .build().unwrap();
     debug!("Saving empty as {result_key}");
     core.datastore.emptyresult.save(&result_key, &EmptyResult{expiry_ts: chrono::Utc::now()}, None, None).await.unwrap();
 
@@ -394,17 +391,17 @@ async fn test_finish_heuristic() {
     });
 
     let heur_id = format!("{}.HEUR1", service.name.to_uppercase());
-    core.datastore.heuristic.save(&heur_id, &assemblyline_models::datastore::heuristic::Heuristic { 
-        attack_id: Default::default(), 
-        classification: ExpandingClassification::unrestricted(&core.classification_parser), 
-        description: "".into(), 
-        filetype: Default::default(), 
-        heur_id: heur_id.clone(), 
-        name: Default::default(), 
-        score: 5000, 
-        signature_score_map: Default::default(), 
-        stats: Default::default(), 
-        max_score: None 
+    core.datastore.heuristic.save(&heur_id, &assemblyline_models::datastore::heuristic::Heuristic {
+        attack_id: Default::default(),
+        classification: ExpandingClassification::unrestricted(&core.classification_parser),
+        description: "".into(),
+        filetype: Default::default(),
+        heur_id: heur_id.clone(),
+        name: Default::default(),
+        score: 5000,
+        signature_score_map: Default::default(),
+        stats: Default::default(),
+        max_score: None
     }, None, None).await.unwrap();
     core.datastore.heuristic.commit(None).await.unwrap();
     core.redis_volatile.publish_json("changes.heuristics", &json!({})).await.unwrap();
@@ -465,18 +462,18 @@ async fn test_finish_missing_file() {
     result.response.service_name = service.name;
     result.response.service_version = service.version;
     result.response.service_tool_version = Some(TOOL_VERSION.to_owned());
-    
+
     let missing_hash: Sha256 = rand::rng().random();
-    result.response.extracted.push(assemblyline_models::datastore::result::File{ 
-        name: Default::default(), 
-        sha256: missing_hash.clone(), 
-        description: Default::default(), 
-        classification: ClassificationString::unrestricted(&core.classification_parser), 
-        is_section_image: Default::default(), 
-        parent_relation: Default::default(), 
-        allow_dynamic_recursion: Default::default() 
+    result.response.extracted.push(assemblyline_models::datastore::result::File{
+        name: Default::default(),
+        sha256: missing_hash.clone(),
+        description: Default::default(),
+        classification: ClassificationString::unrestricted(&core.classification_parser),
+        is_section_image: Default::default(),
+        parent_relation: Default::default(),
+        allow_dynamic_recursion: Default::default()
     });
-    
+
     let result_key = result.build_key(Some(&task)).unwrap();
 
     let response = client.post(format!("{address}/api/v1/task/")).json(&json!({
@@ -507,7 +504,7 @@ async fn test_finish_missing_file() {
 #[tokio::test]
 async fn parse_sample_result() {
     let data = include_str!("data/sample_result_1.json");
-    
+
     let config = assemblyline_markings::classification::sample_config();
     assemblyline_models::set_global_classification(Arc::new(assemblyline_markings::classification::ClassificationParser::new(config).unwrap()));
 

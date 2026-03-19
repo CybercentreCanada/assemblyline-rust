@@ -27,7 +27,7 @@ url = "2"
 log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
-assemblyline-models = { version="0.7", path = "../assemblyline-models" }
+assemblyline-models = { version="0.8", path = "../assemblyline-models" }
 
 # Libraries used for the ingest binary
 clap = { version = "4.5", features = ["derive"], optional = true }

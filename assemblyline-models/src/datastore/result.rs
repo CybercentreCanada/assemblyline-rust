@@ -353,32 +353,77 @@ impl Readable for Result {
     }
 }
 
-impl Result {
-    pub fn build_key(&self, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
-        Self::help_build_key(
-            &self.sha256,
-            &self.response.service_name,
-            &self.response.service_version,
-            self.is_empty(),
-            self.partial,
-            self.response.service_tool_version.as_deref(),
-            task
-        )
+pub struct ResultKeyBuilder<'a> {
+    hash: &'a Sha256,
+    service_name: &'a str,
+    service_version: &'a str,
+    service_tool_version: Option<&'a str>,
+    task: Option<&'a Task>,
+    partial: bool,
+    ignore_cache: bool,
+    is_empty: bool,
+}
+
+impl<'a> ResultKeyBuilder<'a> {
+
+    pub fn new(hash: &'a Sha256, service_name: &'a str, service_version: &'a str) -> Self {
+        Self {
+            hash,
+            service_name,
+            service_version,
+            service_tool_version: None,
+            task: None,
+            partial: false,
+            ignore_cache: false,
+            is_empty: false,
+        }
     }
 
-    pub fn help_build_key(sha256: &Sha256, service_name: &str, service_version: &str, is_empty: bool, partial: bool, service_tool_version: Option<&str>, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
+    pub fn service_tool_version(mut self, service_tool_version: Option<&'a str>) -> Self {
+        self.service_tool_version = service_tool_version; self
+    }
+    pub fn task(mut self, task: Option<&'a Task>) -> Self {
+        self.task = task; self
+    }
+    pub fn partial(mut self, partial: bool) -> Self {
+        self.partial = partial; self
+    }
+    pub fn ignore_cache(mut self, ignore_cache: bool) -> Self {
+        self.ignore_cache = ignore_cache; self
+    }
+    pub fn is_empty(mut self, is_empty: bool) -> Self {
+        self.is_empty = is_empty; self
+    }
+
+    pub fn build(self) -> std::result::Result<String, serde_json::Error> {
         let mut key_list = vec![
-            sha256.to_string(),
-            service_name.replace('.', "_"),
-            format!("v{}", service_version.replace('.', "_")),
-            format!("c{}", generate_conf_key(service_tool_version, task, Some(partial))?),
+            self.hash.to_string(),
+            self.service_name.replace('.', "_"),
+            format!("v{}", self.service_version.replace('.', "_")),
+            format!("c{}", generate_conf_key(self.service_tool_version, self.task, Some(self.partial), self.ignore_cache)?),
         ];
 
-        if is_empty {
+        if self.is_empty {
             key_list.push("e".to_owned())
         }
 
         Ok(key_list.join("."))
+    }
+}
+
+
+impl Result {
+
+    pub fn start_build_key<'a>(&'a self, task: Option<&'a Task>) -> ResultKeyBuilder<'a> {
+        ResultKeyBuilder::new(&self.sha256, &self.response.service_name, &self.response.service_version)
+        .is_empty(self.is_empty())
+        .partial(self.partial)
+        .service_tool_version(self.response.service_tool_version.as_deref())
+        .task(task)
+    }
+
+    pub fn build_key(&self, task: Option<&Task>) -> std::result::Result<String, serde_json::Error> {
+        self.start_build_key(task).build()
     }
 
     pub fn scored_tag_dict(&self) -> std::result::Result<HashMap<String, TagEntry>, LayoutError> {

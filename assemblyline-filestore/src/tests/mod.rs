@@ -253,7 +253,7 @@ async fn parallel_activity(fs: Arc<FileStore>) {
         handles.push(tokio::spawn(async move {
             'outer: for _ in 0..1_000 {
                 let index = rand::random_range(0..file_names.len());
-                for _ in 0..3 {
+                for _ in 0..10 {
                     if let Some(data) = fs.get(&file_names[index]).await.unwrap() {
                         if data == Bytes::copy_from_slice(file_names[index].as_bytes()) {
                             continue 'outer

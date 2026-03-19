@@ -3,17 +3,16 @@ use std::sync::Arc;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ready_classification;
+use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::{File, Service};
 use assemblyline_models::types::{JsonMap, ServiceName, Sha256};
 use log::debug;
-use rand::Rng;
 use serde_json::json;
 
 use crate::Core;
 use crate::common::sha256_data;
 use crate::elastic::create_empty_result_from_key;
 
-use super::Elastic;
 
 fn create_service(name: &str) -> Service {
     serde_json::from_value(serde_json::json!({
@@ -472,15 +471,9 @@ async fn test_create_empty_result() {
     let sha256: Sha256 = "a123".repeat(16).parse().unwrap();
 
     // Build result key
-    let result_key = assemblyline_models::datastore::Result::help_build_key(
-        &sha256,
-        &svc_name,
-        svc_version,
-        true,
-        false,
-        None,
-        None
-    ).unwrap();
+    let result_key = ResultKeyBuilder::new(&sha256, &svc_name, svc_version)
+        .is_empty(true)
+        .build().unwrap();
 
     // Create an empty result from the key
     let empty_result = create_empty_result_from_key(&result_key, 5, &cl_engine).unwrap();
