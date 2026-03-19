@@ -8,6 +8,7 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::config::Config;
 use assemblyline_models::datastore::error::{ErrorSeverity, ErrorTypes};
 use assemblyline_models::datastore::heuristic::Heuristic;
+use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
@@ -540,26 +541,45 @@ impl TaskingClient {
             return Ok((Some(task), false))
         }
 
+        // check for cache hits
+        match self.check_cache(&task, &service_name, service_version, service_tool_version).await {
+            // cache hit, report metrics and retry
+            Ok(CacheResult::Hit {score }) => {
+                increment!(metric_factory, cache_hit);
+                if score != 0 {
+                    increment!(metric_factory, scored);
+                } else {
+                    increment!(metric_factory, not_scored);
+                }
+                // return true to indicate retry desired
+                return Ok((None, true))
+            },
+            // An error we have explicity said we can't recover from, retry
+            Ok(CacheResult::UnrecoverableError) => {
+                return Ok((None, true))
+            }
+            // cache miss or other error with cache
+            Ok(CacheResult::Miss) => {}
+            Err(err) => {
+                error!("Failure reading result cache, treating as miss: {err:?}");
+            },
+        }
+
+        // No luck with the cache, lets dispatch the task to a client
+        increment!(metric_factory, cache_miss);
+        return Ok((Some(task), false))
+    }
+
+    async fn check_cache(&self, task: &Task, service_name: &ServiceName, service_version: &str, service_tool_version: Option<&str>) -> Result<CacheResult>  {
         // get the cache key for if a result exists for this task already
-        let result_key = assemblyline_models::datastore::Result::help_build_key(
-            &task.fileinfo.sha256,
-            &service_name,
-            service_version,
-            false,
-            false,
-            service_tool_version,
-            Some(&task)
-        )?;
+        let result_key = ResultKeyBuilder::new(&task.fileinfo.sha256, service_name, service_version)
+            .service_tool_version(service_tool_version)
+            .task(Some(task))
+            .build()?;
 
         // Checking for previous results for this key
         let possible_result = self.datastore.result.get_if_exists(&result_key, None).await?;
         if let Some((mut result, version)) = possible_result {
-            increment!(metric_factory, cache_hit);
-            if result.result.score != 0 {
-                increment!(metric_factory, scored);
-            } else {
-                increment!(metric_factory, not_scored);
-            }
 
             if task.ttl > 0 {
                 if let Some(expiry) = result.expiry_ts {
@@ -578,12 +598,12 @@ impl TaskingClient {
             // The file to analyse isn't found. Mark this task as an error
             if freshen_hashes.is_empty() {
                 // save error
-                let error = assemblyline_models::datastore::Error::from_task(&task)
+                let error = assemblyline_models::datastore::Error::from_task(task)
                     .error_type(ErrorTypes::TaskPreempted)
                     .message(format!("Service not tasked. Target file not found in system ({}).", task.fileinfo.sha256));
-                let error_key = error.build_key(None, Some(&task))?;
-                self.dispatch_client.service_failed(task, &error_key, error).await?;
-                return Ok((None, true))
+                let error_key = error.build_key(None, Some(task))?;
+                self.dispatch_client.service_failed(task.clone(), &error_key, error).await?;
+                return Ok(CacheResult::UnrecoverableError)
             }
 
             // Check that extracted files are all still accounted for, do the work in separate tasks
@@ -615,8 +635,7 @@ impl TaskingClient {
                     None => {
                         // Bail out if file does not exists
                         info!("We have a cache hit with some related files missing, ignoring it...");
-                        increment!(metric_factory, cache_miss);
-                        return Ok((Some(task), false))
+                        return Ok(CacheResult::Miss)
                     }
                 }
             }
@@ -634,8 +653,9 @@ impl TaskingClient {
                 ).await?;
             }
 
+            let score = result.result.score;
             self.dispatch_client.service_finished(task, result_key.clone(), result, None, Some(version), vec![]).await?;
-            return Ok((None, true))
+            return Ok(CacheResult::Hit{ score })
         }
 
         // Cache of full results has failed, so
@@ -643,29 +663,30 @@ impl TaskingClient {
         let empty_key = format!("{result_key}.e");
         match self.datastore.emptyresult.get_if_exists(&empty_key, None).await {
             Ok(Some((_, version))) => {
-                increment!(metric_factory, cache_hit);
-                increment!(metric_factory, not_scored);
                 let result = create_empty_result_from_key(&result_key, self.config.submission.emptyresult_dtl.into(), &self.classification_engine)?;
                 self.dispatch_client.service_finished(task, empty_key, result, None, Some(version), vec![]).await?;
-                return Ok((None, true))
+                return Ok(CacheResult::Hit { score: 0 })
             },
-            Ok(None) => {},
+            Ok(None) => {
+                return Ok(CacheResult::Miss)
+            },
             Err(err) if err.is_json() => {
                 warn!("Got poisoned empty result cache record for key {result_key}.e, cleaning up...");
                 self.datastore.emptyresult.delete(&empty_key, None).await?;
+                return Ok(CacheResult::Miss)
             },
             Err(err) => {
                 return Err(err.into())
             }
         }
-
-        // Both real and empty results found nothing, report this in the metrics
-        increment!(metric_factory, cache_miss);
-
-        // No luck with the cache, lets dispatch the task to a client
-        return Ok((Some(task), false))
     }
 
+}
+
+enum CacheResult {
+    Hit { score: i32 },
+    Miss,
+    UnrecoverableError
 }
 
 
@@ -1060,7 +1081,7 @@ impl TaskingClient {
 
         let score = result.result.score;
         let result_key = result.build_key(Some(&task))?;
-        self.dispatch_client.service_finished(task, result_key, result, Some(temp_submission_data), None, all_extra_errors).await.context("service_finished")?;
+        self.dispatch_client.service_finished(&task, result_key, result, Some(temp_submission_data), None, all_extra_errors).await.context("service_finished")?;
 
         // Metrics
         if score > 0 {
