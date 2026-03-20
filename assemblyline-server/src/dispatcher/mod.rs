@@ -2035,6 +2035,15 @@ impl Dispatcher {
             },
             Some(filestore_info) => {
                 // Translate the file info format
+
+                let file_type = if task.submission.params.filetype_override.is_some() && task.file_depth.get(sha256).cloned().unwrap_or(0) == 0 {
+                    // If there is a filetype override and this is the root file, use the override instead of the filestore value
+                    task.submission.params.filetype_override.clone().unwrap()
+                } else {
+                    // Otherwise, use the value from the filestore
+                    filestore_info.file_type.clone()
+                };
+
                 let file_info = Arc::new(FileInfo {
                     magic: filestore_info.magic,
                     md5: filestore_info.md5,
@@ -2043,7 +2052,7 @@ impl Dispatcher {
                     sha256: filestore_info.sha256,
                     size: filestore_info.size,
                     ssdeep: Some(filestore_info.ssdeep),
-                    file_type: filestore_info.file_type,
+                    file_type: file_type,
                     tlsh: filestore_info.tlsh,
                     uri_info: filestore_info.uri_info
                 });
