@@ -150,7 +150,7 @@ impl ActionWorker {
                         // if the encoding is nested as a string unwrap that layer and try again
                         if let Ok(data_string) = serde_yaml::from_slice::<String>(&data) {
                             data.clear();
-                            data.copy_from_slice(data_string.as_bytes());
+                            data.extend_from_slice(data_string.as_bytes());
                         } else {
                             error!("Couldn't load stored actions: {err}");
                             break
