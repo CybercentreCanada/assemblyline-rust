@@ -137,25 +137,25 @@ impl ActionWorker {
         // Load the action data from redis
         let data = self.config_data.get_raw(POST_PROCESS_CONFIG_KEY).await?;
 
-        // If nothing is in redis, fall back to legacy storage
-        // if data is None:
-        //     try:
-        //         with CacheStore('system', config=self.config, datastore=self.datastore) as cache:
-        //             byte_data = cache.get('postprocess_actions')
-        //             if byte_data:
-        //                 data = byte_data.decode()
-        //     except Exception:
-        //         logger.warn("Couldn't access system files")
-
         // Decode data
         let mut objects = default_postprocess_actions();
-        if let Some(data) = data {
-            match serde_yaml::from_slice(&data) {
-                Ok(obj) => {
-                    objects = obj;
-                },
-                Err(err) => {
-                    error!("Couldn't load stored actions: {err}")
+        if let Some(mut data) = data {
+            loop {
+                match serde_yaml::from_slice(&data) {
+                    Ok(obj) => {
+                        objects = obj;
+                        break
+                    },
+                    Err(err) => {
+                        // if the encoding is nested as a string unwrap that layer and try again
+                        if let Ok(data_string) = serde_yaml::from_slice::<String>(&data) {
+                            data.clear();
+                            data.copy_from_slice(data_string.as_bytes());
+                        } else {
+                            error!("Couldn't load stored actions: {err}");
+                            break
+                        }
+                    }
                 }
             }
         }
