@@ -22,7 +22,7 @@ use assemblyline_models::config::{default_postprocess_actions, Config, Postproce
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 
 use crate::archive::ArchiveManager;
-use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH_NAME, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
+use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
 use crate::Core;
 // use crate::datastore::Datastore;
 // use crate::models::JsonValue;
@@ -104,7 +104,7 @@ impl ActionWorker {
             actions: Default::default(),
             unique_queue: core.redis_persistant.priority_queue(INGEST_INTERNAL_QUEUE_NAME.to_owned()),
             alert_queue: core.redis_persistant.queue(ALERT_QUEUE_NAME.to_owned(), None),
-            config_data: core.redis_persistant.hashmap(CONFIG_HASH_NAME.to_owned(), None),
+            config_data: core.redis_persistant.hashmap(CONFIG_HASH.to_owned(), None),
             archive_manager: ArchiveManager::new(core),
         });
 
