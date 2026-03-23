@@ -22,7 +22,7 @@ use assemblyline_models::config::{default_postprocess_actions, Config, Postproce
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 
 use crate::archive::ArchiveManager;
-use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH_NAME, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
+use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
 use crate::Core;
 // use crate::datastore::Datastore;
 // use crate::models::JsonValue;
@@ -104,7 +104,7 @@ impl ActionWorker {
             actions: Default::default(),
             unique_queue: core.redis_persistant.priority_queue(INGEST_INTERNAL_QUEUE_NAME.to_owned()),
             alert_queue: core.redis_persistant.queue(ALERT_QUEUE_NAME.to_owned(), None),
-            config_data: core.redis_persistant.hashmap(CONFIG_HASH_NAME.to_owned(), None),
+            config_data: core.redis_persistant.hashmap(CONFIG_HASH.to_owned(), None),
             archive_manager: ArchiveManager::new(core),
         });
 
@@ -137,25 +137,25 @@ impl ActionWorker {
         // Load the action data from redis
         let data = self.config_data.get_raw(POST_PROCESS_CONFIG_KEY).await?;
 
-        // If nothing is in redis, fall back to legacy storage
-        // if data is None:
-        //     try:
-        //         with CacheStore('system', config=self.config, datastore=self.datastore) as cache:
-        //             byte_data = cache.get('postprocess_actions')
-        //             if byte_data:
-        //                 data = byte_data.decode()
-        //     except Exception:
-        //         logger.warn("Couldn't access system files")
-
         // Decode data
         let mut objects = default_postprocess_actions();
-        if let Some(data) = data {
-            match serde_yaml::from_slice(&data) {
-                Ok(obj) => {
-                    objects = obj;
-                },
-                Err(err) => {
-                    error!("Couldn't load stored actions: {err}")
+        if let Some(mut data) = data {
+            loop {
+                match serde_yaml::from_slice(&data) {
+                    Ok(obj) => {
+                        objects = obj;
+                        break
+                    },
+                    Err(err) => {
+                        // if the encoding is nested as a string unwrap that layer and try again
+                        if let Ok(data_string) = serde_yaml::from_slice::<String>(&data) {
+                            data.clear();
+                            data.extend_from_slice(data_string.as_bytes());
+                        } else {
+                            error!("Couldn't load stored actions: {err}");
+                            break
+                        }
+                    }
                 }
             }
         }

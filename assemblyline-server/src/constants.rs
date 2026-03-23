@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub(crate) const NOTIFICATION_QUEUE_PREFIX: &str = "nq-";
 pub(crate) const INGEST_INTERNAL_QUEUE_NAME: &str = "m-unique";
 pub(crate) const ALERT_QUEUE_NAME: &str = "m-alert";
-pub(crate) const CONFIG_HASH_NAME: &str = "config-data";
 pub(crate) const CONFIG_HASH: &str = "al-config";
 pub(crate) const POST_PROCESS_CONFIG_KEY: &str = "post-process-actions";
 pub(crate) const METRICS_CHANNEL: &str = "assemblyline_metrics";
@@ -27,7 +26,7 @@ pub fn service_queue_name(service: &str) -> String {
 }
 
 /// Get the name of the list dispatcher will pull for sending out submission events.
-pub fn make_watcher_list_name(sid: Sid) -> String {    
+pub fn make_watcher_list_name(sid: Sid) -> String {
     format!("dispatch-watcher-list-{sid}")
 }
 
@@ -53,7 +52,7 @@ pub enum ServiceStage {
 impl<'de> Deserialize<'de> for ServiceStage {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> 
+        D: serde::Deserializer<'de>
     {
         let value = usize::deserialize(deserializer)?;
         match Self::from_repr(value) {
@@ -83,7 +82,7 @@ pub enum ServiceStatus {
 impl<'de> Deserialize<'de> for ServiceStatus {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> 
+        D: serde::Deserializer<'de>
     {
         let value = usize::deserialize(deserializer)?;
         match Self::from_repr(value) {
