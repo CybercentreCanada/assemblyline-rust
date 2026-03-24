@@ -2036,13 +2036,14 @@ impl Dispatcher {
             Some(filestore_info) => {
                 // Translate the file info format
 
-                let file_type = if task.submission.params.filetype_override.is_some() && task.file_depth.get(sha256).cloned().unwrap_or(0) == 0 {
-                    // If there is a filetype override and this is the root file, use the override instead of the filestore value
-                    task.submission.params.filetype_override.clone().unwrap()
-                } else {
-                    // Otherwise, use the value from the filestore
-                    filestore_info.file_type.clone()
-                };
+                let mut file_type = &filestore_info.file_type;
+
+                // If there is a filetype override, then only apply it to the root file of the submission
+                if let Some(ft) = &task.submission.params.filetype_override {
+                    if task.file_depth.get(sha256).is_none_or(|&depth| depth == 0) {
+                        file_type = ft;
+                    }
+                }
 
                 let file_info = Arc::new(FileInfo {
                     magic: filestore_info.magic,
@@ -2052,7 +2053,7 @@ impl Dispatcher {
                     sha256: filestore_info.sha256,
                     size: filestore_info.size,
                     ssdeep: Some(filestore_info.ssdeep),
-                    file_type: file_type,
+                    file_type: file_type.clone(),
                     tlsh: filestore_info.tlsh,
                     uri_info: filestore_info.uri_info
                 });
