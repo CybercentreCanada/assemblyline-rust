@@ -151,6 +151,9 @@ pub struct SubmissionParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[metadata(store=true, copyto="__text__")]
     pub description: Option<Text>,
+    /// Override the default filetype identification
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filetype_override: Option<String>,
     /// Should this submission generate an alert?
     #[serde(default)]
     pub generate_alert: bool,
@@ -236,6 +239,7 @@ impl SubmissionParams {
             classification,
             deep_scan: false,
             description: None,
+            filetype_override: None,
             generate_alert: false,
             groups: vec![],
             ignore_cache: false,
