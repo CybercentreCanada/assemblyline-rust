@@ -8,7 +8,10 @@ use assemblyline_models::datastore::apikey::Apikey;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
+use bytes::Bytes;
 use log::{debug, error, warn};
+use poem::http;
+use serde::de::DeserializeOwned;
 use tracing::instrument;
 
 pub mod responses;
@@ -503,7 +506,7 @@ impl ElasticHelper {
             None => self.make_request(&mut 0, &request).await?
         };
 
-        let ret: responses::Command = response.json().await?;
+        let ret: responses::Command = response.json()?;
 
         if !ret.acknowledged {
             return Err(ElasticErrorInner::FailedToCreateIndex{ src: src.to_owned(), target: target.to_owned()}.into())
@@ -542,7 +545,7 @@ impl ElasticHelper {
     }
 
     /// Given an http query result decide whether to retry or extract the response
-    async fn handle_result(attempt: &mut u64, request: &Request, result: reqwest::Result<reqwest::Response>) -> Result<Option<reqwest::Response>> {
+    async fn handle_result(attempt: &mut u64, request: &Request, result: reqwest::Result<reqwest::Response>) -> Result<Option<Response>> {
         match Self::_handle_result(result, request).await? {
             Some(value) => Ok(Some(value)),
             None => {
@@ -554,7 +557,7 @@ impl ElasticHelper {
     }
 
     /// Given an http query result decide whether to retry or extract the response
-    async fn _handle_result(result: reqwest::Result<reqwest::Response>, request: &Request) -> Result<Option<reqwest::Response>> {
+    async fn _handle_result(result: reqwest::Result<reqwest::Response>, request: &Request) -> Result<Option<Response>> {
         // Handle connection errors with a retry, let other non http errors bubble up
         let response = match result {
             Ok(response) => response,
@@ -571,17 +574,31 @@ impl ElasticHelper {
 
         // At this point we have a response from the server, but it may be describing an error.
         let status = response.status();
-        // debug!("elastic response status: {status}");
 
-        // handle non-errors
-        if status.is_success() {
-            return Ok(Some(response))
+        // if the server told us how large the body should be fetch that info
+        let mut size: Option<usize> = None;
+        if let Some(value) = response.headers().get(http::header::CONTENT_LENGTH) {
+            if let Ok(value) = value.to_str() {
+                if let Ok(value) = value.parse::<usize>() {
+                    size = Some(value);
+                };
+            }
         }
 
-        // Since we know we have an error, load the body, for some errors this will have more information
-        // let headers = response.headers().clone();
+        // Load the entire body, since we are always going to do this anyway, we don't stream
+        // any responses from elasticsearch
         let body = match response.bytes().await {
-            Ok(body) => body,
+            Ok(body) => {
+                match size {
+                    Some(size) => if size == body.len() {
+                        body
+                    } else {
+                        warn!("Incomplete read from elastic. Retrying...");
+                        return Ok(None)
+                    },
+                    None => body,
+                }
+            },
             Err(err) => {
                 // always retry for connect and timeout errors
                 if err.is_request() || err.is_connect() || err.is_timeout() {
@@ -592,6 +609,11 @@ impl ElasticHelper {
                 return Err(err.into())
             }
         };
+
+        // handle non-errors
+        if status.is_success() {
+            return Ok(Some(Response { status, body }))
+        }
 
         // handle specific HTTP status codes we want particular actions for
         if StatusCode::NOT_FOUND == status {
@@ -734,55 +756,75 @@ impl ElasticHelper {
         error!("unexpected elastic error: {}", String::from_utf8_lossy(&body));
         return Err(ElasticError::fatal(format!("Unexpected elastic error [status: {status}]")))
     }
+}
 
+trait ReadsResponse: Sized {
+    async fn read_from(input: reqwest::Response) -> Result<Option<Self>>;
+}
+
+// trait ElasticRequest<Body, Response: ReadsResponse> {
+
+// }
+
+pub enum Body<'a, R: Serialize> {
+    None,
+    Json(&'a R),
+    NLJson(Bytes)
+}
+
+// struct Json<Resp>(Resp);
+
+// impl<Resp: DeserializeOwned> ReadsResponse for Json<Resp> {
+//     async fn read_from(input: reqwest::Response) -> Result<Option<Self>> {
+//         todo!()
+//     }
+// }
+
+pub struct Response {
+    status: StatusCode,
+    body: Bytes,
+}
+
+impl Response {
+    pub fn json<R: DeserializeOwned>(&self) -> Result<R> {
+        Ok(serde_json::from_slice(&self.body)?)
+    }
+}
+
+impl ElasticHelper {
     /// Start an http request with an empty body
-    pub async fn make_request(&self, attempt: &mut u64, request: &Request) -> Result<reqwest::Response> {
-        loop {
-            *attempt += 1;
-
-            // Build and dispatch the request
-            let result = self.client.request(request.method.clone(), request.url.clone())
-                .send().await;
-
-            // Handle connection errors with a retry, let other non http errors bubble up
-            match Self::handle_result(attempt, request, result).await? {
-                Some(response) => return Ok(response),
-                None => continue,
-            }
-        }
+    pub async fn make_request(&self, attempt: &mut u64, request: &Request) -> Result<Response> {
+        self.request_with_retry::<()>(attempt, request, Body::None).await
     }
 
     /// start an http request with a json body
     #[instrument(skip(body))]
-    pub async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<reqwest::Response> {
-        loop {
-            *attempt += 1;
-
-            // Build and dispatch the request
-            let result = self.client.request(request.method.clone(), request.url.clone())
-                .json(body)
-                .send().await;
-
-            // Handle connection errors with a retry, let other non http errors bubble up
-            match Self::handle_result(attempt, request, result).await? {
-                Some(response) => return Ok(response),
-                None => continue,
-            }
-        }
+    pub async fn make_request_json<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: &R) -> Result<Response> {
+        self.request_with_retry(attempt, request, Body::Json(body)).await
     }
 
     /// start an http request with a binary body
     #[instrument(skip(body))]
-    async fn make_request_data(&self, attempt: &mut u64, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
-        // TODO: body can probably be a boxed stream of some sort which will be faster to clone
+    async fn make_request_data(&self, attempt: &mut u64, request: &Request, body: Bytes) -> Result<Response> {
+        self.request_with_retry::<()>(attempt, request, Body::NLJson(body)).await
+    }
+
+    pub async fn request_with_retry<R: Serialize>(&self, attempt: &mut u64, request: &Request, body: Body<'_, R>) -> Result<Response> {
         loop {
             *attempt += 1;
 
             // Build and dispatch the request
-            let result = self.client.request(request.method.clone(), request.url.clone())
-                .header("Content-Type", "application/x-ndjson")
-                .body(body.to_owned())
-                .send().await;
+            let builder = self.client.request(request.method.clone(), request.url.clone());
+            let builder = match &body {
+                Body::None => builder,
+                Body::Json(json) => builder.json(json),
+                Body::NLJson(bytes) => {
+                    builder
+                        .header("Content-Type", "application/x-ndjson")
+                        .body(bytes.clone())
+                },
+            };
+            let result = builder.send().await;
 
             // Handle connection errors with a retry, let other non http errors bubble up
             match Self::handle_result(attempt, request, result).await? {
@@ -791,13 +833,14 @@ impl ElasticHelper {
             }
         }
     }
+
 
     /// checking if an index of the given name exists
     #[instrument]
     pub async fn does_index_exist(&self, name: &str) -> Result<bool> {
         match self.make_request(&mut 0, &Request::head_index(&self.host, name)?).await {
             Ok(result) => {
-                Ok(result.status() == reqwest::StatusCode::OK)
+                Ok(result.status == reqwest::StatusCode::OK)
             },
             Err(err) => if err.is_index_not_found() {
                 Ok(false)
@@ -813,7 +856,7 @@ impl ElasticHelper {
         // self.with_retries(self.datastore.client.indices.exists_alias, name=alias)
         let request = Request::head_alias(&self.host, name)?;
         let result = self.make_request(&mut 0, &request).await?;
-        Ok(result.status() == reqwest::StatusCode::OK)
+        Ok(result.status == reqwest::StatusCode::OK)
     }
 
     /// Create an index alias
@@ -868,7 +911,7 @@ impl ElasticHelper {
             let res = self.make_request(&mut 0, &request).await;
 
             match res {
-                Ok(ok) => break ok.json().await?,
+                Ok(ok) => break ok.json()?,
                 Err(err) if err.is_timeout() => { continue }
                 Err(err) => return Err(err)
             }
@@ -881,7 +924,7 @@ impl ElasticHelper {
     pub async fn list_indices(&self, prefix: &str) -> Result<Vec<String>> {
         let request = Request::get_indices(&self.host, prefix)?;
         let response = self.make_request(&mut 0, &request).await?;
-        let body: DescribeIndex = response.json().await?;
+        let body: DescribeIndex = response.json()?;
         Ok(body.indices.into_keys().collect())
     }
 }
@@ -1120,7 +1163,7 @@ impl Elastic {
         let request = Request::delete_by_query(&self.es.host, ".tasks", false, "proceed", max_tasks)?;
         let task: responses::TaskId = self.es.make_request_json(&mut 0, &request, &json!({
             "query": {"bool": {"must": {"query_string": {"query": q}}}},
-        })).await?.json().await?;
+        })).await?.json()?;
 
         // Wait until the tasks deletion task is over
         let res = self.es.get_task_results(&task.task).await?;

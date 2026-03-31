@@ -35,7 +35,7 @@ impl<T: Serialize + Readable + Described<ElasticMeta> + Debug> Collection<T> {
             key_space: None,
             search_after: None,
         }
-    }        
+    }
 }
 
 /// Build a search query that will run a single search call
@@ -43,9 +43,9 @@ pub struct SearchBuilder<'a, T: Serialize + Readable + Described<ElasticMeta>> {
     collection: &'a Collection<T>,
     query: &'a str,
     target: Target,
-    offset: Option<u64>, 
-    rows: u64, 
-    sort: String, 
+    offset: Option<u64>,
+    rows: u64,
+    sort: String,
     filters: Vec<String>,
     access_control: Option<String>,
     field_list: String,
@@ -55,7 +55,7 @@ pub struct SearchBuilder<'a, T: Serialize + Readable + Described<ElasticMeta>> {
 }
 
 impl<'a, T: Serialize + Readable + Described<ElasticMeta> + Debug> SearchBuilder<'a, T> {
-    
+
     pub fn fields(mut self, fields: &str) -> Self {
         self.field_list = fields.to_owned(); self
     }
@@ -144,7 +144,7 @@ impl<'a, T: Serialize + Readable + Described<ElasticMeta> + Debug> SearchBuilder
         };
 
         let response = self.collection.database.make_request_json(&mut 0, &request, &body).await?;
-        let response: responses::Search<Field, T> = response.json().await?;
+        let response: responses::Search<Field, T> = response.json()?;
         Ok(response)
     }
 

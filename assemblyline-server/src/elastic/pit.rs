@@ -16,7 +16,7 @@ pub (super) struct PitGuard {
 impl PitGuard {
     pub async fn open(helper: Arc<ElasticHelper>, index: &str) -> Result<Self> {
         let response = helper.make_request(&mut 0, &Request::create_pit(&helper.host, index, PIT_KEEP_ALIVE)?).await?;
-        let pit: responses::OpenPit = response.json().await?;
+        let pit: responses::OpenPit = response.json()?;
         Ok(Self { helper, id: pit.id })
     }
 
@@ -24,7 +24,7 @@ impl PitGuard {
         let response = helper.make_request_json(&mut 0, &Request::delete_pit(&helper.host)?, &json!({
             "id": id
         })).await?;
-        let _body: responses::ClosePit = response.json().await?;
+        let _body: responses::ClosePit = response.json()?;
         Ok(())
     }
 }

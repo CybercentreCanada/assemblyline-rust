@@ -89,7 +89,7 @@ async fn test_cleanup_old_tasks() {
             ("track_total_hits", "1000".into()),
         ]).unwrap();
         let result = connection.make_request(&mut 0, &request).await.unwrap();
-        let result: responses::Search<(), ()> = result.json().await.unwrap();
+        let result: responses::Search<(), ()> = result.json().unwrap();
         result.hits.total.value
     };
 

@@ -7,18 +7,19 @@ use std::sync::Arc;
 use assemblyline_models::meta::{build_mapping_inner, flatten_fields, FieldMapping};
 use assemblyline_models::types::{JsonMap, mapping_keys::FIELD_SANITIZER};
 use assemblyline_models::{ElasticMeta, Readable};
+use bytes::Bytes;
 use itertools::Itertools;
 use log::{debug, error, warn};
 use reqwest::Method;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use struct_metadata::Described;
 use thiserror::Error;
 use tracing::instrument;
 
 use crate::common::odm::flat_fields;
-use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
+use crate::elastic::{DEFAULT_SEARCH_FIELD, KEEP_ALIVE, Response, responses};
 
 use super::bulk::TypedBulkPlan;
 use super::pit::PitGuard;
@@ -89,7 +90,7 @@ impl<T: CollectionType> Collection<T> {
                 let result = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &index)?, &body).await;
                 match result {
                     Ok(resp) => {
-                        let _resp: responses::CreateIndex = resp.json().await?;
+                        let _resp: responses::CreateIndex = resp.json()?;
                     }
                     Err(err) => {
                         if err.is_resource_already_exists() {
@@ -211,7 +212,7 @@ impl<T: CollectionType> Collection<T> {
         }
 
         let request = Request::get_index(&self.database.host, &self.name)?;
-        let data: responses::DescribeIndex = self.database.make_request(&mut 0, &request).await?.json().await?;
+        let data: responses::DescribeIndex = self.database.make_request(&mut 0, &request).await?.json()?;
 
         let Some((_idx_name, spec)) = data.indices.into_iter().next() else {
             return Err(ElasticError::fatal("No indices returned when asking for fields."));
@@ -324,7 +325,8 @@ impl<T: CollectionType> Collection<T> {
                     "settings": index_settings
                 });
 
-                let _result: responses::CreateIndex = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &new_name)?, &body).await?.json().await?;
+                let resp = self.database.make_request_json(&mut 0, &Request::put_index(&self.database.host, &new_name)?, &body).await?;
+                let _result: responses::CreateIndex = resp.json()?;
 
                 // Swap indices
                 // actions = [{"add": {"index": new_name, "alias": name}},
@@ -341,7 +343,7 @@ impl<T: CollectionType> Collection<T> {
                 let task: responses::TaskId = self.database.make_request_json(&mut 0, &Request::post_reindex(&self.database.host, false)?, &json!({
                     "source": {"index": index},
                     "dest": {"index": new_name},
-                })).await?.json().await?;
+                })).await?.json()?;
                 self.database.get_task_results(&task.task).await?;
 
                 // Commit reindexed data
@@ -381,7 +383,7 @@ impl<T: CollectionType> Collection<T> {
 
     /// Make an http request with no body
     #[instrument]
-    async fn make_request(&self, request: &Request) -> Result<reqwest::Response> {
+    async fn make_request(&self, request: &Request) -> Result<Response> {
         let mut attempt = 0;
         loop {
             match self.database.make_request(&mut attempt, request).await {
@@ -397,7 +399,7 @@ impl<T: CollectionType> Collection<T> {
 
     /// Make an http request with a json body
     #[instrument(skip(body))]
-    async fn make_request_json<R: Serialize>(&self, request: &Request, body: &R) -> Result<reqwest::Response> {
+    async fn make_request_json<R: Serialize>(&self, request: &Request, body: &R) -> Result<Response> {
         let mut attempt = 0;
         loop {
             match self.database.make_request_json(&mut attempt, request, body).await {
@@ -413,10 +415,10 @@ impl<T: CollectionType> Collection<T> {
 
     /// Make an http request with a body
     #[instrument(skip(body))]
-    async fn make_request_data(&self, request: &Request, body: &[u8]) -> Result<reqwest::Response> {
+    async fn make_request_data(&self, request: &Request, body: Bytes) -> Result<Response> {
         let mut attempt = 0;
         loop {
-            match self.database.make_request_data(&mut attempt, request, body).await {
+            match self.database.make_request_data(&mut attempt, request, body.clone()).await {
                 Ok(response) => break Ok(response),
                 Err(err) if err.is_index_not_found() => {
                     self.ensure_collection().await?;
@@ -509,7 +511,7 @@ impl<T: CollectionType> Collection<T> {
             debug!("Exist at {index}");
             match self.make_request(&Request::head_doc(&self.database.host, &index, key)?).await {
                 Ok(response) => {
-                    if response.status().is_success() {
+                    if response.status.is_success() {
                         return Ok(true)
                     }
                 },
@@ -559,7 +561,7 @@ impl<T: CollectionType> Collection<T> {
 
             // fetch all the documents
             let response = self.make_request_json(&Request::mget_doc(&self.database.host, &index)?, &body).await.context("mget request")?;
-            let response: responses::Multiget<RT, ()> = response.json().await?;
+            let response: responses::Multiget<RT, ()> = serde_json::from_slice(&response.body)?;
 
             // track which ones we have found
             outstanding.clear();
@@ -660,10 +662,7 @@ impl<T: CollectionType> Collection<T> {
             // fetch all the documents
             let request = Request::get_doc(&self.database.host, &index, key)?;
             let mut response: responses::Get<RT, ()> = match self.make_request(&request).await {
-                Ok(response) => {
-                    let body = response.bytes().await?;
-                    serde_json::from_slice(&body)?
-                },
+                Ok(response) => response.json()?,
                 Err(err) if err.is_document_not_found() => continue,
                 Err(err) => return Err(err)
             };
@@ -776,7 +775,7 @@ impl<T: CollectionType> Collection<T> {
         let item_buffer_size = item_buffer_size.unwrap_or(200);
         let index_type = index_type.unwrap_or(Index::Hot);
 
-        if !(50..2000).contains(&item_buffer_size) {
+        if !(50..=2000).contains(&item_buffer_size) {
             return Err(ElasticError::fatal("Variable item_buffer_size must be between 50 and 2000."))
         }
 
@@ -834,7 +833,7 @@ impl<T: CollectionType> Collection<T> {
 
             let result = self.make_request_json(&request, &operations).await;
             let body: responses::Index = match result {
-                Ok(response) => response.json().await?,
+                Ok(response) => response.json()?,
                 Err(err) => {
                     if err.is_document_not_found() {
                         continue
@@ -879,7 +878,7 @@ impl<T: CollectionType> Collection<T> {
             let result = self.make_request(&request).await;
             match result {
                 Ok(response) => {
-                    let response: responses::Delete = response.json().await?;
+                    let response: responses::Delete = response.json()?;
                     if matches!(response.result, DeleteResult::Deleted) {
                         deleted = true;
                     }
@@ -906,7 +905,7 @@ impl<T: CollectionType> Collection<T> {
     #[instrument(skip(bulk))]
     pub async fn bulk(&self, bulk: TypedBulkPlan<T>) -> Result<responses::Bulk> {
         let request = Request::bulk(&self.database.host)?;
-        Ok(self.make_request_data(&request, bulk.get_plan_data().as_bytes()).await?.json().await?)
+        Ok(self.make_request_data(&request, Bytes::copy_from_slice(bulk.get_plan_data().as_bytes())).await?.json()?)
     }
 
     #[cfg(test)]
@@ -1431,7 +1430,7 @@ impl<T: CollectionType, RT: Debug + Readable> ScrollCursor<'_, T, RT> {
 
 
             let response = self.collection.database.make_request_json(&mut 0, &request, &body).await?;
-            let mut response: responses::Search<(), RT> = response.json().await?;
+            let mut response: responses::Search<(), RT> = response.json()?;
 
             match response.hits.hits.last() {
                 Some(row) => {
