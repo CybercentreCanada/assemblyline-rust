@@ -584,6 +584,9 @@ impl ElasticHelper {
                 };
             }
         }
+        if request.method == Method::HEAD {
+            size = Some(0);
+        }
 
         // Load the entire body, since we are always going to do this anyway, we don't stream
         // any responses from elasticsearch
@@ -593,7 +596,7 @@ impl ElasticHelper {
                     Some(size) => if size == body.len() {
                         body
                     } else {
-                        warn!("Incomplete read from elastic. Retrying...");
+                        warn!("Incomplete read from elastic ({request} expected {size} got {}). Retrying...", body.len());
                         return Ok(None)
                     },
                     None => body,
