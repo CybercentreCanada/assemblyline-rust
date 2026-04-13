@@ -332,7 +332,7 @@ impl ActionWorker {
         let payload = Bytes::from(serde_json::to_vec(&json!({
             "is_cache": self.running_cache_tasks,
             "score": score,
-            "submission": submission
+            "submission": data
         }))?);
         let mut pool = tokio::task::JoinSet::new();
         for hook in webhooks.into_iter() {
