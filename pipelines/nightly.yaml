@@ -8,6 +8,7 @@ schedules:
   branches:
     include:
     - main
+  always: true
 
 jobs:
   - job: build_nightly
