@@ -187,6 +187,7 @@ impl TransportS3 {
             aws_sdk_s3::config::Builder::from(&sdk_config)
                 .force_path_style(true)
                 .request_checksum_calculation(aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired)
+                .response_checksum_validation(aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired)
                 .build()
         } else {
             aws_sdk_s3::config::Builder::from(&sdk_config).build()
