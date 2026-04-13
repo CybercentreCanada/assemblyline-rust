@@ -3,8 +3,8 @@ use std::io::Write;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libunftp::auth::{AuthenticationError, Authenticator, Credentials, DefaultUser};
-use unftp_sbe_fs::ServerExt;
+use unftp_core::auth::{AuthenticationError, Authenticator, Credentials, Principal};
+use unftp_sbe_fs::Filesystem;
 
 
 pub fn random_tls_certificate() -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
@@ -57,12 +57,14 @@ pub async fn start_temp_ftp_server(tls_cert: Option<(Vec<u8>, Vec<u8>)>) -> Stri
     struct StaticAuth;
 
     #[async_trait]
-    impl Authenticator<DefaultUser> for StaticAuth {
-        async fn authenticate(&self, username: &str, creds: &Credentials) -> Result<DefaultUser, AuthenticationError> {
+    impl Authenticator for StaticAuth {
+        async fn authenticate(&self, username: &str, creds: &Credentials) -> Result<Principal, AuthenticationError> {
             if username.eq_ignore_ascii_case("bozo") {
                 if let Some(password) = &creds.password {
                     if password == "theclown" {
-                        return Ok(DefaultUser{})
+                        return Ok(Principal {
+                            username: username.to_ascii_lowercase()
+                        })
                     }
                 }
             }
@@ -87,7 +89,8 @@ pub async fn start_temp_ftp_server(tls_cert: Option<(Vec<u8>, Vec<u8>)>) -> Stri
         let dir_path = dir.path().to_owned();
 
         loop {
-            let mut server_builder = libunftp::Server::with_fs(dir_path.clone())
+            let dir_path = dir_path.clone();
+            let mut server_builder = libunftp::ServerBuilder::new(Box::new(move || Filesystem::new(dir_path.clone()).unwrap()))
                 .authenticator(Arc::new(StaticAuth{}))
                 .passive_ports(50000..=65535);
             if tls_cert.is_some() {
@@ -98,7 +101,7 @@ pub async fn start_temp_ftp_server(tls_cert: Option<(Vec<u8>, Vec<u8>)>) -> Stri
             let (sock, _) = listener.accept().await.unwrap();
             println!("test server accepted connection");
             tokio::spawn(async move {
-                server.service(sock).await.unwrap();                
+                server.service(sock).await.unwrap();
             });
         }
     });
