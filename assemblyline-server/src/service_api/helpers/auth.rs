@@ -17,9 +17,8 @@ use crate::constants::{SERVICE_API_KEY_HASH, ServiceApiKeyConfig};
 
 use super::make_empty_api_error;
 
-/// Don't re-check an api key within 10 seconds, if we want to make this longer
-/// we need to start checking expiry within the cache.
-const KEY_CACHE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Don't re-check an api key within 30 seconds.
+const KEY_CACHE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct ApiKeyLoader {
@@ -51,7 +50,7 @@ impl ApiKeyLoader {
     async fn cleanup(table: Hashmap<ServiceApiKeyConfig>) -> anyhow::Result<()> {
         let existing = table.items().await?;
         for (key, config) in existing {
-            if config.expiry > chrono::Utc::now() {
+            if config.expiry < chrono::Utc::now() {
                 table.pop(&key).await?;
             }
         }
@@ -61,14 +60,16 @@ impl ApiKeyLoader {
     pub async fn check_key(&self, key: &str) -> anyhow::Result<Option<ServiceApiKeyConfig>> {
         {
             let mut cache = self.cache.lock();
-            cache.retain(|_, (created, _)| created.elapsed() < KEY_CACHE_TIMEOUT);
+            cache.retain(|_, (created, config)| {
+                created.elapsed() < KEY_CACHE_TIMEOUT || config.expiry > chrono::Utc::now()
+            });
             if let Some((_, config)) = cache.get(key) {
                 return Ok(Some(config.clone()))
             }
         }
 
         if let Some(row) = self.table.get(key).await? {
-            if row.expiry < chrono::Utc::now() {
+            if row.expiry > chrono::Utc::now() {
                 let mut cache = self.cache.lock();
                 cache.insert(key.to_owned(), (Instant::now(), row.clone()));
                 return Ok(Some(row))

@@ -54,6 +54,7 @@ async fn register_service(
 
     match outcome {
         Ok(output) => Ok(make_api_response(output)),
+        Err(err) if err.is_permission() => Err(make_empty_api_error(StatusCode::UNAUTHORIZED, &err.to_string())),
         Err(err) if err.is_input_error() => Err(make_empty_api_error(StatusCode::BAD_REQUEST, &err.to_string())),
         Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))
     }

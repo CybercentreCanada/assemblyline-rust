@@ -214,7 +214,7 @@ impl TaskingClient {
             None => {
                 error!("{log_prefix}Service attempted to register without write permissions: {}/{}",
                        service.name, service.version);
-                return Err(RegisterError::ServiceRemoved)
+                return Err(RegisterError::Permission)
             }
         };
 
@@ -222,7 +222,7 @@ impl TaskingClient {
         if service_config.version != service.version {
             error!("{log_prefix}Service [{}] attempted to register with the wrong version: {} (expected {})",
                     service.name, service.version, service_config.version);
-            return Err(RegisterError::ServiceRemoved)
+            return Err(RegisterError::Permission)
         }
 
         Ok(RegisterResponse{
@@ -482,6 +482,8 @@ fn fix_docker_config(docker_config: &mut JsonMap, registry_type: &Value) -> serd
 pub enum RegisterError {
     #[error("Could not complete json coversion: {0}")]
     Formatting(String),
+    #[error("The operation requested required permissions this api key does not have")]
+    Permission,
     #[error("{0}")]
     BadHeuristic(String),
     #[error("Service was removed during registration.")]
@@ -494,10 +496,15 @@ impl RegisterError {
     pub fn is_input_error(&self) -> bool {
         match self {
             RegisterError::Formatting(_) => true,
+            RegisterError::Permission => false,
             RegisterError::BadHeuristic(_) => true,
             RegisterError::ServiceRemoved => false,
             RegisterError::Other(_) => false,
         }
+    }
+
+    pub fn is_permission(&self) -> bool {
+        matches!(self, RegisterError::Permission)
     }
 }
 

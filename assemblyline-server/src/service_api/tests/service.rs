@@ -4,6 +4,7 @@ use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::types::ExpandingClassification;
 use reqwest::header::{HeaderMap, HeaderValue};
 
+use crate::constants::{SERVICE_API_KEY_HASH, ServiceApiKeyConfig};
 use crate::service_api::helpers::APIResponse;
 use crate::service_api::tests::{build_service, empty_delta};
 use crate::service_api::v1::service::RegisterResponse;
@@ -13,7 +14,7 @@ use super::{setup, AUTH_KEY, random_hash};
 fn headers() -> HeaderMap {
     [
         ("Container-Id", random_hash(12)),
-        ("X-APIKey", AUTH_KEY.to_owned()),
+        ("X-Apikey", AUTH_KEY.to_owned()),
         ("Service-Tool-Version", random_hash(64)),
         ("X-Forwarded-For", "127.0.0.1".to_owned()),
     ].into_iter()
@@ -42,16 +43,39 @@ async fn test_register_service_auth_fail() {
 
     let service = build_service();
     let service_delta = empty_delta(&service);
+
+    // try connecting using the pre configured (read only) api key against a service that doesn't exist
+    {
+        let mut headers = headers();
+        headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
+        headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
+
+        let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
+        assert_eq!(result.status().as_u16(), 401);
+    }
+
+    // register the service via backend, and see the same query succeed
     core.datastore.service.save(&service.key(), &service, None, None).await.unwrap();
     core.datastore.service_delta.save(&service.name, &service_delta, None, None).await.unwrap();
-    
-    let mut headers = headers();
-    headers.insert("X-APIKEY", HeaderValue::from_static("10"));
-    headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
-    headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
+    {
+        let mut headers = headers();
+        headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
+        headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
-    let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
-    assert_eq!(result.status().as_u16(), 401);
+        let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
+        assert_eq!(result.status().as_u16(), 200);
+    }
+
+    // try connecting using an obviously wrong API key to repeat that query that just succeeded
+    {
+        let mut headers = headers();
+        headers.insert("X-Apikey", HeaderValue::from_static("10"));
+        headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
+        headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
+
+        let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
+        assert_eq!(result.status().as_u16(), 401);
+    }
 }
 
 #[tokio::test]
@@ -83,7 +107,7 @@ async fn test_register_bad_service() {
     let (client, _core, _guard, address) = setup(headers()).await;
 
     let mut service = build_service();
-   
+
     let mut headers = headers();
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
@@ -98,10 +122,18 @@ async fn test_register_bad_service() {
 async fn test_register_new_service() {
     let (client, core, _guard, address) = setup(headers()).await;
 
+    let key = rand::random::<u128>().to_string();
+    core.redis_persistant.hashmap(SERVICE_API_KEY_HASH.to_owned(), None).add(&key, &ServiceApiKeyConfig {
+        key: key.clone(),
+        allow_registry_writing: true,
+        expiry: chrono::Utc::now() + chrono::TimeDelta::hours(1)
+    }).await.unwrap();
+
     let service = build_service();
     let service_delta = empty_delta(&service);
 
     let mut headers = headers();
+    headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
@@ -124,6 +156,13 @@ async fn test_register_new_service() {
 async fn test_register_new_service_version() {
     let (client, core, _guard, address) = setup(headers()).await;
 
+    let key = rand::random::<u128>().to_string();
+    core.redis_persistant.hashmap(SERVICE_API_KEY_HASH.to_owned(), None).add(&key, &ServiceApiKeyConfig {
+        key: key.clone(),
+        allow_registry_writing: true,
+        expiry: chrono::Utc::now() + chrono::TimeDelta::hours(1)
+    }).await.unwrap();
+
     let mut service = build_service();
     let service_delta = empty_delta(&service);
 
@@ -134,6 +173,7 @@ async fn test_register_new_service_version() {
     service.version = "101".to_string();
 
     let mut headers = headers();
+    headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
@@ -157,6 +197,13 @@ async fn test_register_new_service_version() {
 async fn test_register_new_heuristics() {
     let (client, core, _guard, address) = setup(headers()).await;
 
+    let key = rand::random::<u128>().to_string();
+    core.redis_persistant.hashmap(SERVICE_API_KEY_HASH.to_owned(), None).add(&key, &ServiceApiKeyConfig {
+        key: key.clone(),
+        allow_registry_writing: true,
+        expiry: chrono::Utc::now() + chrono::TimeDelta::hours(1)
+    }).await.unwrap();
+
     let service = build_service();
     let service_delta = empty_delta(&service);
 
@@ -171,6 +218,7 @@ async fn test_register_new_heuristics() {
     let heur_id = format!("{}.{}", service.name.to_uppercase(), new_heuristic.heur_id);
 
     let mut headers = headers();
+    headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
@@ -193,6 +241,13 @@ async fn test_register_new_heuristics() {
 async fn test_register_existing_heuristics() {
     let (client, core, _guard, address) = setup(headers()).await;
 
+    let key = rand::random::<u128>().to_string();
+    core.redis_persistant.hashmap(SERVICE_API_KEY_HASH.to_owned(), None).add(&key, &ServiceApiKeyConfig {
+        key: key.clone(),
+        allow_registry_writing: true,
+        expiry: chrono::Utc::now() + chrono::TimeDelta::hours(1)
+    }).await.unwrap();
+
     let service = build_service();
     let service_delta = empty_delta(&service);
 
@@ -213,6 +268,7 @@ async fn test_register_existing_heuristics() {
     new_heuristic.heur_id = base_id;
 
     let mut headers = headers();
+    headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
@@ -234,6 +290,14 @@ async fn test_register_existing_heuristics() {
 async fn test_register_bad_heuristics() {
     let (client, core, _guard, address) = setup(headers()).await;
 
+    let key = rand::random::<u128>().to_string();
+    core.redis_persistant.hashmap(SERVICE_API_KEY_HASH.to_owned(), None).add(&key, &ServiceApiKeyConfig {
+        key: key.clone(),
+        allow_registry_writing: true,
+        expiry: chrono::Utc::now() + chrono::TimeDelta::hours(1)
+    }).await.unwrap();
+
+
     let service = build_service();
     let service_delta = empty_delta(&service);
 
@@ -248,6 +312,7 @@ async fn test_register_bad_heuristics() {
     service_request.get_mut("heuristics").unwrap().as_array_mut().unwrap().get_mut(0).unwrap().as_object_mut().unwrap().insert("description".to_string(), serde_json::Value::Null);
 
     let mut headers = headers();
+    headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
