@@ -204,10 +204,35 @@ impl TaskingClient {
         Ok(())
     }
 
-    pub async fn register_service(&self, mut service_data: JsonMap, log_prefix: &str) -> Result<RegisterResponse, RegisterError> {
-        debug!("Registring service: {:?}", service_data.get("name"));
-        let mut keep_alive = true;
+    pub async fn compare_service_info(&self, service_data: JsonMap, log_prefix: &str) -> Result<RegisterResponse, RegisterError> {
+        // normalize the service_data the same as we would during registration
+        let (service, _heuristics) = self.normalize_service_info(service_data)?;
 
+        // get the currently running configuration for the service
+        let service_config = match self.datastore.get_service_with_delta(&service.name, None).await? {
+            Some(config) => config,
+            None => {
+                error!("{log_prefix}Service attempted to register without write permissions: {}/{}",
+                       service.name, service.version);
+                return Err(RegisterError::ServiceRemoved)
+            }
+        };
+
+        // Validate that this call is for the right service version
+        if service_config.version != service.version {
+            error!("{log_prefix}Service [{}] attempted to register with the wrong version: {} (expected {})",
+                    service.name, service.version, service_config.version);
+            return Err(RegisterError::ServiceRemoved)
+        }
+
+        Ok(RegisterResponse{
+            keep_alive: true,
+            new_heuristics: vec![],
+            service_config
+        })
+    }
+
+    pub fn normalize_service_info(&self, mut service_data: JsonMap) -> Result<(Service, Option<Value>), RegisterError> {
         // Initialize the classification strings
         if !service_data.contains_key("classification") {
             service_data.insert("classification".to_string(), json!(self.classification_engine.unrestricted()));
@@ -256,6 +281,15 @@ impl TaskingClient {
 
         // Fix service version, we don't need to see the stable label
         service.version = service.version.replace("stable", "");
+
+        Ok((service, heuristics))
+    }
+
+    pub async fn register_service(&self, service_data: JsonMap, log_prefix: &str) -> Result<RegisterResponse, RegisterError> {
+        debug!("Registring service: {:?}", service_data.get("name"));
+        let mut keep_alive = true;
+
+        let (service, heuristics) = self.normalize_service_info(service_data)?;
 
         // Save service if it doesn't already exist
         let key = format!("{}_{}", service.name, service.version);
