@@ -31,11 +31,11 @@ use crate::Core;
 // SUB_API = 'file'
 // file_api = make_subapi_blueprint(SUB_API, api_version=1)
 // file_api._doc = "Perform operations on file"
-pub fn api(core: Arc<Core>) -> impl Endpoint {
+pub fn api(auth: ServiceAuth) -> impl Endpoint {
     Route::new()
     .at("/:sha256", get(download_file))
     .at("/", put(upload_file))
-    .with(ServiceAuth::new(core))
+    .with(auth)
 }
 
 

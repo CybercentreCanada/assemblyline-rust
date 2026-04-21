@@ -7,6 +7,7 @@ use poem::{Endpoint, EndpointExt, Route, Server};
 
 use crate::logging::LoggerMiddleware;
 use crate::Core;
+use crate::service_api::helpers::auth::{ApiKeyLoader, ServiceAuth};
 
 pub mod helpers;
 pub mod v1;
@@ -15,14 +16,16 @@ pub (crate) mod tests;
 
 pub async fn api(core: Arc<Core>) -> Result<impl Endpoint> {
     let tasking_client = Arc::new(TaskingClient::new(&core).await?);
+    let keys = ApiKeyLoader::new(core.redis_persistant.clone());
+    let auth = ServiceAuth::new(core.clone(), keys);
 
     Ok(
         Route::new()
-        .nest("/api/v1/badlist", v1::badlist::api(core.clone()))
-        .nest("/api/v1/file", v1::file::api(core.clone()))
-        .nest("/api/v1/service", v1::service::api(core.clone()))
-        .nest("/api/v1/task", v1::task::api(core.clone()))
-        .nest("/api/v1/safelist", v1::safelist::api(core.clone()))
+        .nest("/api/v1/badlist", v1::badlist::api(core.clone(), auth.clone()))
+        .nest("/api/v1/file", v1::file::api(auth.clone()))
+        .nest("/api/v1/service", v1::service::api(auth.clone()))
+        .nest("/api/v1/task", v1::task::api(auth.clone()))
+        .nest("/api/v1/safelist", v1::safelist::api(core.clone(), auth))
         .nest("/healthz", v1::health::api(core.clone()))
         .data(tasking_client)
         .with(LoggerMiddleware)
