@@ -52,7 +52,7 @@ fn get_full_text_field_names() -> &'static Vec<Vec<String>> {
                     struct_metadata::Kind::Mapping(_, _) => {},
                     _ => {}
                 }
-                break 
+                break
             }
         }
 
@@ -673,7 +673,7 @@ fn check_field_type(_root: &str, tail: &[String], kind: &struct_metadata::Kind<E
                 0 => false,
                 1 => true,
                 _ => check_field_type(&tail[1], &tail[2..], &inner.kind)
-            }            
+            }
         },
 
         // Recurse into the inner type for these
@@ -683,7 +683,7 @@ fn check_field_type(_root: &str, tail: &[String], kind: &struct_metadata::Kind<E
             check_field_type(_root, tail, &kind.kind)
         }
 
-        // all remaining types are scalar, accept the field so long as its not trying 
+        // all remaining types are scalar, accept the field so long as its not trying
         // to select a subfield of a scalar
         _ => {
             tail.is_empty()
