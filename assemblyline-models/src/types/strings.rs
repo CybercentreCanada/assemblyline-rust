@@ -509,7 +509,7 @@ fn internationalized_domains() {
 // MARK: URI
 // Used for finding URIs in a blob
 const URI_PATH: &str = r"([/?#]\S*)";
-const URI_REGEX: &str = concat!("((?:(?:[A-Za-z][A-Za-z0-9+.-]*:)//)(?:[^/?#\\s]+@)?(", IP_REGEX, "|", DOMAIN_REGEX, ")(?::\\d{1,5})?", URI_PATH, "?)");
+const URI_REGEX: &str = concat!("((?:(?:[A-Za-z][A-Za-z0-9+.-]*:)//)(?:[^/?#\\s]*@)?(", IP_REGEX, "|", DOMAIN_REGEX, ")(?::\\d{1,5})?", URI_PATH, "?)");
 // Used for direct matching
 const FULL_URI: &str = concat!("^", URI_REGEX, "$");
 
