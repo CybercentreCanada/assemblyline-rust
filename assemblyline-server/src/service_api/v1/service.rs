@@ -14,6 +14,7 @@ use poem::web::{Data, Json};
 use poem::{handler, put, Endpoint, EndpointExt, Result, Response, Route};
 use serde::{Deserialize, Serialize};
 
+use crate::constants::ServiceApiKeyConfig;
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_response, make_empty_api_error};
 use crate::service_api::helpers::tasking::TaskingClient;
@@ -22,10 +23,10 @@ use crate::Core;
 // SUB_API = 'service'
 // service_api = make_subapi_blueprint(SUB_API, api_version=1)
 // service_api._doc = "Perform operations on service"
-pub fn api(core: Arc<Core>) -> impl Endpoint {
+pub fn api(auth: ServiceAuth) -> impl Endpoint {
     Route::new()
     .at("/register", put(register_service).post(register_service))
-    .with(ServiceAuth::new(core))
+    .with(auth)
 }
 
 
@@ -39,9 +40,21 @@ pub fn api(core: Arc<Core>) -> impl Endpoint {
 ///     'service_config': < APPLIED SERVICE CONFIG >
 /// }
 #[handler]
-async fn register_service(tasking: Data<&Arc<TaskingClient>>, Json(body): Json<JsonMap>, client_info: Data<&ClientInfo>) -> Result<Response> {
-    match tasking.register_service(body, &format!("{} - ", client_info.client_id)).await {
+async fn register_service(
+    tasking: Data<&Arc<TaskingClient>>,
+    Json(body): Json<JsonMap>,
+    client_info: Data<&ClientInfo>,
+    Data(api_key): Data<&ServiceApiKeyConfig>,
+) -> Result<Response> {
+    let outcome = if api_key.allow_registry_writing {
+        tasking.register_service(body, &format!("{} - ", client_info.client_id)).await
+    } else {
+        tasking.compare_service_info(body, &format!("{} - ", client_info.client_id)).await
+    };
+
+    match outcome {
         Ok(output) => Ok(make_api_response(output)),
+        Err(err) if err.is_permission() => Err(make_empty_api_error(StatusCode::UNAUTHORIZED, &err.to_string())),
         Err(err) if err.is_input_error() => Err(make_empty_api_error(StatusCode::BAD_REQUEST, &err.to_string())),
         Err(err) => Err(make_empty_api_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()))
     }
@@ -49,7 +62,7 @@ async fn register_service(tasking: Data<&Arc<TaskingClient>>, Json(body): Json<J
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterResponse {
-    pub keep_alive: bool, 
-    pub new_heuristics: Vec<String>, 
-    pub service_config: Service 
+    pub keep_alive: bool,
+    pub new_heuristics: Vec<String>,
+    pub service_config: Service
 }

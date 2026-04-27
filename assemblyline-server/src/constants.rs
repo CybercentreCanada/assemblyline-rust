@@ -19,6 +19,7 @@ pub(crate) const DISPATCH_TASK_HASH: &str = "dispatch-active-submissions";
 pub(crate) const SCALER_TIMEOUT_QUEUE: &str = "scaler-timeout-queue";
 pub(crate) const SERVICE_STATE_HASH: &str = "service-stasis-table";
 pub(crate) const SERVICE_QUEUE_PREFIX: &str = "service-queue-";
+pub(crate) const SERVICE_API_KEY_HASH: &str = "dynamic-service-keys";
 
 /// Take the name of a service, and provide the queue name to send tasks to that service.
 pub fn service_queue_name(service: &str) -> String {
@@ -130,3 +131,12 @@ pub const SERVICE_STAGE_KEY: &str = "service-stage";
 //     'critical': 500,
 //     'high': 100,
 // }
+
+
+/// An entry stored in redis in the SERVICE_API_KEY_HASH hash
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ServiceApiKeyConfig {
+    pub key: String,
+    pub allow_registry_writing: bool,
+    pub expiry: chrono::DateTime<chrono::Utc>
+}

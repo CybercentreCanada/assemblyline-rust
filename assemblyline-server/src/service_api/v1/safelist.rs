@@ -19,13 +19,13 @@ use crate::Core;
 // SUB_API = 'safelist'
 // safelist_api = make_subapi_blueprint(SUB_API, api_version=1)
 // safelist_api._doc = "Query safelisted hashes"
-pub fn api(core: Arc<Core>) -> impl Endpoint {
+pub fn api(core: Arc<Core>, auth: ServiceAuth) -> impl Endpoint {
     Route::new()
     .at("/signatures", get(get_safelisted_signatures))
     .at("/:qhash", get(exists))
     .at("/", get(get_safelisted_tags))
     .data(Arc::new(SafelistClient::new(core.config.clone(), core.datastore.clone())))
-    .with(ServiceAuth::new(core))
+    .with(auth)
 }
 
 
