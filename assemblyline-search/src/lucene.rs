@@ -56,8 +56,20 @@ impl Query {
             },
             Query::Not(part) => fields.extend(part.list_fields()),
             Query::MatchAny(_) | Query::RegexAny(_) => fields.push(vec![]),
-            Query::FieldExists(field) |
-            Query::MatchField(field, _) => fields.push(field.clone()),
+            Query::FieldExists(field) => {
+                fields.push(field.clone());
+            },
+            Query::MatchField(field, query) => {
+                if let FieldQuery::Nested(query) = query {
+                    for part in query.list_fields() {
+                        let mut field = field.clone();
+                        field.extend(part);
+                        fields.push(field);
+                    }
+                } else {
+                    fields.push(field.clone());
+                }
+            },
         }
         fields.sort_unstable();
         fields.dedup();
@@ -73,7 +85,8 @@ pub enum FieldQuery {
     Range(RangeQuery),
     Or(Vec<FieldQuery>),
     And(Vec<FieldQuery>),
-    Not(Box<FieldQuery>)
+    Not(Box<FieldQuery>),
+    Nested(Box<Query>),
 }
 
 #[derive(Debug, Clone)]
@@ -407,7 +420,7 @@ fn prefix_operator(input: &str) -> IResult<&str, PrefixOperator> {
 //              | "\\?" | "\\:" | "\\\\" | "*" | "?" | "_" | "-" | DIGIT | LETTER)+
 // (escaped (multi character | single character)) | special chars | alphanum
 fn is_special(value: char) -> bool {
-    matches!(value, '_' | '-')
+    matches!(value, '_' | '-' | '.')
 }
 fn primitive_simple_term(input: &str) -> IResult<&str, String> {
     // println!("simple_term: {input}");
@@ -468,6 +481,7 @@ fn pattern_term(input: &str) -> IResult<&str, regex::Regex> {
 fn end_term(input: &str) -> IResult<&str, ()> {
     alt((
         map(peek(tag(")")), |_| ()),
+        map(peek(tag("}")), |_| ()),
         map(peek(eof), |_|()),
         map(multispace1, |_| ()),
     )).parse(input)
@@ -509,7 +523,23 @@ fn cname(input: &str) -> IResult<&str, String> {
 //            | "(" field_expression ")"
 fn field_value(input: &str) -> IResult<&str, FieldQuery> {
     // println!("field_value: {input}");
-    alt((range, delimited(ws(tag("(")), field_expression, ws(tag(")"))), regex_term, number_term, field_term)).parse(input)
+    alt((
+        range,
+        delimited(ws(tag("(")), field_expression, ws(tag(")"))),
+        regex_term,
+        number_term,
+        field_term,
+        nested,
+    )).parse(input)
+}
+
+fn nested(input: &str) -> IResult<&str, FieldQuery> {
+    let (remain, expression) = nested_inner(input)?;
+    Ok((remain, FieldQuery::Nested(Box::new(expression))))
+}
+
+fn nested_inner(input: &str) -> IResult<&str, Query> {
+    delimited(ws(tag("{")), expression, ws(tag("}"))).parse(input)
 }
 
 // REGEX_TERM: /\/([^\/]|(\\\/))*\//
