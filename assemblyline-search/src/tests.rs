@@ -235,6 +235,19 @@ fn test_date_truncate() {
 #[test]
 fn test_subobject_filters() {
     let document = json!({
+        "size": "large",
+        "labels": {
+            "pets": [
+                {
+                    "name": "cat",
+                    "height": "small"
+                },
+                {
+                    "name": "cat",
+                    "height": "small"
+                }
+            ]
+        },
         "tags": [
             {
                 "name": "vector",
@@ -247,20 +260,58 @@ fn test_subobject_filters() {
         ]
     });
 
-
+    // A normal document level search that hits both tags
     let fltr = Query::parse("tags.name: vector AND tags.value: giftwrap").unwrap();
     assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
     assert!(AllFields::test(&fltr, &document).unwrap());
 
-    let fltr = Query::parse("{tags.name: vector AND tags.value: giftwrap}").unwrap();
-    assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
-    assert!(!AllFields::test(&fltr, &document).unwrap());
+    // A nested search that is nested at the wrong level
+    let fltr = Query::parse("labels: {pets.name: cat AND pets.height: small}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec!["labels", "pets", "height"], vec!["labels", "pets", "name"]]);
+    assert!(AllFields::test(&fltr, &document).is_err());
 
+    // A nested search that is nested at the wrong level with a different test that passes
+    let fltr = Query::parse("large OR labels: {pets.name: cat AND pets.height: small}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["labels", "pets", "height"], vec!["labels", "pets", "name"]]);
+    assert!(AllFields::test(&fltr, &document).unwrap());
+
+    let fltr = Query::parse("labels: {pets.name: cat AND pets.height: small} OR large").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["labels", "pets", "height"], vec!["labels", "pets", "name"]]);
+    assert!(AllFields::test(&fltr, &document).is_err());
+
+    // A valid nested search that shouldn't hit
     let fltr = Query::parse("tags: {name: vector AND value: giftwrap}").unwrap();
     assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
     assert!(!AllFields::test(&fltr, &document).unwrap());
 
-    let fltr = Query::parse("tags: {(name: (vector OR technique.*) AND value: giftwrap}").unwrap();
+    // A valid nested search that shouldn't hit with a global one that should
+    let fltr = Query::parse("large OR tags: {name: vector AND value: rent}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(AllFields::test(&fltr, &document).unwrap());
+
+    let fltr = Query::parse("tags: {name: vector AND value: rent} OR large").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(AllFields::test(&fltr, &document).unwrap());
+
+    // A valid nested search that shouldn't hit with a global one that shouldn't either
+    let fltr = Query::parse("large AND tags: {name: vector AND value: rent}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(!AllFields::test(&fltr, &document).unwrap());
+
+    let fltr = Query::parse("tags: {name: vector AND value: rent} AND large").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec![], vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(!AllFields::test(&fltr, &document).unwrap());
+
+    // nested searches that should hit
+    let fltr = Query::parse("tags: {name: (vector OR \"technique.packer\") AND value: giftwrap}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(AllFields::test(&fltr, &document).unwrap());
+
+    let fltr = Query::parse("tags: {name: (vector OR technique.*) AND value: giftwrap}").unwrap();
+    assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
+    assert!(AllFields::test(&fltr, &document).unwrap());
+
+    let fltr = Query::parse("tags: {name: vector AND value: things}").unwrap();
     assert_eq!(fltr.list_fields(), vec![vec!["tags", "name"], vec!["tags", "value"]]);
     assert!(AllFields::test(&fltr, &document).unwrap());
 }

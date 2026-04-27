@@ -4,18 +4,22 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use crate::lucene::{FieldQuery, NumberQuery, ParsingError, PrefixOperator, Query, RangeBound, RangeQuery, RangeTerm, StringQuery};
 
+#[derive(Debug, thiserror::Error)]
+#[error("A nested query targeted a value that wasn't a list")]
+pub struct NestedFieldError;
 
 pub trait JsonFilter {
     fn get_full_text_fields(data: &serde_json::Value) -> Vec<&serde_json::Value>;
 
     fn get_field<'a>(data: &'a serde_json::Value, fields: &[String]) -> Vec<&'a serde_json::Value> {
-        if let Some(data) = data.as_array() {
+        if let Some(data) = data.as_array() && !fields.is_empty() {
             let mut out = vec![];
             for item in data {
                 out.extend(Self::get_field(item, fields))
             }
             return out;
         }
+
         if let Some(field) = fields.first() {
             if let Some(data) = data.as_object() {
                 match data.get(field) {
@@ -84,7 +88,6 @@ pub trait JsonFilter {
                 }
                 for field in fields {
                     if Self::test_field(query, field)? {
-                        // println!("hit");
                         return Ok(true)
                     }
                 }
@@ -144,6 +147,18 @@ pub trait JsonFilter {
                 Ok(true)
             },
             FieldQuery::Not(part) => Ok(!Self::test_field(part, data)?),
+            FieldQuery::Nested(query) => {
+                if let Some(data) = data.as_array() {
+                    for row in data {
+                        if Self::test(query, row)? {
+                            return Ok(true)
+                        }
+                    }
+                    return Ok(false)
+                } else {
+                    Err(NestedFieldError.into())
+                }
+            },
         }
     }
 
