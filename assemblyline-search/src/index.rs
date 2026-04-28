@@ -2,11 +2,11 @@ use assemblyline_models::ElasticMeta;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use log::warn;
+use log::{error, warn};
 
 use struct_metadata::{Described, Entry, Kind, MetadataKind};
 
-use yb_postgres::{Client, NoTls};
+use yb_tokio_postgres::{connect, NoTls};
 
 #[derive(Debug)]
 
@@ -25,6 +25,8 @@ enum PostgresTypes {
     TextTrigram,
     JsonInverse,
     BigSerial,
+    Float,
+    Double,
 }
 
 impl PostgresTypes {
@@ -44,6 +46,8 @@ impl PostgresTypes {
             PostgresTypes::TextInvert => "text".to_owned(),
             PostgresTypes::JsonInverse => "jsonb".to_owned(),
             PostgresTypes::BigSerial => "bigserial".to_owned(),
+            PostgresTypes::Float => "real".to_owned(),
+            PostgresTypes::Double => "double precision".to_owned(),
         }
     }
 }
@@ -76,6 +80,16 @@ impl Field {
         }
     }
 
+    fn new_index(name: String, kind: PostgresTypes, index: String) -> Self {
+        Self {
+            name,
+            optional: false,
+            kind,
+            index: FieldIndex::Some(index),
+            primary: false,
+        }
+    }
+
     fn index(&self, default: &str) -> Option<String> {
         match &self.index {
             FieldIndex::Some(value) => Some(value.clone()),
@@ -97,16 +111,12 @@ struct Table {
 impl Table {
     pub fn create_table_command(&self) -> (String, Vec<String>) {
         let mut fields = vec![];
-
         let mut indices = vec![];
-
         let mut primary = None;
 
         for field in &self.fields {
             let mut string = field.name.clone();
-
             string += " ";
-
             string += &field.kind.type_string();
 
             if !field.optional {
@@ -118,18 +128,12 @@ impl Table {
             if field.primary {
                 primary = Some(match &field.index {
                     FieldIndex::Some(index) => index.clone(),
-
-                    _ => format!(
-                        "{} HASH",
-                        field.name
-                    ),
+                    _ => format!("{} HASH", field.name),
                 });
             } else {
                 match field.kind {
                     PostgresTypes::BigSerial => {
-                        panic!(
-                            "Serial type used outside of primary key?"
-                        );
+                        panic!("Serial type used outside of primary key?");
                     }
 
                     PostgresTypes::Text
@@ -137,6 +141,8 @@ impl Table {
                     | PostgresTypes::SmallInt
                     | PostgresTypes::Int
                     | PostgresTypes::BigInt
+                    | PostgresTypes::Float
+                    | PostgresTypes::Double
                     | PostgresTypes::Timestamp => {
                         if let Some(index) = field.index("ASC") {
                             indices.push(format!("CREATE INDEX {}_{} ON {}({})",
@@ -149,9 +155,7 @@ impl Table {
                     PostgresTypes::SmallIntHash | PostgresTypes::Uuid => {
                         if let Some(index) = field.index("hash") {
                             indices.push(format!(
-                                "CREATE
- INDEX {}_{}
- ON {}({})",
+                                "CREATE INDEX {}_{} ON {}({})",
                                 self.name, field.name, self.name, index
                             ));
                         }
@@ -159,17 +163,11 @@ impl Table {
 
                     PostgresTypes::TextArrayInvert | PostgresTypes::JsonInverse => {
                         if field.index("").is_some() {
-                            warn!(
-                                "Ignoring the index setting
- for: {}/{}",
-                                self.name, field.name
-                            );
+                            warn!("Ignoring the index setting for: {}/{}", self.name, field.name);
                         }
 
                         indices.push(format!(
-                            "CREATE
- INDEX {}_{}
- ON {} USING ybgin({})",
+                            "CREATE INDEX {}_{} ON {} USING ybgin({})",
                             self.name, field.name, self.name, field.name
                         ));
                     }
@@ -177,44 +175,28 @@ impl Table {
                     PostgresTypes::TextTrigram => {
                         if let Some(index) = field.index("ASC") {
                             indices.push(format!(
-                                "CREATE
- INDEX {}_{}
- ON {}({})",
+                                "CREATE INDEX {}_{} ON {}({})",
                                 self.name, field.name, self.name, index
                             ));
                         }
 
                         indices.push(format!(
-                            "CREATE
- INDEX {}_{}_tgram
- ON {} USING ybgin({}
- gin_trgm_ops)",
+                            "CREATE INDEX {}_{}_tgram ON {} USING ybgin({} gin_trgm_ops)",
                             self.name, field.name, self.name, field.name
                         ));
                     }
 
                     PostgresTypes::TextInvert => {
                         if field.index("").is_some() {
-                            warn!(
-                                "Ignoring the index setting
- for: {}/{}",
-                                self.name, field.name
-                            );
+                            warn!("Ignoring the index setting for: {}/{}", self.name, field.name);
                         }
 
-                        fields.push(format!(
-                            "{}_vectored
- tsvector",
-                            field.name
-                        ));
-
+                        fields.push(format!("{}_vectored tsvector", field.name));
                         indices.push(format!(
-                            "CREATE
- INDEX {}_{}
- ON {} USING ybgin({}_vectored)",
+                            "CREATE INDEX {}_{} ON {} USING ybgin({}_vectored)",
                             self.name, field.name, self.name, field.name
                         ))
-                    }
+                    },
                 }
             }
         }
@@ -222,20 +204,15 @@ impl Table {
         let primary = primary.unwrap();
 
         let create = format!(
-            "CREATE TABLE IF NOT EXISTS
-{} (\n    {},\n
-    PRIMARY KEY({})\n) PARTITION BY RANGE (expiry_ts);",
-            self.name,
-            fields.join(
-                ",\n
-    "
-            ),
-            primary
+            "CREATE TABLE IF NOT EXISTS {} (\n    {},\n    PRIMARY KEY({})\n) PARTITION BY RANGE (expiry_ts);",
+            self.name, fields.join(",\n    "), primary
         );
 
         (create, indices)
     }
 }
+
+
 fn init_field(
     label: &str,
     metadata: &ElasticMeta,
@@ -247,13 +224,7 @@ fn init_field(
     }
 
     println!();
-
-    println!(
-        "{}
-{:?}
-{:?}",
-        label, metadata.index, kind
-    );
+    println!("{} {:?} {:?}", label, metadata.index, kind);
 
     if !metadata.index.unwrap_or_default() {
         return vec![];
@@ -276,25 +247,14 @@ fn init_field(
         }
 
         Kind::Aliased { name, kind } => match name {
-            "ClassificationString" => {
-                vec![Field::new(label.to_string(), PostgresTypes::Text)]
-            }
-
-            "Sid" => {
-                vec![Field::new(label.to_string(), PostgresTypes::Uuid)]
-            }
-
-            "Text" => {
-                vec![Field::new(label.to_string(), PostgresTypes::TextInvert)]
-            }
-
-            "Sha256" => {
-                vec![Field::new(label.to_string(), PostgresTypes::Char(32))]
-            }
-
-            _ => {
-                todo!()
-            }
+            "ClassificationString" => vec![Field::new(label.to_string(), PostgresTypes::Text)],
+            "Sid" => vec![Field::new(label.to_string(), PostgresTypes::Uuid)],
+            "Text" => vec![Field::new(label.to_string(), PostgresTypes::TextInvert)],
+            "Sha256" => vec![Field::new_index(label.to_string(), PostgresTypes::Char(32), format!("{label} HASH"))],
+            "MD5" => vec![Field::new_index(label.to_string(), PostgresTypes::Char(16), format!("{label} HASH"))],
+            "Sha1" => vec![Field::new_index(label.to_string(), PostgresTypes::Char(20), format!("{label} HASH"))],
+            "SSDeepHash" => vec![Field::new(label.to_string(), PostgresTypes::Text)],
+            _ => todo!(),
         },
 
         Kind::Enum { name, variants } => {
@@ -302,10 +262,7 @@ fn init_field(
         }
 
         Kind::Sequence(descriptor) => match descriptor.kind {
-            Kind::Aliased {
-                name: "UpperString",
-                kind,
-            } => {
+            Kind::Aliased {name: "UpperString", kind} => {
                 vec![Field::new(
                     label.to_string(),
                     PostgresTypes::TextArrayInvert,
@@ -358,9 +315,8 @@ fn init_field(
             vec![Field::new(label.to_string(), PostgresTypes::SmallInt)]
         }
 
-        Kind::F64 => todo!(),
-
-        Kind::F32 => todo!(),
+        Kind::F64 => vec![Field::new(label.to_string(), PostgresTypes::Double)],
+        Kind::F32 => vec![Field::new(label.to_string(), PostgresTypes::Float)],
 
         Kind::Bool => {
             vec![Field::new(label.to_string(), PostgresTypes::Boolean)]
@@ -385,19 +341,17 @@ fn init_submission_table() -> Table {
 
     let removed = SUBMISSION_REMOVED.get_or_init(|| {
         let mut removed = HashSet::new();
-
+        removed.insert("archived");
         removed.insert("errors");
-
         removed.insert("files");
-
         removed.insert("metadata");
-
         removed.insert("results");
-
         removed.insert("classification");
-
         removed.insert("sid");
-
+        removed.insert("to_be_deleted");
+        removed.insert("state");
+        removed.insert("verdict");
+        removed.insert("archive_ts");
         removed
     });
 
@@ -424,13 +378,9 @@ fn init_submission_table() -> Table {
 
     fields.push(Field {
         name: "raw".to_string(),
-
         optional: false,
-
         primary: false,
-
         kind: PostgresTypes::TextInvert,
-
         index: FieldIndex::Default,
     });
 
@@ -438,25 +388,16 @@ fn init_submission_table() -> Table {
 
     fields.push(Field {
         name: "sid".to_string(),
-
         optional: false,
-
         primary: true,
-
         kind: PostgresTypes::Uuid,
-
         index: FieldIndex::Some("sid HASH, expiry_ts ASC".to_string()),
     });
 
-    println!(
-        "submission
-{} fields",
-        fields.len()
-    );
+    println!("submission {} fields", fields.len());
 
     Table {
         name: "submission".to_string(),
-
         fields,
     }
 }
@@ -472,19 +413,12 @@ fn init_error_table() -> Table {
 
     let removed = SUBMISSION_REMOVED.get_or_init(|| {
         let mut removed = HashSet::new();
-
-        // removed.insert("errors");
-
+        removed.insert("archive_ts");
         // removed.insert("files");
-
         // removed.insert("metadata");
-
         // removed.insert("results");
-
         // removed.insert("classification");
-
         // removed.insert("sid");
-
         removed
     });
 
@@ -503,6 +437,11 @@ fn init_error_table() -> Table {
         ));
     }
 
+    for field in &mut fields {
+        if field.name == "response_service_name" || field.name == "response_service_version" {
+            field.optional = true;
+        }
+    }
     // insert classification fields
 
     fields.extend(classification_fields());
@@ -511,25 +450,17 @@ fn init_error_table() -> Table {
 
     fields.push(Field {
         name: "raw".to_string(),
-
         optional: false,
-
         primary: false,
-
         kind: PostgresTypes::TextInvert,
-
         index: FieldIndex::Default,
     });
 
     fields.push(Field {
         name: "submission".to_string(),
-
         optional: false,
-
         kind: PostgresTypes::Uuid,
-
         index: FieldIndex::Default,
-
         primary: false,
     });
 
@@ -537,25 +468,16 @@ fn init_error_table() -> Table {
 
     fields.push(Field {
         name: "id".to_string(),
-
         optional: false,
-
         kind: PostgresTypes::BigSerial,
-
         index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
-
         primary: true,
     });
 
-    println!(
-        "error
-{} fields",
-        fields.len()
-    );
+    println!("error {} fields", fields.len());
 
     Table {
         name: "error".to_string(),
-
         fields,
     }
 }
@@ -571,18 +493,17 @@ fn init_result_table() -> Table {
 
     let remove = RESULT_REMOVE.get_or_init(|| {
         let mut removed = HashSet::new();
+        removed.insert("archive_ts");
 
+        // handled in the file table
         removed.insert("response_supplementary");
+        removed.insert("response_extracted");
 
-        // removed.insert("files");
+        // handled as tags and raw indexing
+        removed.insert("result_sections");
 
-        // removed.insert("metadata");
-
-        // removed.insert("results");
-
-        // removed.insert("classification");
-
-        // removed.insert("sid");
+        // handled explicitly
+        removed.insert("classification");
 
         removed
     });
@@ -606,25 +527,17 @@ fn init_result_table() -> Table {
 
     fields.push(Field {
         name: "raw".to_string(),
-
         optional: false,
-
         primary: false,
-
         kind: PostgresTypes::TextInvert,
-
         index: FieldIndex::Default,
     });
 
     fields.push(Field {
         name: "submission".to_string(),
-
         optional: false,
-
         kind: PostgresTypes::Uuid,
-
         index: FieldIndex::Default,
-
         primary: false,
     });
 
@@ -632,128 +545,134 @@ fn init_result_table() -> Table {
 
     fields.push(Field {
         name: "id".to_string(),
-
         optional: false,
-
         kind: PostgresTypes::BigSerial,
-
         index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
-
         primary: true,
     });
 
-    println!(
-        "result
-{} fields",
-        fields.len()
-    );
+    println!("result {} fields", fields.len());
 
     Table {
         name: "result".to_string(),
-
         fields,
     }
 }
 
 fn init_file_table() -> Table {
-    todo!()
+    let meta = assemblyline_models::datastore::File::metadata();
+
+    let Kind::Struct { name, children } = meta.kind else {
+        panic!()
+    };
+
+    static RESULT_REMOVE: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+    let remove = RESULT_REMOVE.get_or_init(|| {
+        let mut removed = HashSet::new();
+        removed.insert("archive_ts");
+        removed.insert("uri_info");
+        removed.insert("classification");
+        removed.insert("labels");
+        removed.insert("label_categories");
+        removed.insert("comments");
+        removed.insert("from_archive");
+        removed
+    });
+
+    let mut fields = vec![];
+
+    for child in children {
+        fields.extend(init_field(
+            child.label,
+            &child.metadata,
+            child.type_info.kind,
+            remove,
+        ));
+    }
+
+    // insert classification fields
+
+    fields.extend(classification_fields());
+
+    // insert raw fields
+
+    fields.push(Field {
+        name: "raw".to_string(),
+        optional: false,
+        primary: false,
+        kind: PostgresTypes::TextInvert,
+        index: FieldIndex::Default,
+    });
+
+    fields.push(Field {
+        name: "submission".to_string(),
+        optional: false,
+        kind: PostgresTypes::Uuid,
+        index: FieldIndex::Default,
+        primary: false,
+    });
+
+    // insert primary key field
+
+    fields.push(Field {
+        name: "id".to_string(),
+        optional: false,
+        kind: PostgresTypes::BigSerial,
+        index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
+        primary: true,
+    });
+
+    println!("file {} fields", fields.len());
+
+    Table {
+        name: "file".to_string(),
+        fields,
+    }
 }
 
 fn init_tag_table() -> Table {
-    todo!()
-}
-
-// #[derive(Debug, Default, Described)]
-
-// #[metadata_type(PostgresMetadata)]
-
-// struct MetadataRow {
-
-//     #[metadata(class=PostgresTypes::BigSerial, index="id HASH, expiry_ts ASC", primary=true)]
-
-//     id: u64,
-
-//     #[metadata(index="submission HASH, key ASC, value ASC")]
-
-//     submission: u128,
-
-//     #[metadata(index="submission HASH, key ASC, value ASC")]
-
-//     key: String,
-
-//     #[metadata(index="submission HASH, key ASC, value ASC")]
-
-//     key: String,
-
-// }
-
-fn init_metadata_tag_table() -> Table {
     let fields = vec![
         Field {
             name: "id".to_string(),
-
             optional: false,
-
             kind: PostgresTypes::BigSerial,
-
-            index: FieldIndex::Some(
-                "id
- HASH, expiry_ts ASC"
-                    .to_string(),
-            ),
-
+            index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
             primary: true,
         },
         Field {
-            name: "submission".to_string(),
-
+            name: "expiry_ts".to_string(),
             optional: false,
-
+            kind: PostgresTypes::Timestamp,
+            index: FieldIndex::None,
+            primary: false,
+        },
+        Field {
+            name: "submission".to_string(),
+            optional: false,
             kind: PostgresTypes::Uuid,
-
-            index: FieldIndex::Some(
-                "submission
- HASH, key ASC, value ASC"
-                    .to_string(),
-            ),
-
+            index: FieldIndex::Some("submission HASH, key ASC, value ASC".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "result".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Some("result HASH".to_string()),
             primary: false,
         },
         Field {
             name: "key".to_string(),
-
             optional: false,
-
             kind: PostgresTypes::Text,
-
-            index: FieldIndex::Some(
-                "key
- ASC, value ASC"
-                    .to_string(),
-            ),
-
+            index: FieldIndex::Some("key ASC, value ASC".to_string()),
             primary: false,
         },
         Field {
             name: "value".to_string(),
-
             optional: false,
-
             kind: PostgresTypes::TextTrigram,
-
             index: FieldIndex::Default,
-
-            primary: false,
-        },
-        Field {
-            name: "expiry_ts".to_string(),
-
-            optional: false,
-
-            kind: PostgresTypes::Timestamp,
-
-            index: FieldIndex::None,
-
             primary: false,
         },
     ];
@@ -764,30 +683,163 @@ fn init_metadata_tag_table() -> Table {
     }
 }
 
-fn main() {
+fn init_file_relation_table() -> Table {
+    let fields = vec![
+        Field {
+            name: "id".to_string(),
+            optional: false,
+            kind: PostgresTypes::BigSerial,
+            index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
+            primary: true,
+        },
+        Field {
+            name: "expiry_ts".to_string(),
+            optional: false,
+            kind: PostgresTypes::Timestamp,
+            index: FieldIndex::None,
+            primary: false,
+        },
+        // Field {
+        //     name: "submission".to_string(),
+        //     optional: false,
+        //     kind: PostgresTypes::Uuid,
+        //     index: FieldIndex::Some("submission HASH".to_string()),
+        //     primary: false,
+        // },
+        Field {
+            name: "result".to_string(),
+            optional: false,
+            kind: PostgresTypes::BigInt,
+            index: FieldIndex::Some("result HASH".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "parent".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Some("parent HASH, child ASC".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "child".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Some("child HASH, parent ASC".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "name".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Default,
+            primary: false,
+        },
+        Field {
+            name: "relation".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Some("relation HASH, parent ASC".to_string()),
+            index: FieldIndex::Some("relation HASH, parent ASC".to_string()),
+            primary: false,
+        },
+    ];
+
+    Table {
+        name: "relations".to_owned(),
+        fields,
+    }
+
+}
+
+// #[derive(Debug, Default, Described)]
+// #[metadata_type(PostgresMetadata)]
+// struct MetadataRow {
+//     #[metadata(class=PostgresTypes::BigSerial, index="id HASH, expiry_ts ASC", primary=true)]
+//     id: u64,
+//     #[metadata(index="submission HASH, key ASC, value ASC")]
+//     submission: u128,
+//     #[metadata(index="submission HASH, key ASC, value ASC")]
+//     key: String,
+//     #[metadata(index="submission HASH, key ASC, value ASC")]
+//     key: String,
+// }
+
+fn init_metadata_tag_table() -> Table {
+    let fields = vec![
+        Field {
+            name: "id".to_string(),
+            optional: false,
+            kind: PostgresTypes::BigSerial,
+            index: FieldIndex::Some("id HASH, expiry_ts ASC".to_string()),
+            primary: true,
+        },
+        Field {
+            name: "submission".to_string(),
+            optional: false,
+            kind: PostgresTypes::Uuid,
+            index: FieldIndex::Some("submission HASH, key ASC, value ASC".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "key".to_string(),
+            optional: false,
+            kind: PostgresTypes::Text,
+            index: FieldIndex::Some("key ASC, value ASC, submission ASC".to_string()),
+            primary: false,
+        },
+        Field {
+            name: "value".to_string(),
+            optional: false,
+            kind: PostgresTypes::TextTrigram,
+            index: FieldIndex::Default,
+            primary: false,
+        },
+        Field {
+            name: "expiry_ts".to_string(),
+            optional: false,
+            kind: PostgresTypes::Timestamp,
+            index: FieldIndex::None,
+            primary: false,
+        },
+    ];
+
+    Table {
+        name: "metadata".to_owned(),
+        fields,
+    }
+}
+
+// #[tokio::main]
+pub async fn main() {
     // let connection_url: String = String::from("postgresql://9dc62c296bdc:5433/yugabyte?user=yugabyte&password=yugabyte&load_balance=true");
+    let connection_url = String::from("postgresql://localhost:5433/yugabyte?user=yugabyte&password=yugabyte");
+    println!("Database connecting...");
+    let (client, connection) = connect(&connection_url, NoTls).await.unwrap();
 
-    let connection_url =
-        String::from("postgresql://localhost:5433/yugabyte?user=yugabyte&password=yugabyte");
+    // The connection object performs the actual communication with the database,
+    // so spawn it off to run on its own.
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            error!("connection error: {e}");
+        }
+    });
 
-    let mut client = Client::connect(&connection_url, NoTls).unwrap();
-
-    client
-        .execute(
-            "CREATE
- extension IF NOT EXISTS pg_trgm",
-            &[],
-        )
-        .unwrap();
+    println!("Enabling database extensions...");
+    client.execute("CREATE extension IF NOT EXISTS pg_trgm", &[]).await.unwrap();
+    println!("Database ready");
 
     let tables = vec![
         init_submission_table(),
         init_metadata_tag_table(),
         init_error_table(),
+        init_result_table(),
+        init_file_table(),
+        init_tag_table(),
+        init_file_relation_table(),
     ];
 
     for table in tables {
-        println!("{table:?}");
+        println!("Creating table {} ...", table.name);
 
         let (create_table, create_indices) = table.create_table_command();
 
@@ -797,31 +849,18 @@ fn main() {
             println!("{index}");
         }
 
-        client
-            .execute(
-                &format!(
-                    "drop
- table if exists {}",
-                    table.name
-                ),
-                &[],
-            )
-            .unwrap();
-
-        client.execute(&create_table, &[]).unwrap();
+        client.execute(&format!("drop table if exists {}", table.name), &[]).await.unwrap();
+        client.execute(&create_table, &[]).await.unwrap();
 
         for create_index in create_indices {
-            client.execute(&create_index, &[]).unwrap();
+            client.execute(&create_index, &[]).await.unwrap();
         }
     }
 
-    init_result_table();
-
-    init_file_table();
-
-    init_tag_table();
-
     todo!("impl enums");
+    todo!("normalize some fields on index, update, or search");
+    todo!("add index to result for submission, hash combo");
+    todo!("separate index from field");
 }
 
 // #[derive(Debug, Default, MetadataKind)]
