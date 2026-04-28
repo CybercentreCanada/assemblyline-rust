@@ -4,7 +4,7 @@
     clippy::collapsible_else_if
 )]
 
-// pub mod index;
+pub mod index;
 pub mod lucene;
 pub mod json;
 #[cfg(test)]
