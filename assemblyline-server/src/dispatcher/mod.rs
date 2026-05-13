@@ -70,7 +70,6 @@ const TASK_ASSIGNMENT_PATTERN: &str = "dispatcher-tasks-assigned-to-*";
 const DISPATCH_START_EVENTS: &str = "dispatcher-start-events-";
 const DISPATCH_RESULT_QUEUE: &str = "dispatcher-results-";
 const DISPATCH_COMMAND_QUEUE: &str = "dispatcher-commands-";
-const DISPATCH_DIRECTORY: &str = "dispatchers-directory";
 const DISPATCH_DIRECTORY_FINALIZE: &str = "dispatchers-directory-finalizing";
 const BAD_SID_HASH: &str = "bad-sid-hash";
 const QUEUE_EXPIRY: Duration = Duration::from_secs(60 * 60);
@@ -2728,7 +2727,15 @@ impl UserCache {
             }
         }
 
-        if let Some((user, _)) = self.datastore.user.get_if_exists(name, None).await.context("fetching user data...")? {
+        let user = match self.datastore.user.get_if_exists(name, None).await {
+            Ok(user) => user,
+            Err(err) => {
+                error!("Failed to fetch user {name}: {err:?}");
+                None
+            },
+        };
+
+        if let Some((user, _)) = user {
             let user = Arc::new(user);
             self.cache.lock().insert(name.to_string(), (user.clone(), Instant::now()));
             return Ok(Some(user))
