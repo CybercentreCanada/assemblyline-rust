@@ -560,7 +560,7 @@ impl Tagging {
 
 // MARK: Flat Tag Container
 /// List of validated tags
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct FlatTags {
     tags: HashMap<&'static TagInformation, Vec<TagValue>>,
 }

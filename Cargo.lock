@@ -271,7 +271,7 @@ name = "assemblyline-client"
 version = "0.2.0"
 dependencies = [
  "assemblyline-markings 0.1.12",
- "assemblyline-models 0.8.0",
+ "assemblyline-models",
  "async-recursion",
  "base64 0.22.1",
  "chrono",
@@ -357,18 +357,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "assemblyline-markings"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c82b424207b8b5018e07fd71b3ae2934f8e0752accb03438c0d508ed0c7dc9d"
-dependencies = [
- "itertools 0.14.0",
- "serde",
- "serde_json",
- "serde_yaml",
-]
-
-[[package]]
 name = "assemblyline-models"
 version = "0.8.0"
 dependencies = [
@@ -381,36 +369,8 @@ dependencies = [
  "internment",
  "log",
  "md-5",
+ "postgres-types",
  "pretty_assertions",
- "rand 0.9.2",
- "regex",
- "serde",
- "serde_json",
- "serde_with",
- "sha1",
- "sha2",
- "struct-metadata",
- "strum",
- "thiserror 2.0.17",
- "unicode-normalization",
- "uuid",
-]
-
-[[package]]
-name = "assemblyline-models"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5eb99394a67854d7400df0649c23e92cc47b6292d69ace64321bb2f036076479"
-dependencies = [
- "assemblyline-markings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "base62",
- "chrono",
- "constcat",
- "hex",
- "idna",
- "internment",
- "log",
- "md-5",
  "rand 0.9.2",
  "regex",
  "serde",
@@ -430,16 +390,21 @@ name = "assemblyline-search"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assemblyline-models 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assemblyline-markings 0.2.0",
+ "assemblyline-models",
  "chrono",
  "clap",
+ "env_logger",
  "itertools 0.14.0",
  "log",
  "nom 8.0.0",
+ "postgres-types",
+ "rand 0.9.2",
  "regex",
  "serde",
  "serde_json",
  "struct-metadata",
+ "strum",
  "thiserror 2.0.17",
  "tokio",
  "yb-tokio-postgres",
@@ -452,7 +417,8 @@ dependencies = [
  "anyhow",
  "assemblyline-filestore",
  "assemblyline-markings 0.2.0",
- "assemblyline-models 0.8.0",
+ "assemblyline-models",
+ "assemblyline-search",
  "bytes",
  "cart_container",
  "chrono",
@@ -4740,6 +4706,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres-derive"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca1dad89d9ffdbf78502fde418eeede499b87772d88be780478f7f76dc8d471f"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "postgres-protocol"
 version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4764,7 +4742,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54b858f82211e84682fecd373f68e1ceae642d8d751a1ebd13f33de6257b3e20"
 dependencies = [
  "bytes",
+ "chrono",
  "fallible-iterator",
+ "postgres-derive",
  "postgres-protocol",
 ]
 

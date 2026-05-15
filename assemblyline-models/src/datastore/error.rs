@@ -1,9 +1,10 @@
 use chrono::{DateTime, TimeDelta, Utc};
+use postgres_types::ToSql;
 use rand::seq::IteratorRandom;
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
-use strum::IntoEnumIterator;
+use strum::{EnumDiscriminants, EnumIter, IntoEnumIterator, IntoStaticStr};
 
 use crate::datastore::Submission;
 use crate::messages::task::{generate_conf_key, Task};
@@ -11,7 +12,9 @@ use crate::{random_word, random_words, ElasticMeta, Readable};
 use crate::types::{ServiceName, Sha256, Text};
 
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, EnumIter, EnumDiscriminants, Described, Clone, Copy, ToSql, PartialEq)]
+#[strum_discriminants(derive(EnumIter, IntoStaticStr))]
+#[postgres(name="error_status")]
 #[metadata_type(ElasticMeta)]
 pub enum Status {
     #[strum(serialize = "FAIL_NONRECOVERABLE")]
@@ -40,19 +43,17 @@ impl Status {
     }
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
+#[derive(Debug, Default, SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, EnumIter, EnumDiscriminants, Described, Clone, Copy, ToSql, PartialEq)]
+#[strum_discriminants(derive(EnumIter, IntoStaticStr))]
+#[postgres(name="error_severity")]
 #[strum(serialize_all="lowercase")]
 #[metadata_type(ElasticMeta)]
 pub enum ErrorSeverity {
+    #[default]
     Error,
     Warning,
 }
 
-impl Default for ErrorSeverity {
-    fn default() -> Self {
-        Self::Error
-    }
-}
 
 #[cfg(feature = "rand")]
 impl rand::distr::Distribution<ErrorSeverity> for rand::distr::StandardUniform {
@@ -64,7 +65,9 @@ impl rand::distr::Distribution<ErrorSeverity> for rand::distr::StandardUniform {
     }
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
+#[derive(Debug, SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, EnumIter, EnumDiscriminants, Described, Clone, Copy, ToSql, PartialEq)]
+#[strum_discriminants(derive(EnumIter, IntoStaticStr))]
+#[postgres(name="error_types")]
 #[metadata_type(ElasticMeta)]
 pub enum ErrorTypes {
     #[strum(serialize = "UNKNOWN")]
@@ -96,7 +99,7 @@ impl rand::distr::Distribution<ErrorTypes> for rand::distr::StandardUniform {
 }
 
 /// Error Response from a Service
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Response {
@@ -134,7 +137,7 @@ impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
 
 
 /// Error Model used by Error Viewer
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Error {

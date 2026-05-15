@@ -1,4 +1,7 @@
-mod index;
+#![allow(clippy::collapsible_if)]
+
+mod yugabyte;
+mod tables;
 use clap::{Parser, Subcommand};
 
 /// Commands for managing relational index tables in assemblyline
@@ -12,10 +15,10 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Create tables and indices
-    Init {},
-
-    /// Import data from the assemblyline elastic collections into the
-    Import {}
+    Init {
+        #[arg(short, long, default_value_t=false)]
+        wipe: bool,
+    },
 }
 
 #[tokio::main]
@@ -23,11 +26,8 @@ async fn main() {
     let args = Args::parse();
 
     match args.command {
-        Commands::Init { } => {
-            index::main().await;
-        },
-        Commands::Import {  } => {
-            todo!("read to_be_deleted before ingest");
+        Commands::Init { wipe } => {
+            tables::init_database_tables(yugabyte::Yugabyte::development().await.unwrap(), wipe).await.unwrap();
         },
     }
 

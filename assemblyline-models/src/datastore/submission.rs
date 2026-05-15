@@ -13,7 +13,7 @@ use crate::{ElasticMeta, Readable};
 
 
 /// A logging event describing the processing of a submission
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
 pub struct TraceEvent {
@@ -28,7 +28,7 @@ pub struct TraceEvent {
 fn default_now() -> DateTime<Utc> { Utc::now() }
 
 /// Model of Submission
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Submission {
@@ -138,7 +138,7 @@ impl Readable for Submission {
 
 
 /// Submission Parameters
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct SubmissionParams {
@@ -372,7 +372,7 @@ impl SubmissionParams {
 
 
 /// Service Selection Scheme
-#[derive(Serialize, Deserialize, Default, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Described, Clone, PartialEq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=false, store=false)]
@@ -392,7 +392,7 @@ pub struct ServiceSelection {
 }
 
 /// Submission-Relevant Times
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Times {
@@ -413,7 +413,7 @@ impl Default for Times {
 }
 
 /// Submission Verdict
-#[derive(Serialize, Deserialize, Debug, Described, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, Default, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 #[serde(default)]
@@ -424,7 +424,7 @@ pub struct Verdict {
     pub non_malicious: Vec<String>,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumString, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumIter, strum::EnumString, Described, Clone, Copy)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 #[metadata_type(ElasticMeta)]
 pub enum SubmissionState {
@@ -443,7 +443,7 @@ fn test_state_serialization() {
 
 
 /// File Model of Submission
-#[derive(Serialize, Deserialize, Debug, Described, Clone)]
+#[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct File {

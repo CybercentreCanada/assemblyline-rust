@@ -43,6 +43,7 @@ mod core_util;
 mod archive;
 mod services;
 mod dispatcher;
+mod analysis;
 mod postprocessing;
 mod elastic;
 mod logging;
@@ -95,6 +96,10 @@ enum Commands {
         /// If set and no tls configuration is provided revert to http rather than using a self signed certificate
         #[arg(long, default_value_t=false)]
         allow_http_mode: bool
+    },
+    AnalysisImport {
+        #[arg(long, default_value_t=false)]
+        leader: bool,
     }
 }
 
@@ -105,6 +110,7 @@ impl Commands {
             Commands::Dispatcher { .. } => "dispatcher",
             Commands::Plumber { .. } => "plumber",
             Commands::ServiceAPI { .. } => "service_server",
+            Commands::AnalysisImport { .. } => "analysis_import",
         }
     }
 }
@@ -163,6 +169,9 @@ async fn main() -> ExitCode {
         Commands::ServiceAPI { allow_http_mode } => {
             crate::service_api::main(core, allow_http_mode).await
         }
+        Commands::AnalysisImport { leader } => {
+            crate::analysis::main(core, leader).await
+        },
     };
 
     // log if the module failed

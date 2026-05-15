@@ -73,6 +73,7 @@ redis-objects = { version = "1.2", path = "../redis-objects" }
 assemblyline-markings = { version = "0.2.0", path = "../assemblyline-markings" }
 assemblyline-filestore = { version = "0.2", path = "../assemblyline-filestore" }
 assemblyline-models = { version = "0.8", path = "../assemblyline-models", features = ["rand"] }
+assemblyline-search = { version = "0.1", path = "../assemblyline-search" }
 struct-metadata = { version = "1.3", features = ["serde_json"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"

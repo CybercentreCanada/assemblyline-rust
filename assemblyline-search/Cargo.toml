@@ -18,11 +18,20 @@ anyhow = "1.0"
 thiserror = "2.0"
 itertools = "*"
 serde = { version = "1.0", features = ["derive", "rc"] }
-assemblyline-models = "*"
+
+assemblyline-models = { version = "0.8", path = "../assemblyline-models", features = ["rand"] }
+assemblyline-markings = { version = "0.2.0", path = "../assemblyline-markings" }
+
 log = "*"
 struct-metadata = "*"
-yb-tokio-postgres = "0.7.10-yb-1-beta.3"
+postgres-types = { version = "0.2", features = ["derive"]}
+yb-tokio-postgres = { version = "0.7.10-yb-1-beta.3", features = ["with-chrono-0_4"]}
 tokio = { version = "1", features = ["full"] }
 
 
 clap = { version = "4.6", features = ["derive"] }
+strum = "^0.27"
+
+[dev-dependencies]
+rand = "0.9"
+env_logger = "0.11"

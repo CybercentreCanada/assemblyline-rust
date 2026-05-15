@@ -37,6 +37,8 @@ log = "0.4"
 
 internment = { version = "0.8", features = ["serde", "arc"]}
 
+postgres-types = { version = "0.2", features = ["derive"]}
+
 # tokio = { version = "1", features = ["full"], optional = true }
 
 [dev-dependencies]

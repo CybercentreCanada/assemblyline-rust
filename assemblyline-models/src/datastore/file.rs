@@ -9,7 +9,7 @@ use crate::{ElasticMeta, Readable};
 use crate::types::{ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
 
 /// Model of File
-#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct File {
@@ -160,7 +160,7 @@ pub struct URIInfo {
 }
 
 /// File Seen Model
-#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Seen {
@@ -191,7 +191,7 @@ impl Default for Seen {
 
 
 /// Label Categories Model
-#[derive(Debug, Serialize, Deserialize, Described, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, Default, PartialEq)]
 #[serde(default)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
@@ -205,7 +205,7 @@ pub struct LabelCategories {
 }
 
 /// Comment Model
-#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Comment {
@@ -225,7 +225,7 @@ pub struct Comment {
 }
 
 /// Reaction Model
-#[derive(Debug, Serialize, Deserialize, Described, Clone)]
+#[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=false)]
 pub struct Reaction {
@@ -240,10 +240,10 @@ pub struct Reaction {
 #[metadata(mapping="keyword")]
 #[strum(serialize_all = "snake_case")]
 pub enum ReactionsTypes {
-    ThumbsUp, 
-    ThumbsDown, 
-    Love, 
-    Smile, 
-    Surprised, 
+    ThumbsUp,
+    ThumbsDown,
+    Love,
+    Smile,
+    Surprised,
     Party
 }

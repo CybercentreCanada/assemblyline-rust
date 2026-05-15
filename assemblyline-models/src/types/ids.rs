@@ -29,6 +29,10 @@ impl Sid {
     pub fn assign(&self, bins: usize) -> usize {
         (self.0 % bins as u128) as usize
     }
+
+    pub fn as_uuid(&self) -> uuid::Uuid {
+        uuid::Uuid::from_u128(self.0)
+    }
 }
 
 #[cfg(feature = "rand")]
