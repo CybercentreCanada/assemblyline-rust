@@ -1,28 +1,55 @@
 use assemblyline_models::ElasticMeta;
+use assemblyline_models::types::Sid;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::sync::OnceLock;
+use anyhow::Result;
 
 use log::{error, warn};
 
 use struct_metadata::{Described, Entry, Kind, MetadataKind};
 
-use yb_tokio_postgres::{connect, NoTls};
+use crate::yugabyte::Yugabyte;
+
+pub const ANALYSIS_SUBMISSIONS_TABLE: &str = "analysis_submissions";
+pub const ANALYSIS_RESULTS_TABLE: &str = "analysis_results";
+pub const ANALYSIS_ERRORS_TABLE: &str = "analysis_errors";
+pub const ANALYSIS_METADATA_TABLE: &str = "analysis_metadata";
+pub const ANALYSIS_TAGS_TABLE: &str = "analysis_tags";
+pub const ANALYSIS_RELATIONS_TABLE: &str = "analysis_relations";
+pub const ANALYSIS_FILES_TABLE: &str = "analysis_files";
+
+
+pub const ALL_ANALYSIS_TABLES: [&str; 7] = [
+    ANALYSIS_SUBMISSIONS_TABLE,
+    ANALYSIS_RESULTS_TABLE,
+    ANALYSIS_ERRORS_TABLE,
+    ANALYSIS_METADATA_TABLE,
+    ANALYSIS_TAGS_TABLE,
+    ANALYSIS_RELATIONS_TABLE,
+    ANALYSIS_FILES_TABLE,
+];
+
 
 #[derive(Debug, Clone, Copy)]
-enum PostgresTypes {
+pub enum PostgresTypes {
     Timestamp,
     Boolean,
     SmallInt,
-    SmallIntHash,
     Int,
     BigInt,
-    Uuid,
+    // Uuid,
     Char(usize),
+    Enum(&'static str),
     Text,
     TextArrayInvert,
     TextInvert,
     TextTrigram,
-    JsonInverse,
+    // JsonInverse,
     BigSerial,
     Float,
     Double,
@@ -31,84 +58,131 @@ enum PostgresTypes {
 impl PostgresTypes {
     pub fn type_string(&self) -> String {
         match self {
-            PostgresTypes::Timestamp => "timestamp".to_owned(),
+            PostgresTypes::Timestamp => "timestamp with time zone".to_owned(),
             PostgresTypes::Boolean => "boolean".to_owned(),
             PostgresTypes::SmallInt => "smallint".to_owned(),
-            PostgresTypes::SmallIntHash => "smallint".to_owned(),
             PostgresTypes::Int => "integer".to_owned(),
             PostgresTypes::BigInt => "bigint".to_owned(),
-            PostgresTypes::Uuid => "uuid".to_owned(),
+            // PostgresTypes::Uuid => "uuid".to_owned(),
             PostgresTypes::Text => "text".to_owned(),
             PostgresTypes::Char(len) => format!("char({len})"),
             PostgresTypes::TextTrigram => "text".to_owned(),
             PostgresTypes::TextArrayInvert => "text[]".to_owned(),
             PostgresTypes::TextInvert => "text".to_owned(),
-            PostgresTypes::JsonInverse => "jsonb".to_owned(),
+            // PostgresTypes::JsonInverse => "jsonb".to_owned(),
             PostgresTypes::BigSerial => "bigserial".to_owned(),
             PostgresTypes::Float => "real".to_owned(),
             PostgresTypes::Double => "double precision".to_owned(),
+            PostgresTypes::Enum(name) => name.to_string(),
         }
+    }
+
+    pub fn generated(&self) -> bool {
+        matches!(self, PostgresTypes::BigSerial)
     }
 }
 
 #[derive(Debug, Clone)]
-struct Field {
-    name: String,
-    optional: bool,
-    kind: PostgresTypes,
+pub struct Field {
+    pub name: String,
+    pub optional: bool,
+    pub extraction: Option<Vec<String>>,
+    pub kind: PostgresTypes,
 }
 
+// impl Field {
+//     pub fn extract(&self, data: &Value) -> Option<String> {
+//         self._extract(self.extraction.as_ref()?, data)
+//     }
+
+//     fn _extract(&self, path: &[String], data: &Value) -> Option<String> {
+//         if path.is_empty() {
+//             match self.kind {
+//                 PostgresTypes::Timestamp
+//                 | PostgresTypes::SmallInt
+//                 | PostgresTypes::Int
+//                 | PostgresTypes::BigInt => {
+//                     Some(data.as_number()?.as_i64()?.to_string())
+//                 }
+//                 PostgresTypes::Float | PostgresTypes::Double => {
+//                     Some(data.as_number()?.as_f64()?.to_string())
+//                 }
+//                 PostgresTypes::Boolean => {
+//                     Some(data.as_bool()?.to_string())
+//                 },
+//                 // PostgresTypes::Uuid => todo!(),
+//                 PostgresTypes::Enum(_) => todo!(),
+//                 PostgresTypes::Char(_) => todo!(),
+//                 PostgresTypes::Text => todo!(),
+//                 PostgresTypes::TextArrayInvert => todo!(),
+//                 PostgresTypes::TextInvert => todo!(),
+//                 PostgresTypes::TextTrigram => todo!(),
+//                 // PostgresTypes::JsonInverse => todo!(),
+//                 PostgresTypes::BigSerial => None,
+//             }
+//         } else {
+//             self._extract(&path[1..], data.get(&path[0])?)
+//         }
+//     }
+// }
+
 #[derive(Debug, Clone)]
-enum Index {
+pub enum Index {
     Custom(String),
     Default(String),
 }
 
-impl Field {
-    // fn new(name: String, kind: PostgresTypes) -> Self {
-    //     Self {
-    //         name,
-    //         optional: false,
-    //         kind,
-    //         index: FieldIndex::Default,
-    //         primary: false,
-    //     }
-    // }
-
-    // fn new_index(name: String, kind: PostgresTypes, index: String) -> Self {
-    //     Self {
-    //         name,
-    //         optional: false,
-    //         kind,
-    //         index: FieldIndex::Some(index),
-    //         primary: false,
-    //     }
-    // }
-
-    // fn index(&self, default: &str) -> Option<String> {
-    //     match &self.index {
-    //         FieldIndex::Some(value) => Some(value.clone()),
-    //         FieldIndex::Default => Some(format!("{} {default}",self.name)),
-    //         FieldIndex::None => None,
-    //     }
-    // }
-}
-
 #[derive(Debug)]
-
-struct Table {
-    name: String,
-
-    primary: Index,
-    fields: Vec<Field>,
-    indices: Vec<Index>,
+pub struct Table {
+    pub (crate) name: &'static str,
+    pub (crate) primary: Index,
+    pub (crate) fields: Vec<Field>,
+    pub (crate) indices: Vec<Index>,
 }
+
+// struct FieldBuilder<'a> {
+//     parent: &'a mut Table,
+// }
+
 
 impl Table {
+
+    pub fn extract_unindexed_field(&mut self, name: String, path: &[&str], kind: PostgresTypes) -> usize {
+        self.fields.push(Field {
+            name: name.clone(),
+            extraction: Some(path.iter().map(|r| r.to_string()).collect()),
+            optional: false,
+            kind,
+        });
+        self.fields.len() - 1
+    }
+
+    pub fn extract_default_field(&mut self, name: String, path: &[&str], kind: PostgresTypes) -> usize {
+        self.fields.push(Field {
+            name: name.clone(),
+            extraction: Some(path.iter().map(|r| r.to_string()).collect()),
+            optional: false,
+            kind,
+        });
+        self.indices.push(Index::Default(name));
+        self.fields.len() - 1
+    }
+
+    pub fn extract_index_field(&mut self, name: String, path: &[&str], kind: PostgresTypes, index: String) -> usize {
+        self.fields.push(Field {
+            name,
+            extraction: Some(path.iter().map(|r| r.to_string()).collect()),
+            optional: false,
+            kind,
+        });
+        self.indices.push(Index::Custom(index));
+        self.fields.len() - 1
+    }
 
     pub fn add_unindexed_field(&mut self, name: String, kind: PostgresTypes) -> usize {
         self.fields.push(Field {
             name: name.clone(),
+            extraction: None,
             optional: false,
             kind,
         });
@@ -118,6 +192,7 @@ impl Table {
     pub fn add_default_field(&mut self, name: String, kind: PostgresTypes) -> usize {
         self.fields.push(Field {
             name: name.clone(),
+            extraction: None,
             optional: false,
             kind,
         });
@@ -128,6 +203,7 @@ impl Table {
     pub fn add_index_field(&mut self, name: String, kind: PostgresTypes, index: String) -> usize {
         self.fields.push(Field {
             name,
+            extraction: None,
             optional: false,
             kind,
         });
@@ -190,6 +266,7 @@ impl Table {
                         PostgresTypes::Text
                         | PostgresTypes::Char(_)
                         | PostgresTypes::SmallInt
+                        | PostgresTypes::Boolean
                         | PostgresTypes::Int
                         | PostgresTypes::BigInt
                         | PostgresTypes::Float
@@ -198,13 +275,11 @@ impl Table {
                             indices.push(format!("CREATE INDEX {0}_{name} ON {0}({name} ASC)", self.name));
                         }
 
-                        PostgresTypes::Boolean => continue,
-                        // TODO do we want to support this without special handling?
-                        PostgresTypes::SmallIntHash | PostgresTypes::Uuid => {
+                        PostgresTypes::Enum(_) => { // | PostgresTypes::Uuid => {
                             indices.push(format!("CREATE INDEX {0}_{name} ON {0}({name} HASH)", self.name));
                         }
 
-                        PostgresTypes::TextArrayInvert | PostgresTypes::JsonInverse => {
+                        PostgresTypes::TextArrayInvert => { //| PostgresTypes::JsonInverse => {
                             indices.push(format!("CREATE INDEX {0}_{name} ON {0} USING ybgin({name})", self.name));
                         }
 
@@ -233,6 +308,7 @@ impl Table {
     fn init_field(
         &mut self,
         label: &str,
+        path: &[&str],
         metadata: &ElasticMeta,
         kind: Kind<ElasticMeta>,
         remove: &HashSet<&'static str>,
@@ -240,9 +316,6 @@ impl Table {
         if remove.contains(label) {
             return vec![];
         }
-
-        println!();
-        println!("{} {:?} {:?}", label, metadata.index, kind);
 
         if !metadata.index.unwrap_or_default() {
             return vec![];
@@ -253,8 +326,11 @@ impl Table {
                 let mut entries = vec![];
 
                 for child in children {
+                    let mut path = path.to_vec();
+                    path.push(child.label);
                     entries.extend(self.init_field(
                         &format!("{label}_{}", child.label),
+                        &path,
                         &child.metadata,
                         child.type_info.kind,
                         remove,
@@ -265,31 +341,48 @@ impl Table {
             }
 
             Kind::Aliased { name, kind } => match name {
-                "ClassificationString" => vec![self.add_default_field(label.to_string(), PostgresTypes::Text)],
-                "Sid" => vec![self.add_default_field(label.to_string(), PostgresTypes::Uuid)],
-                "Text" => vec![self.add_default_field(label.to_string(), PostgresTypes::TextInvert)],
-                "Sha256" => vec![self.add_index_field(label.to_string(), PostgresTypes::Char(32), format!("{label} HASH"))],
-                "MD5" => vec![self.add_index_field(label.to_string(), PostgresTypes::Char(16), format!("{label} HASH"))],
-                "Sha1" => vec![self.add_index_field(label.to_string(), PostgresTypes::Char(20), format!("{label} HASH"))],
-                "SSDeepHash" => vec![self.add_default_field(label.to_string(), PostgresTypes::Text)],
+                "ClassificationString" => vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Text)],
+                "Sid" => vec![self.extract_index_field(label.to_string(), path, PostgresTypes::Text, "sid HASH".to_owned())],
+                "Text" => vec![self.extract_default_field(label.to_string(), path, PostgresTypes::TextInvert)],
+                "Sha256" => vec![self.extract_index_field(label.to_string(), path, PostgresTypes::Char(64), format!("{label} HASH"))],
+                "MD5" => vec![self.extract_index_field(label.to_string(), path, PostgresTypes::Char(32), format!("{label} HASH"))],
+                "Sha1" => vec![self.extract_index_field(label.to_string(), path, PostgresTypes::Char(40), format!("{label} HASH"))],
+                "SSDeepHash" => vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Text)],
                 _ => todo!(),
             },
 
             Kind::Enum { name, variants } => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::SmallIntHash)]
+                match name {
+                    "Status" => {
+                        if ["response_status"].contains(&label) {
+                            vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Enum("error_status"))]
+                        } else {
+                            todo!("Other enum {label} -> {name}")
+                        }
+                    },
+                    "ErrorTypes" => {
+                        vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Enum("error_types"))]
+                    },
+                    "ErrorSeverity" => {
+                        vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Enum("error_severity"))]
+                    }
+                    _ => {
+                        todo!("Other enum {label} -> {name}")
+                    }
+                }
             }
 
             Kind::Sequence(descriptor) => match descriptor.kind {
                 Kind::Aliased {name: "UpperString", kind} => {
-                    vec![self.add_default_field(
-                        label.to_string(),
+                    vec![self.extract_default_field(
+                        label.to_string(), path,
                         PostgresTypes::TextArrayInvert,
                     )]
                 }
 
                 Kind::String => {
-                    vec![self.add_default_field(
-                        label.to_string(),
+                    vec![self.extract_default_field(
+                        label.to_string(), path,
                         PostgresTypes::TextArrayInvert,
                     )]
                 }
@@ -298,7 +391,7 @@ impl Table {
             },
 
             Kind::Option(descriptor) => {
-                let entries = self.init_field(label, metadata, descriptor.kind, remove);
+                let entries = self.init_field(label, path, metadata, descriptor.kind, remove);
 
                 for entry in &entries {
                     self.fields[*entry].optional = true;
@@ -310,11 +403,11 @@ impl Table {
             Kind::Mapping(descriptor, descriptor1) => todo!(),
 
             Kind::DateTime => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::Timestamp)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Timestamp)]
             }
 
             Kind::String => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::Text)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Text)]
             }
 
             Kind::U128 => todo!(),
@@ -322,22 +415,22 @@ impl Table {
             Kind::I128 => todo!(),
 
             Kind::U64 | Kind::I64 => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::BigInt)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::BigInt)]
             }
 
             Kind::U32 | Kind::I32 => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::Int)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Int)]
             }
 
             Kind::U16 | Kind::I16 | Kind::U8 | Kind::I8 => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::SmallInt)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::SmallInt)]
             }
 
-            Kind::F64 => vec![self.add_default_field(label.to_string(), PostgresTypes::Double)],
-            Kind::F32 => vec![self.add_default_field(label.to_string(), PostgresTypes::Float)],
+            Kind::F64 => vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Double)],
+            Kind::F32 => vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Float)],
 
             Kind::Bool => {
-                vec![self.add_default_field(label.to_string(), PostgresTypes::Boolean)]
+                vec![self.extract_default_field(label.to_string(), path, PostgresTypes::Boolean)]
             }
 
             Kind::JSON => todo!(),
@@ -349,20 +442,20 @@ impl Table {
     }
 
     fn classification_fields(&mut self) {
-        self.add_default_field("classification".to_string(), PostgresTypes::Text);
-        self.add_default_field("__access_lvl__".to_string(), PostgresTypes::Int);
-        self.add_default_field("__access_req__".to_string(), PostgresTypes::TextArrayInvert);
-        self.add_default_field("__access_grp1__".to_string(), PostgresTypes::TextArrayInvert);
-        self.add_default_field("__access_grp2__".to_string(), PostgresTypes::TextArrayInvert);
+        self.extract_default_field("classification".to_string(), &["classification"], PostgresTypes::Text);
+        self.extract_default_field("__access_lvl__".to_string(), &["__access_lvl__"], PostgresTypes::Int);
+        self.extract_default_field("__access_req__".to_string(), &["__access_req__"], PostgresTypes::TextArrayInvert);
+        self.extract_default_field("__access_grp1__".to_string(), &["__access_grp1__"], PostgresTypes::TextArrayInvert);
+        self.extract_default_field("__access_grp2__".to_string(), &["__access_grp2__"], PostgresTypes::TextArrayInvert);
     }
 }
 
 
 
-fn init_submission_table() -> Table {
+pub fn init_submission_table() -> Table {
     let meta = assemblyline_models::datastore::Submission::metadata();
 
-    let Kind::Struct { name, children } = meta.kind else {
+    let Kind::Struct { children, .. } = meta.kind else {
         panic!()
     };
 
@@ -385,7 +478,7 @@ fn init_submission_table() -> Table {
     });
 
     let mut table = Table {
-        name: "submission".to_string(),
+        name: ANALYSIS_SUBMISSIONS_TABLE,
         fields: vec![],
         primary: Index::Custom("sid HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -398,6 +491,7 @@ fn init_submission_table() -> Table {
 
         table.init_field(
             child.label,
+            &[child.label],
             &child.metadata,
             child.type_info.kind,
             &Default::default(),
@@ -411,13 +505,12 @@ fn init_submission_table() -> Table {
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
 
     // insert primary key field
-    table.add_unindexed_field("sid".to_string(), PostgresTypes::Uuid);
+    table.extract_unindexed_field("sid".to_string(), &["sid"], PostgresTypes::Text);
 
-    println!("submission {} fields", table.fields.len());
     table
 }
 
-fn init_error_table() -> Table {
+pub fn init_error_table() -> Table {
     let meta = assemblyline_models::datastore::Error::metadata();
 
     let Kind::Struct { name, children } = meta.kind else {
@@ -429,6 +522,7 @@ fn init_error_table() -> Table {
     let removed = SUBMISSION_REMOVED.get_or_init(|| {
         let mut removed = HashSet::new();
         removed.insert("archive_ts");
+        removed.insert("response_service_debug_info");
         // removed.insert("files");
         // removed.insert("metadata");
         // removed.insert("results");
@@ -438,7 +532,7 @@ fn init_error_table() -> Table {
     });
 
     let mut table = Table {
-        name: "error".to_string(),
+        name: ANALYSIS_ERRORS_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -451,9 +545,10 @@ fn init_error_table() -> Table {
 
         table.init_field(
             child.label,
+            &[child.label],
             &child.metadata,
             child.type_info.kind,
-            &Default::default(),
+            &removed,
         );
     }
 
@@ -470,16 +565,15 @@ fn init_error_table() -> Table {
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
 
     // add indexed field for submission this error is associated with
-    table.add_default_field("submission".to_string(), PostgresTypes::Uuid);
+    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
 
     // insert primary key field
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
 
-    println!("error {} fields", table.fields.len());
     table
 }
 
-fn init_result_table() -> Table {
+pub fn init_result_table() -> Table {
     let meta = assemblyline_models::datastore::Result::metadata();
 
     let Kind::Struct { name, children } = meta.kind else {
@@ -506,7 +600,7 @@ fn init_result_table() -> Table {
     });
 
     let mut table = Table {
-        name: "result".to_string(),
+        name: ANALYSIS_RESULTS_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -515,9 +609,10 @@ fn init_result_table() -> Table {
     for child in children {
         table.init_field(
             child.label,
+            &[child.label],
             &child.metadata,
             child.type_info.kind,
-            &remove,
+            remove,
         );
     }
 
@@ -525,17 +620,17 @@ fn init_result_table() -> Table {
     table.classification_fields();
 
     // insert raw fields
+    table.add_default_field("key".to_string(), PostgresTypes::Text);
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
-    table.add_default_field("submission".to_string(), PostgresTypes::Uuid);
+    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
 
     // insert primary key field
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
 
-    println!("result {} fields", table.fields.len());
     table
 }
 
-fn init_file_table() -> Table {
+pub fn init_file_table() -> Table {
     let meta = assemblyline_models::datastore::File::metadata();
 
     let Kind::Struct { name, children } = meta.kind else {
@@ -557,7 +652,7 @@ fn init_file_table() -> Table {
     });
 
     let mut table = Table {
-        name: "file".to_string(),
+        name: ANALYSIS_FILES_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -566,6 +661,7 @@ fn init_file_table() -> Table {
     for child in children {
         table.init_field(
             child.label,
+            &[child.label],
             &child.metadata,
             child.type_info.kind,
             remove,
@@ -577,18 +673,29 @@ fn init_file_table() -> Table {
 
     // insert raw fields
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
-    table.add_default_field("submission".to_string(), PostgresTypes::Uuid);
+    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
 
     // insert primary key field
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
 
-    println!("file {} fields", table.fields.len());
     table
 }
 
-fn init_tag_table() -> Table {
+#[derive(Serialize, Deserialize)]
+pub struct TagRow<'a> {
+    // pub id: PostgresTypes::BigSerial);
+    pub expiry_ts: Option<DateTime<Utc>>,
+    pub submission: &'a str,
+    pub result: i64,
+    pub key: &'a str,
+    pub score: i32,
+    pub heuristic: bool,
+    pub value: &'a str,
+}
+
+pub fn init_tag_table() -> Table {
     let mut table = Table {
-        name: "metadata".to_owned(),
+        name: ANALYSIS_TAGS_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -596,17 +703,31 @@ fn init_tag_table() -> Table {
 
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
     table.add_unindexed_field("expiry_ts".to_string(), PostgresTypes::Timestamp);
-    table.add_index_field("submission".to_string(), PostgresTypes::Uuid, "submission HASH, key ASC, value ASC".to_string());
-    table.add_index_field("result".to_string(), PostgresTypes::Text, "result HASH".to_string());
-    table.add_index_field("key".to_string(), PostgresTypes::Text, "key ASC, value ASC".to_string());
-    table.add_default_field("value".to_string(), PostgresTypes::TextTrigram);
+    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH, key ASC, value ASC".to_string());
+    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::BigInt, "result HASH".to_string());
+    table.extract_index_field("key".to_string(), &["key"], PostgresTypes::Text, "key ASC, value ASC".to_string());
+    table.extract_default_field("score".to_string(), &["score"], PostgresTypes::Int);
+    table.extract_default_field("heuristic".to_string(), &["heuristic"], PostgresTypes::Boolean);
+    table.extract_default_field("value".to_string(), &["value"], PostgresTypes::TextTrigram);
 
     table
 }
 
-fn init_file_relation_table() -> Table {
+#[derive(Serialize, Deserialize)]
+pub struct RelationRow<'a> {
+    // pub id: PostgresTypes::BigSerial);
+    pub expiry_ts: Option<DateTime<Utc>>,
+    pub result: i64,
+    pub parent: Cow<'a, str>,
+    pub child: Cow<'a, str>,
+    pub name: Cow<'a, str>,
+    pub relation: Cow<'a, str>,
+    pub supplementary: bool,
+}
+
+pub fn init_file_relation_table() -> Table {
     let mut table = Table {
-        name: "relations".to_owned(),
+        name: ANALYSIS_RELATIONS_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
@@ -614,69 +735,90 @@ fn init_file_relation_table() -> Table {
 
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
     table.add_unindexed_field("expiry_ts".to_string(), PostgresTypes::Timestamp);
-    table.add_index_field("result".to_string(), PostgresTypes::BigInt, "result HASH".to_string());
-    table.add_index_field("parent".to_string(), PostgresTypes::Text, "parent HASH, child ASC".to_string());
-    table.add_index_field("child".to_string(), PostgresTypes::Text, "child HASH, parent ASC".to_string());
-    table.add_default_field("name".to_string(), PostgresTypes::Text);
+    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::BigInt, "result HASH".to_string());
+    table.extract_index_field("parent".to_string(), &["parent"], PostgresTypes::Text, "parent HASH, child ASC".to_string());
+    table.extract_index_field("child".to_string(), &["child"], PostgresTypes::Text, "child HASH, parent ASC".to_string());
+    table.extract_default_field("name".to_string(), &["name"], PostgresTypes::Text);
+    table.extract_default_field("supplementary".to_string(), &["supplementary"], PostgresTypes::Boolean);
 
-    table.add_unindexed_field("relation".to_string(), PostgresTypes::Text);
+    table.extract_unindexed_field("relation".to_string(), &["relation"], PostgresTypes::Text);
     table.indices.push(Index::Custom("relation HASH, parent ASC, child ASC".to_string()));
     table.indices.push(Index::Custom("relation HASH, child ASC, parent ASC".to_string()));
 
     table
 }
 
-// #[derive(Debug, Default, Described)]
+// #[derive(Debug, MetadataKind)]
+// struct PostgresMetadata {
+//     index: Option<&'static str>,
+//     class: PostgresTypes,
+// }
+
+// impl Default for PostgresMetadata {
+//     fn default() -> Self {
+//         Self {
+//             index: None,
+//             class: PostgresTypes::Int
+//         }
+//     }
+// }
+
+
+// #[derive(Debug, Described)]
 // #[metadata_type(PostgresMetadata)]
 // struct MetadataRow {
-//     #[metadata(class=PostgresTypes::BigSerial, index="id HASH, expiry_ts ASC", primary=true)]
+//     #[metadata(class=PostgresTypes::BigSerial)]
 //     id: u64,
-//     #[metadata(index="submission HASH, key ASC, value ASC")]
-//     submission: u128,
-//     #[metadata(index="submission HASH, key ASC, value ASC")]
-//     key: String,
+//     #[metadata(class=PostgresTypes::Text)]
+//     submission: String,
 //     #[metadata(index="submission HASH, key ASC, value ASC")]
 //     key: String,
 // }
 
-fn init_metadata_tag_table() -> Table {
+#[derive(Serialize, Deserialize)]
+pub struct MetadataRow {
+    // pub id: u64,
+    pub submission: String,
+    pub key: String,
+    pub value: String,
+    pub expiry_ts: Option<DateTime<Utc>>,
+}
+
+
+pub fn init_metadata_table() -> Table {
     let mut table = Table {
-        name: "metadata".to_owned(),
+        name: ANALYSIS_METADATA_TABLE,
         fields: vec![],
         primary: Index::Custom("id HASH, expiry_ts ASC".to_string()),
         indices: vec![],
     };
 
     table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
-    table.add_index_field("submission".to_string(),  PostgresTypes::Uuid, "submission HASH, key ASC, value ASC".to_string());
-    table.add_index_field("key".to_string(), PostgresTypes::Text, "key ASC, value ASC, submission ASC".to_string());
-    table.add_default_field("value".to_string(), PostgresTypes::TextTrigram);
+
+    let index = table.add_index_field("submission".to_string(),  PostgresTypes::Text, "submission HASH, key ASC, value ASC".to_string());
+    table.fields[index].extraction = Some(vec!["submission".to_string()]);
+
+    let index = table.add_index_field("key".to_string(), PostgresTypes::Text, "key ASC, value ASC, submission ASC".to_string());
+    table.fields[index].extraction = Some(vec!["key".to_string()]);
+
+    let index = table.add_default_field("value".to_string(), PostgresTypes::TextTrigram);
+    table.fields[index].extraction = Some(vec!["value".to_string()]);
+
     table.add_unindexed_field("expiry_ts".to_string(), PostgresTypes::Timestamp);
 
     table
 }
 
-pub async fn main() {
-    // let connection_url: String = String::from("postgresql://9dc62c296bdc:5433/yugabyte?user=yugabyte&password=yugabyte&load_balance=true");
-    let connection_url = String::from("postgresql://localhost:5433/yugabyte?user=yugabyte&password=yugabyte");
-    println!("Database connecting...");
-    let (client, connection) = connect(&connection_url, NoTls).await.unwrap();
+pub async fn init_database_tables(client: Yugabyte, wipe: bool) -> Result<()> {
 
-    // The connection object performs the actual communication with the database,
-    // so spawn it off to run on its own.
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            error!("connection error: {e}");
-        }
-    });
-
-    println!("Enabling database extensions...");
-    client.execute("CREATE extension IF NOT EXISTS pg_trgm", &[]).await.unwrap();
-    println!("Database ready");
+    // register types
+    client.register_type::<assemblyline_models::datastore::error::StatusDiscriminants>("error_status").await?;
+    client.register_type::<assemblyline_models::datastore::error::ErrorTypesDiscriminants>("error_types").await?;
+    client.register_type::<assemblyline_models::datastore::error::ErrorSeverityDiscriminants>("error_severity").await?;
 
     let tables = vec![
         init_submission_table(),
-        init_metadata_tag_table(),
+        init_metadata_table(),
         init_error_table(),
         init_result_table(),
         init_file_table(),
@@ -685,25 +827,9 @@ pub async fn main() {
     ];
 
     for table in tables {
-        println!("Creating table {} ...", table.name);
-
-        let (create_table, create_indices) = table.create_table_command();
-
-        println!("{create_table}");
-
-        for index in &create_indices {
-            println!("{index}");
-        }
-
-        client.execute(&format!("drop table if exists {}", table.name), &[]).await.unwrap();
-        client.execute(&create_table, &[]).await.unwrap();
-
-        for create_index in create_indices {
-            client.execute(&create_index, &[]).await.unwrap();
-        }
+        client.create_table(&table, wipe).await?;
     }
 
-    todo!("impl enums");
-    todo!("normalize some fields on index, update, or search");
-    todo!("add index to result for submission, hash combo");
+    Ok(())
 }
+
