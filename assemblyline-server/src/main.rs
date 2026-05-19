@@ -253,7 +253,11 @@ impl Core {
         let datastore = Elastic::connect(&config.datastore.hosts[0], false, datastore_ca, !datastore_verify, elastic_prefix).await?;
 
         // connect to filestore
-        let filestore = FileStore::open(&config.filestore.storage).await.context("initializing filestore")?;
+        let filestore = if config.filestore.readonly_storage.is_empty() {
+            FileStore::open(&config.filestore.storage).await.context("initializing filestore")?
+        } else {
+            FileStore::open_with_readonly(&config.filestore.storage, &config.filestore.readonly_storage).await.context("initializing filestore with readonly backends")?
+        };
 
         //
         let file_cache = FileStore::open(&config.filestore.cache).await.context("initializing cache filestore")?;

@@ -1131,6 +1131,8 @@ pub struct Filestore {
     pub cache: Vec<String>,
     /// List of filestores used for storage
     pub storage: Vec<String>,
+    /// List of filestores used as read-only fallback for storage (e.g. legacy backends with unmigrated data)
+    pub readonly_storage: Vec<String>,
 }
 
 impl Default for Filestore {
@@ -1138,7 +1140,8 @@ impl Default for Filestore {
         Self {
             archive: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-archive&use_ssl=False".to_string()],
             cache: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-cache&use_ssl=False".to_string()],
-            storage: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False".to_string()]
+            storage: vec!["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000?s3_bucket=al-storage&use_ssl=False".to_string()],
+            readonly_storage: vec![],
         }
     }
 }
