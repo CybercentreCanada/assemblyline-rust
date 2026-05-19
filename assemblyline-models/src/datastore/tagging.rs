@@ -46,7 +46,7 @@ impl From<String> for TagValue {
 
 // MARK: Tag Processors
 #[derive(Debug)]
-enum TagProcessor {
+pub enum TagProcessor {
     // Generic strings
     String,
     Uppercase,
@@ -935,7 +935,25 @@ fn network_tag_parsing() {
     assert_eq!(proc.apply(json!("www.google.com")), Err(json!("www.google.com")));
     assert_eq!(proc.apply(json!("www.GooGle.com")), Err(json!("www.GooGle.com")));
     assert_eq!(proc.apply(json!("172.0.0.1")), Ok(json!("172.0.0.1")));
+    assert_eq!(proc.apply(json!("0.0.0.0")), Ok(json!("0.0.0.0")));
+    assert_eq!(proc.apply(json!("127.0.0.0")), Ok(json!("127.0.0.0")));
+    assert_eq!(proc.apply(json!("127.0.10.200")), Ok(json!("127.0.10.200")));
+    assert_eq!(proc.apply(json!("255.255.255.255")), Ok(json!("255.255.255.255")));
     assert_eq!(proc.apply(json!("1234:5678:9ABC:0000:0000:1234:5678:9abc")), Ok(json!("1234:5678:9ABC:0000:0000:1234:5678:9ABC")));
+    // we don't want abbrivated, octal, hex, or padded ip addresses
+    assert_eq!(proc.apply(json!("172.1")), Err(json!("172.1")));
+    assert_eq!(proc.apply(json!("256.0.0.1")), Err(json!("256.0.0.1")));
+    assert_eq!(proc.apply(json!("0.256.0.1")), Err(json!("0.256.0.1")));
+    assert_eq!(proc.apply(json!("0.0.256.1")), Err(json!("0.0.256.1")));
+    assert_eq!(proc.apply(json!("0.0.0.256")), Err(json!("0.0.0.256")));
+    assert_eq!(proc.apply(json!("172.0x1.0.1")), Err(json!("172.0x1.0.1")));
+    assert_eq!(proc.apply(json!("172.01.0.1")), Err(json!("172.01.0.1")));
+    assert_eq!(proc.apply(json!("172.1.0.00000000001")), Err(json!("172.1.0.00000000001")));
+    assert_eq!(proc.apply(json!("0.0.0.")), Err(json!("0.0.0.")));
+    assert_eq!(proc.apply(json!("0.0.0.0.")), Err(json!("0.0.0.0.")));
+    assert_eq!(proc.apply(json!(".0.0.0")), Err(json!(".0.0.0")));
+    assert_eq!(proc.apply(json!(".0.0.0.0")), Err(json!(".0.0.0.0")));
+
 
     let proc = TagProcessor::UNCPath;
     assert_eq!(proc.apply(json!("www.google.com")), Err(json!("www.google.com")));

@@ -40,7 +40,7 @@ impl std::ops::Deref for ServiceName {
 impl<'de> Deserialize<'de> for ServiceName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de> 
+        D: serde::Deserializer<'de>
     {
         struct Visitor {}
 
@@ -81,17 +81,17 @@ impl From<&str> for ServiceName {
 }
 
 /// A string that maps to a keyword field in elasticsearch.
-/// 
+///
 /// This is the default behaviour for a String in a mapped struct, the only reason
 /// to use this over a standard String is cases where the 'mapping' field has been overwritten
 /// by a container and the more explicit 'mapping' this provided is needed to reassert
 /// the keyword type.
-/// 
+///
 /// Example:
 ///         #[metadata(store=false, mapping="flattenedobject")]
 ///         pub safelisted_tags: HashMap<String, Vec<Keyword>>,
-/// 
-/// In that example, if the inner Keyword was String the entire HashMap would have its 
+///
+/// In that example, if the inner Keyword was String the entire HashMap would have its
 /// mapping set to 'flattenedobject', the inner Keyword more explicitly overrides this.
 #[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[metadata_type(ElasticMeta)]
@@ -238,8 +238,8 @@ impl Text {
 #[derive(Debug, thiserror::Error)]
 #[error("Could not process {original} as a {name}: {error}")]
 pub struct ValidationError {
-    original: String, 
-    name: &'static str, 
+    original: String,
+    name: &'static str,
     error: String
 }
 
@@ -371,11 +371,11 @@ pub fn check_domain(data: &str) -> Result<String, DomainError> {
                 return Err(DomainError::IlligalCharacter)
                 // raise ValueError(f"[{self.name or self.parent_name}] '{segment}' in '{value}' "
                 //                     f"includes a Unicode character that can not be normalized to '{segment_norm}'.")
-            } 
+            }
             normalized_parts.push(segment_norm);
         }
     }
-    
+
     let mut domain = normalized_parts.join(".");
 
     static VALIDATION_REGEX: LazyLock<Regex> = LazyLock::new(||{
@@ -391,7 +391,7 @@ pub fn check_domain(data: &str) -> Result<String, DomainError> {
     }
 
     if domain.contains("@") {
-        return Err(DomainError::IlligalCharacter)   
+        return Err(DomainError::IlligalCharacter)
     }
 
     if let Some((_, tld)) = domain.rsplit_once(".") {
@@ -411,7 +411,7 @@ pub fn check_domain(data: &str) -> Result<String, DomainError> {
     }
 
     Err(DomainError::InvalidTLD)
-} 
+}
 
 // def is_valid_domain(domain: str) -> bool:
 //     if "@" in domain:
@@ -461,14 +461,14 @@ fn system_local_tld() -> Vec<String> {
 fn find_top_level_domains() -> &'static HashSet<String> {
     static TLDS: LazyLock<HashSet<String>> = LazyLock::new(|| {
         use super::net_static::TLDS_ALPHA_BY_DOMAIN;
-        let mut combined_tlds = HashSet::<String>::new(); 
+        let mut combined_tlds = HashSet::<String>::new();
         combined_tlds.extend(TLDS_ALPHA_BY_DOMAIN.iter().map(|s|s.to_string()));
 
         for d in TLDS_SPECIAL_BY_DOMAIN {
             if !d.contains(".") {
                 combined_tlds.insert(d.to_owned());
             }
-        } 
+        }
 
         for tld in system_local_tld() {
             let tld = tld.trim_matches('.').to_uppercase();
@@ -497,11 +497,11 @@ pub type Domain = ValidatedString<DomainValidator>;
 
 #[test]
 fn internationalized_domains() {
-    assert_eq!(check_domain("ουτοπία.δπθ.gr").unwrap(), "ουτοπία.δπθ.gr"); 
+    assert_eq!(check_domain("ουτοπία.δπθ.gr").unwrap(), "ουτοπία.δπθ.gr");
     assert_eq!(check_domain("xn--kxae4bafwg.xn--pxaix.gr").unwrap(), "ουτοπία.δπθ.gr");
-    assert_eq!(check_domain("site.XN--W4RS40L").unwrap(), "site.嘉里"); 
-    assert!(check_domain("ουτοπία.δπθ.g").is_err()); 
-    assert!(check_domain("ουτοπία..gr").is_err()); 
+    assert_eq!(check_domain("site.XN--W4RS40L").unwrap(), "site.嘉里");
+    assert!(check_domain("ουτοπία.δπθ.g").is_err());
+    assert!(check_domain("ουτοπία..gr").is_err());
     assert!(check_domain("xn--kxae4bafwg.xn--pxaix.g").is_err());
     assert!(check_domain("xn--kxae4bafwg.xn--xaix.gr").is_err());
 }
@@ -596,8 +596,8 @@ pub type Uri = ValidatedString<UriValidator>;
 // pub type UriPath = String;
 
 // MARK: IP
+const IPV4_REGEX: &str = r"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])";
 
-const IPV4_REGEX: &str = r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)";
 const IPV6_REGEX: &str = concat!(
     r"(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|",
     r"(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|",
