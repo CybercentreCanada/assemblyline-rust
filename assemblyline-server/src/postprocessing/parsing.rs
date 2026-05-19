@@ -6,12 +6,12 @@ use chrono::{DateTime, Utc, Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use nom::{IResult, Parser};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while, escaped_transform, is_not, take_while1, tag_no_case, is_a};
-use nom::character::complete::{multispace0, alphanumeric1, one_of};
-use nom::combinator::{map, map_opt, map_res, opt, value};
+use nom::character::complete::{alphanumeric1, multispace0, multispace1, one_of};
+use nom::combinator::{eof, map, map_opt, map_res, opt, peek, value};
 use nom::error::ParseError;
-use nom::multi::{separated_list1, count, many1};
+use nom::multi::{count, many_till, many1, separated_list1};
 use nom::number::complete::double;
-use nom::sequence::{delimited, pair};
+use nom::sequence::{delimited, pair, terminated};
 
 use super::search::{Query, PrefixOperator, StringQuery, FieldQuery, RangeBound, RangeTerm, RangeQuery, DateExpression, DateUnit, NumberQuery};
 use super::ParsingError;
@@ -86,9 +86,9 @@ fn not_operator(input: &str) -> IResult<&str, ()> {
 fn atom(input: &str) -> IResult<&str, Query> {
     // println!("atom: {input}");
     alt((
-        delimited(ws(tag("(")), expression, ws(tag(")"))), 
+        delimited(ws(tag("(")), expression, ws(tag(")"))),
         exists,
-        field, 
+        field,
         term
     )).parse(input)
 }
@@ -133,7 +133,7 @@ fn prefix_operator(input: &str) -> IResult<&str, PrefixOperator> {
 fn is_special(value: char) -> bool {
     matches!(value, '_' | '-')
 }
-fn simple_term(input: &str) -> IResult<&str, String> {
+fn primitive_simple_term(input: &str) -> IResult<&str, String> {
     // println!("simple_term: {input}");
     map_res(escaped_transform(
         alt((alphanumeric1, take_while1(is_special))),
@@ -170,16 +170,31 @@ fn simple_term(input: &str) -> IResult<&str, String> {
     }).parse(input)
 }
 
+fn simple_term(input: &str) -> IResult<&str, String> {
+    // println!("simple_term: {input}");
+    terminated(primitive_simple_term, end_term).parse(input)
+}
+
 fn pattern_term(input: &str) -> IResult<&str, regex::Regex> {
-    // println!("pattern_term: {input}");
-    map_res(many1(alt((
-        map(tag("*"), |_|{String::from(".*")}),
-        map(tag("?"), |_|{String::from(".")}),
-        map(simple_term, |row|{regex::escape(&row)}),
-    ))), |parts|{
+    map_res(many_till(
+        alt((
+            map(tag("*"), |_|{String::from(".*")}),
+            map(tag("?"), |_|{String::from(".")}),
+            map(primitive_simple_term, |row|{regex::escape(&row)}),
+        )),
+        end_term
+    ), |(parts, _)|{
         let pattern = parts.join("");
         regex::Regex::new(&pattern)
     }).parse(input)
+}
+
+fn end_term(input: &str) -> IResult<&str, ()> {
+    alt((
+        map(peek(tag(")")), |_| ()),
+        map(eof, |_|()),
+        map(multispace1, |_| ()),
+    )).parse(input)
 }
 
 // phrase_term: ESCAPED_STRING

@@ -50,6 +50,9 @@ fn test_simple_filters() {
     assert!(!fltr.test(&sub).unwrap());
 
     // Try a prefix operator and wildcard matches
+    let _ = parse("max_score: >100 AND NOT results: virus").unwrap();
+    let _ = parse("max_score: >100 AND NOT results: virus*").unwrap();
+    let _ = parse("max_score: >100 AND NOT results: *virus").unwrap();
     let fltr = parse("max_score: >100 AND NOT results: *virus*").unwrap();
     assert_eq!(fltr.cache_safe(), CacheAvailabilityStatus::ErrorUsesForbiddenFields(vec!["results".to_owned()]));
 
@@ -93,6 +96,10 @@ fn test_simple_filters() {
     assert!(fltr.test(&sub).unwrap());
 
     let fltr = parse("metadata.stuff: big-bad").unwrap();
+    assert_eq!(fltr.cache_safe(), CacheAvailabilityStatus::Ok);
+    assert!(fltr.test(&sub).unwrap());
+
+    let fltr = parse("metadata.stuff: big-*").unwrap();
     assert_eq!(fltr.cache_safe(), CacheAvailabilityStatus::Ok);
     assert!(fltr.test(&sub).unwrap());
 
@@ -299,7 +306,7 @@ async fn test_hook() {
     use assemblyline_models::datastore::submission::Submission;
 
     let (port, mut hits) = run_server().await;
-    
+
     let action = PostprocessAction{
         enabled: true,
         run_on_completed: true,
@@ -307,7 +314,7 @@ async fn test_hook() {
         webhook: Some(Webhook {
             uri: format!("http://localhost:{port}"),
             headers: vec![NamedValue{
-                name: "care-of".to_string(), 
+                name: "care-of".to_string(),
                 value: "assemblyline".to_string()
             }],
             password: None,
@@ -338,14 +345,14 @@ async fn test_hook() {
     {
         let mut sub: Submission = rand::rng().random();
         sub.metadata.insert("ok".to_string(), "bad".into());
-        worker.process(&sub, Default::default(), false).await.unwrap(); 
+        worker.process(&sub, Default::default(), false).await.unwrap();
     }
 
     {
         let mut sub: Submission = rand::rng().random();
         sub.metadata.insert("ok".to_string(), "good".into());
         sub.metadata.insert("do_hello".to_string(), "yes".into());
-        worker.process(&sub, Default::default(), false).await.unwrap(); 
+        worker.process(&sub, Default::default(), false).await.unwrap();
     }
 
     let (headers, body) = tokio::time::timeout(std::time::Duration::from_secs(3), hits.recv()).await.unwrap().unwrap();
@@ -360,11 +367,11 @@ async fn test_hook() {
 #[test]
 fn test_webhook_match() {
     let webhook_first = json!({
-        "uri": "http://api.interface.website"        
+        "uri": "http://api.interface.website"
     });
 
     let webhook_second = json!({
-        "uri": "http://api.interface.website",        
+        "uri": "http://api.interface.website",
         "headers": [{
             "name": "APIKEY",
             "value": "1111111111111111111111111111111111111111111111111111111111111111"
