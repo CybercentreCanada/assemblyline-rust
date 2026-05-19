@@ -20,6 +20,7 @@ use poem::web::{Data, Multipart, Path};
 use poem::{get, handler, put, Body, Endpoint, EndpointExt, Result, Response, Route};
 use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::instrument;
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::tasking::TaskingClient;
@@ -55,6 +56,7 @@ pub fn api(auth: ServiceAuth) -> impl Endpoint {
 ///
 /// Result example:
 /// <THE FILE BINARY>
+#[instrument(skip(core))]
 #[handler]
 async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo>, core: Data<&Arc<Core>>) -> Result<Response> {
     let sha256: Sha256 = match sha256.parse() {
@@ -98,6 +100,7 @@ async fn download_file(Path(sha256): Path<String>, client_info: Data<&ClientInfo
 ///
 /// Result example:
 /// {"success": true}
+#[instrument(skip(tasking, multipart_body, stream_body))]
 #[handler]
 async fn upload_file(
     client_info: Data<&ClientInfo>,

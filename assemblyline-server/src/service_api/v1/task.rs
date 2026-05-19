@@ -19,6 +19,7 @@ use poem::{get, handler, Endpoint, EndpointExt, Result, Response, Route};
 use poem::web::{Data, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::instrument;
 
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_error, make_api_response, make_empty_api_error};
@@ -48,6 +49,7 @@ pub fn api(auth: ServiceAuth) -> impl Endpoint {
 ///
 /// Result example:
 /// {'keep_alive': true}
+#[instrument(skip(tasking, headers))]
 #[handler]
 async fn get_task(
     tasking: Data<&Arc<TaskingClient>>,
@@ -126,6 +128,7 @@ async fn get_task(
 ///  "result": <AL Result Dict>,
 ///  "freshen": true
 /// }
+#[instrument(skip(tasking, body))]
 #[handler]
 async fn task_finished(
     Data(client_info): Data<&ClientInfo>,
