@@ -294,6 +294,12 @@ impl Transport for TransportAzure {
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let key = self.normalize(name);
         let client = self.container_client.blob_client(key);
+
+        // Fetch properties first to get content length before starting the stream,
+        // avoiding a TOCTOU race between get() and get_properties()
+        let properties = client.get_properties().await?;
+        let content_length = properties.blob.properties.content_length;
+
         let mut stream = client.get().into_stream();
         let (send, recv) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
@@ -322,8 +328,7 @@ impl Transport for TransportAzure {
             }
         });
         
-        let properties = client.get_properties().await?;
-        Ok((properties.blob.properties.content_length, recv))
+        Ok((content_length, recv))
     }
 
     async fn delete(&self, name: &str) -> Result<()> {

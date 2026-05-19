@@ -836,12 +836,21 @@ impl TaskingClient {
             let hash_strings: Vec<&str> = hash_strings.iter().map(|h|h.as_str()).collect();
 
             // In the event of a result with duplicate files, let's cache file existence checks with the filestore
-            // Pre-compute file existence checks before freshening files
-            // let file_exists_check = {h: self.filestore.exists(h) for h in hashes}
-            let mut file_exists_check: HashMap<Sha256, bool> = Default::default();
+            // Pre-compute file existence checks before freshening files (parallelized)
+            let mut exists_tasks = tokio::task::JoinSet::new();
             for h in hashes {
-                let hash_str = h.to_string();
-                file_exists_check.insert(h, self.filestore.exists(&hash_str).await.context("exists")?);
+                let filestore = self.filestore.clone();
+                let hash = h.clone();
+                exists_tasks.spawn(async move {
+                    let hash_str = hash.to_string();
+                    let exists = filestore.exists(&hash_str).await.context("exists")?;
+                    anyhow::Ok((hash, exists))
+                });
+            }
+            let mut file_exists_check: HashMap<Sha256, bool> = Default::default();
+            while let Some(res) = exists_tasks.join_next().await {
+                let (hash, exists) = res??;
+                file_exists_check.insert(hash, exists);
             }
 
             let file_infos = self.datastore.file.multiget::<assemblyline_models::datastore::File>(&hash_strings, Some(false), None).await.context("multiget")?;

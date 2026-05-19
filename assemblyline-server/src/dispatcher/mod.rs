@@ -2571,16 +2571,8 @@ impl Dispatcher {
             return Ok(())
         }
 
-        // Check if its worth trying to run the next stage
-        // Not worth running if we know we are waiting for another service
-        if !task.running_services.keys().any(|(hash, _)| hash == &sha256) {
-            force_redispatch.insert(sha256.clone());
-        }
-
-        // Not worth running if we know we have services in queue
-        if !task.queue_keys.keys().any(|(hash, _)| hash == &sha256) {
-            force_redispatch.insert(sha256);
-        }
+        // No services running or queued for this file, always redispatch
+        force_redispatch.insert(sha256);
 
         // Try to run the next stage
         for sha256 in force_redispatch {
