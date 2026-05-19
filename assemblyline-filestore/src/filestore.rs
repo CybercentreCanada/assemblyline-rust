@@ -226,22 +226,34 @@ impl FileStore {
             }
         }
         if errors.is_empty() {
-            bail!("All transports failed to fetch [{name}]")
+            bail!("No transports configured to download [{name}]")
         }
         Err(anyhow::anyhow!(errors.join("\n")).context("All transports failed to fetch"))
     }
 
     /// Upload a local file as a named blob.
+    /// Succeeds if at least one transport accepts the upload.
+    /// Logs warnings for transports that fail but does not return an error
+    /// unless ALL transports fail.
     pub async fn upload(&self, path: &Path, name: &str) -> Result<()> {
         let mut last_error = None;
+        let mut any_success = false;
         for transport in &self.transports {
-            if let Err(err) = transport.upload(path, name).await {
-                last_error = Some(err);
+            match transport.upload(path, name).await {
+                Ok(()) => any_success = true,
+                Err(err) => {
+                    warn!("Failed to upload [{name}] to transport {transport:?}: {err}");
+                    last_error = Some(err);
+                }
             }
         }
-        match last_error {
-            Some(error) => Err(error).context("A transport failed to upload"),
-            None => Ok(())
+        if any_success {
+            Ok(())
+        } else {
+            match last_error {
+                Some(error) => Err(error).context("All transports failed to upload"),
+                None => bail!("No transports configured for upload")
+            }
         }
     }
 

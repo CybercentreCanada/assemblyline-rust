@@ -182,8 +182,14 @@ impl DispatchCapable for DispatchClient {
             extra_errors,
         };
 
+        let mut backoff = Duration::from_secs(1);
+        let max_backoff = Duration::from_secs(30);
+        let max_attempts = 60; // ~10 minutes with escalating backoff
+        let mut attempts = 0;
+
         loop {
-            // Let the dispatcher know we failed this task
+            attempts += 1;
+            // Let the dispatcher know we finished this task
             let response = self.http_client.post(&url).json(&message).send().await;
 
             match response {
@@ -197,9 +203,13 @@ impl DispatchCapable for DispatchClient {
                     if !self.is_dispatcher(&dispatcher).await? {
                         warn!("Error [{sid}/{sha256}/{service_name}] reaching dispatcher (dispatcher not on record): {err}");
                         return Ok(())
+                    } else if attempts >= max_attempts {
+                        error!("Error [{sid}/{sha256}/{service_name}] giving up after {attempts} attempts: {err}");
+                        bail!("Failed to reach dispatcher after {attempts} attempts: {err}");
                     } else {
-                        error!("Error [{sid}/{sha256}/{service_name}] reaching dispatcher: {err}");
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        warn!("Error [{sid}/{sha256}/{service_name}] reaching dispatcher (attempt {attempts}): {err}");
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(max_backoff);
                     }
                 },
             }
@@ -242,7 +252,15 @@ impl DispatchCapable for DispatchClient {
             error_key: error_key.to_owned()
         };
 
+        let mut backoff = Duration::from_secs(1);
+        let max_backoff = Duration::from_secs(30);
+        let max_attempts = 60;
+        let mut attempts = 0;
+        let sid = task.sid;
+        let sha256 = error.sha256.clone();
+
         loop {
+            attempts += 1;
             // Let the dispatcher know we failed this task
             let response = self.http_client
                 .post(&url)
@@ -257,11 +275,16 @@ impl DispatchCapable for DispatchClient {
                     bail!("Error refused by dispatcher");
                 },
                 Err(err) => {
-                    error!("Error reaching dispatcher: {err}");
                     if !self.is_dispatcher(&dispatcher).await? {
+                        warn!("Error [{sid}/{sha256}] reaching dispatcher for error report (not on record): {err}");
                         return Ok(())
+                    } else if attempts >= max_attempts {
+                        error!("Error [{sid}/{sha256}] giving up error report after {attempts} attempts: {err}");
+                        bail!("Failed to reach dispatcher for error report after {attempts} attempts: {err}");
                     } else {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        warn!("Error [{sid}/{sha256}] reaching dispatcher for error report (attempt {attempts}): {err}");
+                        tokio::time::sleep(backoff).await;
+                        backoff = (backoff * 2).min(max_backoff);
                     }
                 },
             }
@@ -446,6 +469,8 @@ impl DispatchClient {
         };
 
         if self.is_known_dead(&task.dispatcher).await {
+            warn!("{service_name}:{worker_id} dropping task from dead dispatcher {} for [{}/{}]",
+                  task.dispatcher, task.sid, task.fileinfo.sha256);
             return Ok(None)
         }
 
