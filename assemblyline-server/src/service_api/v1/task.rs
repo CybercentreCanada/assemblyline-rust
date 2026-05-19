@@ -23,7 +23,6 @@ use serde_json::json;
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_error, make_api_response, make_empty_api_error};
 use crate::service_api::helpers::tasking::{MalformedResult, ServiceMissing, TaskingClient, timestamp};
-use crate::Core;
 
 use super::require_header;
 
@@ -33,10 +32,10 @@ const EXTRA_STATUS_TIME: Duration = Duration::from_secs(1);
 // SUB_API = 'task'
 // task_api = make_subapi_blueprint(SUB_API, api_version=1)
 // task_api._doc = "Perform operations on service tasks"
-pub fn api(core: Arc<Core>) -> impl Endpoint {
+pub fn api(auth: ServiceAuth) -> impl Endpoint {
     Route::new()
     .at("/", get(get_task).post(task_finished))
-    .with(ServiceAuth::new(core))
+    .with(auth)
 }
 
 
