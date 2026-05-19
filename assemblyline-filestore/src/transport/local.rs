@@ -21,10 +21,7 @@ impl LocalTransport {
     }
 
     fn normalize(&self, path: &str) -> Result<PathBuf> {
-        // If they've provided an absolute path. Leave it a is.
-        let s = if path.starts_with('/') {
-            PathBuf::from_str(path)?
-        } else if path.contains("/") || path.len() != 64 { // Relative paths
+        let s = if path.contains("/") || path.len() != 64 { // Relative paths
             safe_path::scoped_join(&self.path, path)?
         } else {
             safe_path::scoped_join(&self.path, normalize_srl_path(path))?

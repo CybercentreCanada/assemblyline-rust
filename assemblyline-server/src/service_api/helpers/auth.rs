@@ -80,8 +80,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
 
         if self.auth_key != apikey {
             let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
-            let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
-            warn!("Client [{client_id}] provided wrong api key [{apikey}] headers: {header_dump}");
+            warn!("Client [{client_id}] provided wrong api key [REDACTED]");
             return Err(make_empty_api_error(StatusCode::UNAUTHORIZED, "Unauthorized access denied"));
         }
 
