@@ -76,6 +76,10 @@ struct Args {
     #[arg(short, long)]
     enable_apm: bool,
 
+    /// Enable OpenTelemetry exporting (overrides config.logging.enable_opentelemetry)
+    #[arg(long)]
+    enable_otel: bool,
+
     #[command(subcommand)]
     pub command: Commands
 }
@@ -140,6 +144,30 @@ async fn main() -> ExitCode {
         info!("APM collection not configured");
     }
 
+    // Configure OpenTelemetry (flag-gated, runs alongside APM if both enabled)
+    let _otel_guard = {
+        let otel_enabled = args.enable_otel || config.logging.enable_opentelemetry;
+        if otel_enabled {
+            let endpoint = config.logging.opentelemetry_endpoint.clone()
+                .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+                .unwrap_or_else(|| "http://localhost:4317".to_string());
+
+            match init_opentelemetry(args.command.label(), &endpoint) {
+                Ok(guard) => {
+                    info!("OpenTelemetry exporter enabled -> {endpoint}");
+                    Some(guard)
+                }
+                Err(err) => {
+                    error!("Failed to initialize OpenTelemetry: {err}");
+                    None
+                }
+            }
+        } else {
+            info!("OpenTelemetry not enabled");
+            None
+        }
+    };
+
     // Connect to all the supporting components
     let core = match Core::setup(config, "", args.secure_connections).await {
         Ok(core) => core,
@@ -173,6 +201,52 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         },
     }
+}
+
+/// Guard that flushes and shuts down the OTEL tracer provider on drop.
+struct OtelGuard(opentelemetry_sdk::trace::SdkTracerProvider);
+
+impl Drop for OtelGuard {
+    fn drop(&mut self) {
+        if let Err(err) = self.0.shutdown() {
+            eprintln!("OpenTelemetry shutdown error: {err}");
+        }
+    }
+}
+
+/// Initialize an OpenTelemetry OTLP exporter and install it as a tracing subscriber layer.
+fn init_opentelemetry(service_name: &str, endpoint: &str) -> Result<OtelGuard> {
+    use opentelemetry::trace::TracerProvider;
+    use opentelemetry_otlp::SpanExporter;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::Resource;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let exporter = SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(endpoint)
+        .build()?;
+
+    let resource = Resource::builder()
+        .with_service_name(service_name.to_string())
+        .build();
+
+    let provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(resource)
+        .build();
+
+    let tracer = provider.tracer("assemblyline");
+    let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+    tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
+        .init();
+
+    Ok(OtelGuard(provider))
 }
 
 

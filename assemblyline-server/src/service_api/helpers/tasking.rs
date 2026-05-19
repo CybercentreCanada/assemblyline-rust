@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, RedisObjects};
 use serde_json::{json, Value};
 use thiserror::Error;
+use tracing::instrument;
 
 use crate::service_api::v1::task::models::{Result as ApiResult};
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
@@ -163,6 +164,7 @@ impl TaskingClient {
         })
     }
 
+    #[instrument(skip(self, file), fields(sha256 = expected_sha256))]
     pub async fn upload_file(&self, file: &Path, classification: &str, ttl: u32, is_section_image: bool, is_supplementary: bool, expected_sha256: &str) -> Result<()> {
         // Identify the file info of the uploaded file
         let file_info = self.identify.fileinfo(file.to_path_buf(), true, None, None).await.context("fileinfo")?;
@@ -535,6 +537,7 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 }
 
 impl TaskingClient {
+    #[instrument(skip(self, service_tool_version, status_expiry, timeout))]
     pub async fn get_task(&self, client_id: &str, service_name: ServiceName, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
         let metric_factory = self.get_metrics_factory(service_name);
         let start_time = std::time::Instant::now();
@@ -776,6 +779,7 @@ fn finish_parsing_task(mut data: JsonMap) -> Result<Task, MalformedResult> {
 
 impl TaskingClient {
 
+    #[instrument(skip(self, service_task))]
     pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: ServiceName) -> Result<Value> {
         match service_task {
             FinishedBody::Success(mut success) => {
@@ -814,6 +818,7 @@ impl TaskingClient {
         }
     }
 
+    #[instrument(skip(self, success))]
     async fn _handle_task_result(&self,
         task: Task,
         success: Box<TaskSuccess>,

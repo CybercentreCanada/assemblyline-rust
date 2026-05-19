@@ -1186,6 +1186,10 @@ pub struct Logging {
     pub log_as_json: bool,
     // /// Add a health check to core components.<br>If `true`, core components will touch this path regularly to tell the container environment it is healthy
     // pub heartbeat_file: str = odm.Optional(odm.Keyword(),")
+    /// Enable OpenTelemetry trace export
+    pub enable_opentelemetry: bool,
+    /// OpenTelemetry collector endpoint (OTLP gRPC), e.g. http://otel-collector:4317
+    pub opentelemetry_endpoint: Option<String>,
 }
 
 impl Default for Logging {
@@ -1200,6 +1204,8 @@ impl Default for Logging {
             syslog_host: "localhost".to_owned(),
             syslog_port: 514,
             syslog_transport: SyslogTransport::Tcp,
+            enable_opentelemetry: false,
+            opentelemetry_endpoint: None,
             // export_interval: 5,
             // heartbeat_file: "/tmp/heartbeat"
         }
