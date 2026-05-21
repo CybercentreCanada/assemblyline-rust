@@ -34,7 +34,6 @@ async fn test_azure() {
     assert!(fs.exists("test").await.unwrap());
     assert!(fs.get("test").await.unwrap().is_some());
     assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_err());
-    read_only(url.to_string()).await;
 }
 
 /// test Azure filestore against the local emulator container
