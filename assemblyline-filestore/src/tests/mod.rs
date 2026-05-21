@@ -46,6 +46,26 @@ async fn test_azure_emulator() {
     big_file(fs).await;
 }
 
+/// test Azure filestore in read-only mode
+#[tokio::test(flavor = "multi_thread")]
+async fn test_azure_readonly() {
+    init();
+    let fs = FileStore::with_limit_retries("azure://alpytest.blob.core.windows.net/pytest/?read_only=true").await.unwrap();
+    println!("{fs:?}");
+
+    assert!(fs.get("__missing_file__").await.unwrap().is_none());
+    assert!(fs.exists("test").await.unwrap());
+    assert!(fs.get("test").await.unwrap().is_some());
+
+    // Writes should fail but not error
+    assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
+    assert!(!fs.exists("bob").await.unwrap());
+
+    // Deletes should fail but not error
+    assert!(fs.delete("test").await.is_ok());
+    assert!(fs.exists("test").await.unwrap());    
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_sftp() {
     init();
@@ -53,6 +73,27 @@ async fn test_sftp() {
     let fs = FileStore::with_limit_retries(&server).await.unwrap();
     common_actions(fs).await;
     // big_file(fs).await; VERY SLOW
+}
+
+/// Test SFTP filestore in read-only mode
+#[tokio::test(flavor = "multi_thread")]
+async fn test_sftp_readonly() {
+    init();
+    let server = start_temp_sftp_server().await;
+    let fs = FileStore::with_limit_retries(&format!("sftp://{server}/?read_only=true")).await.unwrap();
+    
+    // Ensure that we can read files but not write or delete
+    assert!(fs.get("__missing_file__").await.unwrap().is_none());
+    assert!(fs.exists("test").await.unwrap());
+    assert!(fs.get("test").await.unwrap().is_some());
+
+    // Writes should fail but not error
+    assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
+    assert!(!fs.exists("bob").await.unwrap());
+
+    // Deletes should fail but not error
+    assert!(fs.delete("test").await.is_ok());
+    assert!(fs.exists("test").await.unwrap());    
 }
 
 /// Run some operations against an in-process ftp server
@@ -74,6 +115,25 @@ async fn ftps() {
     let fs = FileStore::with_limit_retries(&format!("ftps://{temp_ftps_server}")).await.unwrap();
     common_actions(fs.clone()).await;
     big_file(fs).await;
+}
+
+// Test FTP filestore in read-only mode
+#[tokio::test(flavor = "multi_thread")]
+async fn test_ftp_readonly() {
+    init();
+    let temp_ftp_server = start_temp_ftp_server(None).await;
+    let fs = FileStore::with_limit_retries(&format!("ftp://{temp_ftp_server}/?read_only=true")).await.unwrap();
+    assert!(fs.get("__missing_file__").await.unwrap().is_none());
+    assert!(fs.exists("test").await.unwrap());
+    assert!(fs.get("test").await.unwrap().is_some());
+
+    // Writes should fail but not error
+    assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
+    assert!(!fs.exists("bob").await.unwrap());
+
+    // Deletes should fail but not error
+    assert!(fs.delete("test").await.is_ok());
+    assert!(fs.exists("test").await.unwrap());    
 }
 
 /// Run many parallel operations against an in-process ftp server
@@ -105,6 +165,28 @@ async fn test_file() {
     big_file(fs).await;
 }
 
+/// Test local filesystem based filestore in read-only mode
+#[tokio::test(flavor = "multi_thread")]
+async fn test_file_readonly() {
+    let directory = tempfile::tempdir().unwrap();
+    let url = format!("file://{}?read_only=true", directory.path().to_string_lossy());
+    println!("{url}");
+    let fs = FileStore::with_limit_retries(&url).await.unwrap();
+    assert!(fs.get("__missing_file__").await.unwrap().is_none());
+    let test_file = directory.path().join("test");
+    tokio::fs::write(&test_file, b"test").await.unwrap();
+    assert!(fs.exists("test").await.unwrap());
+    assert!(fs.get("test").await.unwrap().is_some());
+
+    // Writes should fail but not error
+    assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
+    assert!(!fs.exists("bob").await.unwrap());
+
+    // Deletes should fail but not error
+    assert!(fs.delete("test").await.is_ok());
+    assert!(fs.exists("test").await.unwrap());
+}
+
 /// Test S3 FileStore using Minio by pushing and fetching back content from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_s3() {
@@ -120,7 +202,6 @@ async fn test_s3() {
     big_file(fs).await;
 }
 
-
 /// Test S3 FileStore using Minio by pushing and fetching back content from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_s3_retry() {
@@ -133,6 +214,24 @@ async fn test_s3_retry() {
         FileStore::open(&["s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9111/?s3_bucket=test&use_ssl=False".to_string()])
     ).await;
     assert!(timeout.is_err());
+}
+
+/// Test S3 FileStore in read-only mode
+#[tokio::test(flavor = "multi_thread")]
+async fn test_s3_readonly() {
+    let fs = FileStore::with_limit_retries("s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000/?s3_bucket=test&use_ssl=False&read_only=true").await.unwrap();
+    assert!(fs.get("__missing_file__").await.unwrap().is_none());
+    assert!(fs.exists("test").await.unwrap());
+    assert!(fs.get("test").await.unwrap().is_some());
+    
+
+    // Writes should fail but not error
+    assert!(fs.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
+    assert!(!fs.exists("bob").await.unwrap());
+
+    // Deletes should fail but not error
+    assert!(fs.delete("test").await.is_ok());
+    assert!(fs.exists("test").await.unwrap());    
 }
 
 async fn common_actions(fs: Arc<FileStore>) {

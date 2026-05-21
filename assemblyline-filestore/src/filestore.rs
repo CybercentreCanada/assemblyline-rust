@@ -183,6 +183,10 @@ impl FileStore {
     /// Read-only transports are skipped.
     pub async fn put(&self, name: &str, body: &Bytes) -> Result<()> {
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
             transport.put(name, body).await?;
         }
         Ok(())
@@ -192,7 +196,7 @@ impl FileStore {
     /// Errors will be supressed as long as any transport contains the file.
     pub async fn exists(&self, name: &str) -> Result<bool> {
         let mut last_error = None;
-        for transport in self.transports.iter() {
+        for transport in &self.transports {
             match transport.exists(name).await {
                 Ok(true) => return Ok(true),
                 Ok(false) => continue,
@@ -212,7 +216,7 @@ impl FileStore {
     /// Returns errors only if all transports fail, otherwise errors will be logged as warnings.
     pub async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let mut last_error = None;
-        for transport in self.transports.iter() {
+        for transport in &self.transports {
             match transport.get(name).await {
                 Ok(bytes) => {
                     return Ok(bytes)
@@ -234,7 +238,7 @@ impl FileStore {
     /// If the file does not exist it will be created. If it does exist it will be replaced.
     pub async fn download(&self, name: &str, path: &Path) -> Result<()> {
         let mut errors = vec![];
-        for transport in self.transports.iter() {
+        for transport in &self.transports {
             match transport.download(name, path).await {
                 Ok(()) => {
                     return Ok(())
@@ -286,7 +290,7 @@ impl FileStore {
     /// Returns the total expected length of the stream and a message receiver of data buffers.
     pub async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let mut last_error = None;
-        for transport in self.transports.iter() {
+        for transport in &self.transports {
             match transport.stream(name).await {
                 Ok((size, stream)) => return Ok((size, stream)),
                 Err(err) => last_error = Some(err),
