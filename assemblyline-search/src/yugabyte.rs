@@ -537,8 +537,7 @@ impl Parameters {
     }
 }
 
-
-
+/// Utility struct to build insert commands for tables that have a relatively small amount of special casing
 struct InsertBuilder<'a> {
     table: &'a Table,
     sid: &'a str,
@@ -733,6 +732,8 @@ fn normalize_expiry(value: &Option<DateTime<Utc>>) -> DateTime<Utc> {
     }
 }
 
+/// Interface for building insert commands for tables that have a great deal of special cased
+/// types such as enums or computed values
 trait BuildsInsert {
     type Parameters;
 
@@ -804,13 +805,7 @@ impl BuildsInsert for datastore::Error {
 
         params.push("submission", extra.submission);
 
-        // let return_clause = match self.return_id {
-        //     Some(id) => format!("RETURNING {id}"),
-        //     None => "".to_string(),
-        // };
-        let return_clause = "".to_string();
-
-        let command = format!("INSERT INTO {} ({}) VALUES ({}){return_clause}", ANALYSIS_ERRORS_TABLE, params.header.join(", "), params.row.join(", "));
+        let command = format!("INSERT INTO {} ({}) VALUES ({})", ANALYSIS_ERRORS_TABLE, params.header.join(", "), params.row.join(", "));
         Ok((command, params))
 
     }
