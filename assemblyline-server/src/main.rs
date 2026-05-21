@@ -253,11 +253,7 @@ impl Core {
         let datastore = Elastic::connect(&config.datastore.hosts[0], false, datastore_ca, !datastore_verify, elastic_prefix).await?;
 
         // connect to filestore
-        let filestore = if config.filestore.readonly_storage.is_empty() {
-            FileStore::open(&config.filestore.storage).await.context("initializing filestore")?
-        } else {
-            FileStore::open_with_readonly(&config.filestore.storage, &config.filestore.readonly_storage).await.context("initializing filestore with readonly backends")?
-        };
+        let filestore = FileStore::open(&config.filestore.storage).await.context("initializing filestore")?;
 
         //
         let file_cache = FileStore::open(&config.filestore.cache).await.context("initializing cache filestore")?;
@@ -457,4 +453,3 @@ impl Drop for TestGuard {
 /// A convenience trait that lets you pass true, false, or None for boolean arguments
 pub trait IBool: Into<Option<bool>> + Copy + Send {}
 impl<T: Into<Option<bool>> + Copy + Send> IBool for T {}
-

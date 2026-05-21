@@ -20,8 +20,6 @@ use crate::transport::sftp::{SftpParameters, TransportSftp};
 pub struct FileStore {
     /// Transports that support both read and write operations
     transports: Vec<Box<dyn Transport>>,
-    /// Transports that only support read operations (e.g. legacy storage with unmigrated data)
-    readonly_transports: Vec<Box<dyn Transport>>,
 }
 
 
@@ -34,27 +32,7 @@ impl FileStore {
         }
         info!("FileStore initialized with {} writable transport(s)", transports.len());
         Ok(Arc::new(Self {
-            transports,
-            readonly_transports: vec![],
-        }))
-    }
-
-    /// Open writable and read-only urls with default parameters.
-    /// Write operations only target writable transports. Read operations search both pools.
-    pub async fn open_with_readonly(urls: &[String], readonly_urls: &[String]) -> Result<Arc<FileStore>> {
-        let mut transports = vec![];
-        for url in urls {
-            transports.push(Self::create_transport(url, None).await?)
-        }
-        let mut readonly_transports = vec![];
-        for url in readonly_urls {
-            readonly_transports.push(Self::create_transport(url, None).await?)
-        }
-        info!("FileStore initialized with {} writable transport(s) and {} readonly transport(s)",
-              transports.len(), readonly_transports.len());
-        Ok(Arc::new(Self {
-            transports,
-            readonly_transports,
+            transports
         }))
     }
 
@@ -62,7 +40,6 @@ impl FileStore {
     pub async fn with_limit_retries(url: &str) -> Result<Arc<FileStore>> {
         Ok(Arc::new(Self {
             transports: vec![Self::create_transport(url, Some(1)).await?],
-            readonly_transports: vec![],
         }))
     }
 
@@ -84,6 +61,14 @@ impl FileStore {
             percent_encoding::percent_decode_str(password).decode_utf8_lossy().to_string()
         });
 
+        let read_only = url.query_pairs().find_map(|(name, value)| {
+            if name == "read_only" {
+                Some(read_bool(&value))
+            } else {
+                None
+            }
+        }).unwrap_or(false);
+
         // user = parsed.username or ''
 
 
@@ -102,7 +87,7 @@ impl FileStore {
                 // t = TransportLocal(base=base, **extras)
 
                 let path = base.parse()?;
-                Ok(Box::new(LocalTransport::new(path)))
+                Ok(Box::new(LocalTransport::new(path, read_only)))
             }
             "azure" => {
                 use crate::transport::azure::{AzureParameters, TransportAzure};
@@ -127,7 +112,7 @@ impl FileStore {
                 };
                 let base = url.path().to_owned();
 
-                Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts).await?))
+                Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts, read_only).await?))
             },
             "s3" => {
                 use crate::transport::s3::{S3Parameters, TransportS3};
@@ -150,7 +135,7 @@ impl FileStore {
                     value => Some(value.to_owned())
                 };
 
-                Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters).await?))
+                Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters, read_only).await?))
             }
             "ftp" | "ftps" => {
                 let host = match host {
@@ -164,9 +149,9 @@ impl FileStore {
                 };
 
                 if url.scheme().eq_ignore_ascii_case("ftps") {
-                    Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                    Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password, read_only).await?))
                 } else {
-                    Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                    Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password, read_only).await?))
                 }
             }
             "sftp" => {
@@ -186,7 +171,7 @@ impl FileStore {
                     }
                 }
 
-                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params).await?))
+                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params, read_only).await?))
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());
@@ -207,7 +192,7 @@ impl FileStore {
     /// Errors will be supressed as long as any transport contains the file.
     pub async fn exists(&self, name: &str) -> Result<bool> {
         let mut last_error = None;
-        for transport in self.transports.iter().chain(self.readonly_transports.iter()) {
+        for transport in self.transports.iter() {
             match transport.exists(name).await {
                 Ok(true) => return Ok(true),
                 Ok(false) => continue,
@@ -227,12 +212,9 @@ impl FileStore {
     /// Returns errors only if all transports fail, otherwise errors will be logged as warnings.
     pub async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let mut last_error = None;
-        for transport in self.transports.iter().chain(self.readonly_transports.iter()) {
+        for transport in self.transports.iter() {
             match transport.get(name).await {
                 Ok(bytes) => {
-                    if self.readonly_transports.iter().any(|t| std::ptr::eq(t.as_ref(), transport.as_ref())) {
-                        debug!("File {name} found on readonly transport (not yet migrated to primary)");
-                    }
                     return Ok(bytes)
                 },
                 Err(err) => {
@@ -252,12 +234,9 @@ impl FileStore {
     /// If the file does not exist it will be created. If it does exist it will be replaced.
     pub async fn download(&self, name: &str, path: &Path) -> Result<()> {
         let mut errors = vec![];
-        for transport in self.transports.iter().chain(self.readonly_transports.iter()) {
+        for transport in self.transports.iter() {
             match transport.download(name, path).await {
                 Ok(()) => {
-                    if self.readonly_transports.iter().any(|t| std::ptr::eq(t.as_ref(), transport.as_ref())) {
-                        debug!("File {name} found on readonly transport (not yet migrated to primary)");
-                    }
                     return Ok(())
                 },
                 Err(err) => {
@@ -277,6 +256,11 @@ impl FileStore {
     pub async fn upload(&self, path: &Path, name: &str) -> Result<()> {
         let mut last_error = None;
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
+
             if let Err(err) = transport.upload(path, name).await {
                 last_error = Some(err);
             }
@@ -302,7 +286,7 @@ impl FileStore {
     /// Returns the total expected length of the stream and a message receiver of data buffers.
     pub async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let mut last_error = None;
-        for transport in self.transports.iter().chain(self.readonly_transports.iter()) {
+        for transport in self.transports.iter() {
             match transport.stream(name).await {
                 Ok((size, stream)) => return Ok((size, stream)),
                 Err(err) => last_error = Some(err),
@@ -318,6 +302,10 @@ impl FileStore {
     /// Read-only transports are skipped.
     pub async fn delete(&self, name: &str) -> Result<()> {
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
             transport.delete(name).await?;
         }
         Ok(())

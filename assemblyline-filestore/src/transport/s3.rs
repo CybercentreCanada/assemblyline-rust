@@ -80,13 +80,14 @@ pub struct TransportS3 {
     _accesskey: Option<String>,
     host: String,
     port: u16,
+    read_only: bool,
 }
 
 
 impl TransportS3 {
     // base=None, , aws_region=None, host=None, port=None, ):
 
-    pub async fn new(base: String, host: Option<String>, port: Option<u16>, accesskey: Option<String>, secretkey: Option<String>, connection_attempts: Option<usize>, parameters: S3Parameters) -> Result<Self> {
+    pub async fn new(base: String, host: Option<String>, port: Option<u16>, accesskey: Option<String>, secretkey: Option<String>, connection_attempts: Option<usize>, parameters: S3Parameters, read_only: bool) -> Result<Self> {
         let host = host.unwrap_or_else(|| DEFAULT_HOST.to_owned());
 
         let port = match port {
@@ -203,18 +204,20 @@ impl TransportS3 {
             let err = err.downcast::<SdkError<aws_sdk_s3::operation::head_bucket::HeadBucketError>>()?;
             let err = err.into_service_error();
             if err.is_not_found() {
-                // if the bucket does not exist, create it
-                let create_result = retry!(connection_attempts, {
-                    client.create_bucket().bucket(&parameters.s3_bucket).send().await
-                });
-                if let Err(err) = create_result {
-                    let err = err.downcast::<SdkError<aws_sdk_s3::operation::create_bucket::CreateBucketError>>()?;
-                    let x = err.into_service_error();
-                    // Maybe someone else created the bucket in the tibe between us calling head and create.
-                    if !x.is_bucket_already_exists() && !x.is_bucket_already_owned_by_you() {
-                        return Err(x.into())
+                // if the bucket does not exist, create it if it's not a read-only transport
+                if !read_only{
+                    let create_result = retry!(connection_attempts, {
+                        client.create_bucket().bucket(&parameters.s3_bucket).send().await
+                    });
+                    if let Err(err) = create_result {
+                        let err = err.downcast::<SdkError<aws_sdk_s3::operation::create_bucket::CreateBucketError>>()?;
+                        let x = err.into_service_error();
+                        // Maybe someone else created the bucket in the tibe between us calling head and create.
+                        if !x.is_bucket_already_exists() && !x.is_bucket_already_owned_by_you() {
+                            return Err(x.into())
+                        }
                     }
-                }
+                }                
             } else {
                 return Err(anyhow::Error::new(err).context("head error"))
             }
@@ -228,6 +231,7 @@ impl TransportS3 {
             client,
             host,
             port,
+            read_only
         })
     }
 
@@ -381,6 +385,10 @@ impl Transport for TransportS3 {
                 .send().await
         })
     }
+    
+    fn read_only(&self) -> bool {
+        self.read_only
+    }    
 }
 
 
