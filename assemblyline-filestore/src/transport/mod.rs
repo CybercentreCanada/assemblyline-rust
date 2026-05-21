@@ -42,9 +42,7 @@ pub trait Transport: Send + Sync + std::fmt::Debug {
 
     async fn delete(&self, name: &str) -> Result<()>;
 
-    fn read_only(&self) -> bool {
-        false
-    }
+    fn read_only(&self) -> bool;
 }
 
 fn normalize_srl_path(path: &str) -> String {
