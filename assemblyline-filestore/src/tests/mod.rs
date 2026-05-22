@@ -284,7 +284,7 @@ async fn parallel_activity(fs: Arc<FileStore>) {
 
 // Test that a FileStore in read-only mode properly disallows writes and deletes but still allows reads.
 async fn read_only(url: String) {
-    use url::Url;    
+    use url::Url;
     // Initialize with a single file for testing existence and retrieval
     let fs = FileStore::with_limit_retries(&url).await.unwrap();
     assert!(fs.put("test", &Bytes::copy_from_slice(b"test")).await.is_ok());
@@ -297,7 +297,7 @@ async fn read_only(url: String) {
     assert!(fs.get("__missing_file__").await.unwrap().is_none());
     assert!(fs_ro.exists("test").await.unwrap());
     assert!(fs_ro.get("test").await.unwrap().is_some());
-    
+
 
     // Writes should fail but not error
     assert!(fs_ro.put("bob", &Bytes::copy_from_slice(b"bob")).await.is_ok());
@@ -305,9 +305,5 @@ async fn read_only(url: String) {
 
     // Deletes should fail but not error
     assert!(fs_ro.delete("test").await.is_ok());
-    assert!(fs_ro.exists("test").await.unwrap());    
-
-
-    assert!(fs.get("__missing_file__").await.unwrap().is_none());
-    assert!(fs.exists("test").await.unwrap());
+    assert!(fs_ro.exists("test").await.unwrap());
 }
