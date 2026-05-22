@@ -499,4 +499,3 @@ impl Drop for TestGuard {
 /// A convenience trait that lets you pass true, false, or None for boolean arguments
 pub trait IBool: Into<Option<bool>> + Copy + Send {}
 impl<T: Into<Option<bool>> + Copy + Send> IBool for T {}
-

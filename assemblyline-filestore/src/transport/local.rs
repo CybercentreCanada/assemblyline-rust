@@ -13,11 +13,12 @@ use super::Transport;
 
 pub struct LocalTransport {
     path: PathBuf,
+    read_only: bool,
 }
 
 impl LocalTransport {
-    pub fn new(path: PathBuf) -> Self {
-        Self { path }
+    pub fn new(path: PathBuf, read_only: bool) -> Self {
+        Self { path, read_only }
     }
 
     fn normalize(&self, path: &str) -> Result<PathBuf> {
@@ -130,6 +131,10 @@ impl Transport for LocalTransport {
         }
         Ok(())
     }
+
+    fn read_only(&self) -> bool {
+        self.read_only
+    }    
 }
 
 impl std::fmt::Debug for LocalTransport {

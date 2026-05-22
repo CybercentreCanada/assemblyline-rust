@@ -75,10 +75,10 @@ pub struct TransportAzure {
 
 
 impl TransportAzure {
-    pub async fn new(host: String, base: String, parameters: AzureParameters, connection_attempts: Option<usize>) -> Result<Self> {
+    pub async fn new(host: String, base: String, parameters: AzureParameters, connection_attempts: Option<usize>, read_only: bool) -> Result<Self> {
 //     def __init__(self, base=None, access_key=None, tenant_id=None, client_id=None, client_secret=None,
 //                 host=None, connection_attempts=None, allow_directory_access=False, use_default_credentials=False):
-        let mut read_only = false;
+        let mut read_only = read_only;
         let AzureParameters {
             access_key,
             use_default_credentials,
@@ -145,14 +145,15 @@ impl TransportAzure {
             if !any_is_not_found(&err) {
                 return Err(err)
             }
-
-            if let Err(err) = retry!(connection_attempts, container_client.create().await) {
-                if !any_is_not_found(&err) {
-                    return Err(err)
+            if !read_only {
+                if let Err(err) = retry!(connection_attempts, container_client.create().await) {
+                    if !any_is_not_found(&err) {
+                        return Err(err)
+                    }
+                    info!("Failed to create container, we're most likely in read only mode");
+                    read_only = true;
                 }
-                info!("Failed to create container, we're most likely in read only mode");
-                read_only = true;
-            }    
+            }                
         }
 
         Ok(Self {
@@ -348,6 +349,10 @@ impl Transport for TransportAzure {
 //             # If its already not found, then consider it deleted.
 //             if not isinstance(error.cause, ResourceNotFoundError):
 //                 raise
+    }
+
+    fn read_only(&self) -> bool {
+        self.read_only
     }
 }
 

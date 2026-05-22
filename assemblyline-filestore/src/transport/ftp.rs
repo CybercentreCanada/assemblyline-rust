@@ -32,7 +32,8 @@ struct FtpConnectionPool<T: TokioTlsStream + Send> {
     pool: parking_lot::Mutex<Vec<Client<T>>>,
     signal: tokio::sync::Notify,
 
-    retry_limit: Option<usize>
+    retry_limit: Option<usize>,
+    read_only: bool,
 }
 
 /// A single connection owned by the pool, loaned to a function call
@@ -77,7 +78,7 @@ impl<T: TokioTlsStream + Send> std::ops::DerefMut for Client<T> {
 
 
 impl<T: TokioTlsStream + Send> FtpConnectionPool<T> {
-    pub async fn new(tls: bool, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>, retry_limit: Option<usize>) -> Result<Arc<Self>> {
+    pub async fn new(tls: bool, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>, retry_limit: Option<usize>, read_only: bool) -> Result<Arc<Self>> {
         let new = Arc::new(Self {
             user,
             password,
@@ -89,7 +90,8 @@ impl<T: TokioTlsStream + Send> FtpConnectionPool<T> {
             pool: parking_lot::Mutex::new(vec![]),
             signal: tokio::sync::Notify::new(),
 
-            retry_limit
+            retry_limit,
+            read_only
         });
 
         // initiaize the pool with some connections
@@ -146,18 +148,18 @@ impl<T: TokioTlsStream + Send> std::fmt::Debug for TransportFtp<T> {
 
 impl TransportFtp<AsyncNoTlsStream> {
 
-    pub async fn new(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>) -> Result<Self> {
+    pub async fn new(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>, read_only: bool) -> Result<Self> {
         Ok(Self {
-            pool: FtpConnectionPool::new(false, base, host, port, user, password, retry_limit).await?,
+            pool: FtpConnectionPool::new(false, base, host, port, user, password, retry_limit, read_only).await?,
         })
     }
 }
 
 impl TransportFtp<AsyncNativeTlsStream> {
 
-    pub async fn new_secure(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>) -> Result<Self> {
+    pub async fn new_secure(retry_limit: Option<usize>, base: &str, host: String, port: u16, user: Option<String>, password: Option<String>, read_only: bool) -> Result<Self> {
         Ok(Self {
-            pool: FtpConnectionPool::new(true, base, host, port, user, password, retry_limit).await?,
+            pool: FtpConnectionPool::new(true, base, host, port, user, password, retry_limit, read_only).await?,
         })
     }
 }
@@ -312,6 +314,10 @@ impl<T: TokioTlsStream + Send + 'static> Transport for TransportFtp<T> {
             client.rm(&name).await
         })?;
         Ok(())
+    }
+
+    fn read_only(&self) -> bool {
+        self.pool.read_only
     }
 }
 

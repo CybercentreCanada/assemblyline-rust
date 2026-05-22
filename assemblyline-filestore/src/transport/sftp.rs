@@ -27,6 +27,7 @@ pub struct TransportSftp {
     base: String,
     client: SftpSession,
     retry_limit: Option<usize>,
+    read_only: bool
 }
 
 impl std::fmt::Debug for TransportSftp {
@@ -63,7 +64,7 @@ pub struct SftpParameters {
 
 
 impl TransportSftp {
-    pub async fn new(base: String, host: String, password: Option<String>, user: String, port: u16, retry_limit: Option<usize>, params: SftpParameters) -> Result<Self> {
+    pub async fn new(base: String, host: String, password: Option<String>, user: String, port: u16, retry_limit: Option<usize>, params: SftpParameters, read_only: bool) -> Result<Self> {
         // let base = if base == "/" { "".to_owned() } else { base };
 
         debug!("SFTP to {user}@{host}:{port}{base}; password ({}), private_key ({})", password.is_some(), params.private_key.is_some());
@@ -108,6 +109,7 @@ impl TransportSftp {
             port,
             user,
             retry_limit,
+            read_only
         })
     }
 
@@ -256,6 +258,10 @@ impl Transport for TransportSftp {
     async fn delete(&self, name: &str) -> Result<()> {
         retry!(self.retry_limit, self._delete(name).await)
     }
+
+    fn read_only(&self) -> bool {
+        self.read_only
+    }    
 }
 
 
