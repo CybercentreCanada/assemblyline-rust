@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
-use log::{debug, info, warn};
+use log::{info, warn};
 
 use crate::transport::Transport;
 use crate::transport::ftp::TransportFtp;
