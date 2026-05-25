@@ -41,6 +41,8 @@ pub trait Transport: Send + Sync + std::fmt::Debug {
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)>;
 
     async fn delete(&self, name: &str) -> Result<()>;
+
+    fn read_only(&self) -> bool;
 }
 
 fn normalize_srl_path(path: &str) -> String {

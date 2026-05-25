@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
-use log::warn;
+use log::{info, warn};
 
 use crate::transport::Transport;
 use crate::transport::ftp::TransportFtp;
@@ -11,8 +11,14 @@ use crate::transport::local::LocalTransport;
 use crate::transport::sftp::{SftpParameters, TransportSftp};
 
 /// An abstract interface over one or more storage transports.
+///
+/// Supports separate writable and read-only transport pools. Write operations
+/// (upload, put, delete) only target writable transports. Read operations
+/// (download, get, exists, stream) search both pools, with read-only transports
+/// used as a fallback for data that hasn't been migrated to the primary storage.
 #[derive(Debug)]
 pub struct FileStore {
+    /// Transports that support both read and write operations
     transports: Vec<Box<dyn Transport>>,
 }
 
@@ -24,6 +30,7 @@ impl FileStore {
         for url in urls {
             transports.push(Self::create_transport(url, None).await?)
         }
+        info!("FileStore initialized with {} writable transport(s)", transports.len());
         Ok(Arc::new(Self {
             transports
         }))
@@ -32,7 +39,7 @@ impl FileStore {
     /// Open a single url with retrying disabled
     pub async fn with_limit_retries(url: &str) -> Result<Arc<FileStore>> {
         Ok(Arc::new(Self {
-            transports: vec![Self::create_transport(url, Some(1)).await?]
+            transports: vec![Self::create_transport(url, Some(1)).await?],
         }))
     }
 
@@ -54,6 +61,14 @@ impl FileStore {
             percent_encoding::percent_decode_str(password).decode_utf8_lossy().to_string()
         });
 
+        let read_only = url.query_pairs().find_map(|(name, value)| {
+            if name == "read_only" {
+                Some(read_bool(&value))
+            } else {
+                None
+            }
+        }).unwrap_or(false);
+
         // user = parsed.username or ''
 
 
@@ -72,7 +87,7 @@ impl FileStore {
                 // t = TransportLocal(base=base, **extras)
 
                 let path = base.parse()?;
-                Ok(Box::new(LocalTransport::new(path)))
+                Ok(Box::new(LocalTransport::new(path, read_only)))
             }
             "azure" => {
                 use crate::transport::azure::{AzureParameters, TransportAzure};
@@ -97,7 +112,7 @@ impl FileStore {
                 };
                 let base = url.path().to_owned();
 
-                Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts).await?))
+                Ok(Box::new(TransportAzure::new(host, base, parameters, connection_attempts, read_only).await?))
             },
             "s3" => {
                 use crate::transport::s3::{S3Parameters, TransportS3};
@@ -120,7 +135,7 @@ impl FileStore {
                     value => Some(value.to_owned())
                 };
 
-                Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters).await?))
+                Ok(Box::new(TransportS3::new(base, host.map(str::to_string), port, user, password, connection_attempts, parameters, read_only).await?))
             }
             "ftp" | "ftps" => {
                 let host = match host {
@@ -134,9 +149,9 @@ impl FileStore {
                 };
 
                 if url.scheme().eq_ignore_ascii_case("ftps") {
-                    Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                    Ok(Box::new(TransportFtp::new_secure(connection_attempts, &base, host, port.unwrap_or(21), user, password, read_only).await?))
                 } else {
-                    Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password).await?))
+                    Ok(Box::new(TransportFtp::new(connection_attempts, &base, host, port.unwrap_or(21), user, password, read_only).await?))
                 }
             }
             "sftp" => {
@@ -156,7 +171,7 @@ impl FileStore {
                     }
                 }
 
-                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params).await?))
+                Ok(Box::new(TransportSftp::new(base, host, password, user, port.unwrap_or(22), connection_attempts, params, read_only).await?))
             }
             _ => {
                 bail!("Not an accepted filestore scheme: {}", url.scheme());
@@ -164,15 +179,20 @@ impl FileStore {
         }
     }
 
-    /// Upload a buffer to all transports
+    /// Upload a buffer to all writable transports.
+    /// Read-only transports are skipped.
     pub async fn put(&self, name: &str, body: &Bytes) -> Result<()> {
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
             transport.put(name, body).await?;
         }
         Ok(())
     }
 
-    /// Check if a given blob is defined in any transport.
+    /// Check if a given blob is defined in any transport (writable or read-only).
     /// Errors will be supressed as long as any transport contains the file.
     pub async fn exists(&self, name: &str) -> Result<bool> {
         let mut last_error = None;
@@ -192,13 +212,15 @@ impl FileStore {
         return Ok(false)
     }
 
-    /// Pull blob to in memory buffer.
+    /// Pull blob to in memory buffer from any transport (writable or read-only).
     /// Returns errors only if all transports fail, otherwise errors will be logged as warnings.
     pub async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
         let mut last_error = None;
         for transport in &self.transports {
             match transport.get(name).await {
-                Ok(bytes) => return Ok(bytes),
+                Ok(bytes) => {
+                    return Ok(bytes)
+                },
                 Err(err) => {
                     warn!("error fetching blob [{name}] from transport {transport:?}: {err}");
                     last_error = Some(err);
@@ -212,13 +234,15 @@ impl FileStore {
         }
     }
 
-    /// Download a blob and write it to a local file.
+    /// Download a blob and write it to a local file from any transport (writable or read-only).
     /// If the file does not exist it will be created. If it does exist it will be replaced.
     pub async fn download(&self, name: &str, path: &Path) -> Result<()> {
         let mut errors = vec![];
         for transport in &self.transports {
             match transport.download(name, path).await {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    return Ok(())
+                },
                 Err(err) => {
                     errors.push(format!("Could not download file: [{name}] from {transport:?}: {err}"));
                     continue
@@ -231,10 +255,16 @@ impl FileStore {
         Err(anyhow::anyhow!(errors.join("\n")).context("All transports failed to fetch"))
     }
 
-    /// Upload a local file as a named blob.
+    /// Upload a local file as a named blob to writable transports only.
+    /// Read-only transports are skipped.
     pub async fn upload(&self, path: &Path, name: &str) -> Result<()> {
         let mut last_error = None;
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
+
             if let Err(err) = transport.upload(path, name).await {
                 last_error = Some(err);
             }
@@ -245,7 +275,7 @@ impl FileStore {
         }
     }
 
-    /// Upload a collection of local files.
+    /// Upload a collection of local files to writable transports only.
     pub async fn upload_batch(&self, local_remote_tuples: &[(&Path, &str)]) -> Vec<(PathBuf, String, String)> {
         let mut failed_tuples = vec![];
         for (src_path, dst_path) in local_remote_tuples {
@@ -256,7 +286,7 @@ impl FileStore {
         return failed_tuples
     }
 
-    /// Stream the content of a blob.
+    /// Stream the content of a blob from any transport (writable or read-only).
     /// Returns the total expected length of the stream and a message receiver of data buffers.
     pub async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let mut last_error = None;
@@ -272,9 +302,14 @@ impl FileStore {
         }
     }
 
-    /// Remove a blob from the storage
+    /// Remove a blob from writable storage only.
+    /// Read-only transports are skipped.
     pub async fn delete(&self, name: &str) -> Result<()> {
         for transport in &self.transports {
+            if transport.read_only() {
+                // Skip on read-only transports
+                continue;
+            }
             transport.delete(name).await?;
         }
         Ok(())
