@@ -677,7 +677,7 @@ async fn test_deduplication() {
     context.signal.notify_one();
 
     // notification_queue = NamedQueue('', core.redis)
-    let notification_queue = context.core.notification_queue("output-queue-one");
+    let notification_queue = context.core.notification_queue("user", "output-queue-one");
     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     // One of the submission will get processed fully
@@ -715,7 +715,7 @@ async fn test_deduplication() {
 
     context.signal.notify_one();
 
-    let notification_queue = context.core.notification_queue("2");
+    let notification_queue = context.core.notification_queue("user", "2");
     let third_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     // The third task should not be deduplicated by ingester, so will have a different submission
@@ -762,7 +762,7 @@ async fn test_ingest_retry() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("ingest-retry");
+    let notification_queue = context.core.notification_queue("user", "ingest-retry");
     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     // One of the submission will get processed fully
@@ -864,7 +864,7 @@ async fn test_service_crash_recovery() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("watcher-recover");
+    let notification_queue = context.core.notification_queue("user", "watcher-recover");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -905,7 +905,7 @@ async fn test_service_retry_limit() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("watcher-recover");
+    let notification_queue = context.core.notification_queue("user", "watcher-recover");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -946,7 +946,7 @@ async fn test_dropping_early() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("drop");
+    let notification_queue = context.core.notification_queue("user", "drop");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -996,7 +996,7 @@ async fn test_service_error() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("error");
+    let notification_queue = context.core.notification_queue("user", "error");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1036,7 +1036,7 @@ async fn test_extracted_file() {
 
         context.ingest_queue.push(&sub_message).await.unwrap();
 
-        let notification_queue = context.core.notification_queue("text-extracted-file");
+        let notification_queue = context.core.notification_queue("user", "text-extracted-file");
         tasks.push(notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap());
         context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
         context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 2)]).await;
@@ -1089,7 +1089,7 @@ async fn test_extracted_dynamic_file() {
 
         context.ingest_queue.push(&sub_message).await.unwrap();
 
-        let notification_queue = context.core.notification_queue("text-extracted-dynamic-file");
+        let notification_queue = context.core.notification_queue("user", "text-extracted-dynamic-file");
         tasks.push(notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap());
         context.metrics.assert_metrics("dispatcher", &[("submissions_completed", 1), ("files_completed", 2)]).await;
         context.metrics.assert_metrics("ingester", &[("submissions_ingested", 1), ("submissions_completed", 1), ("files_completed", 2)]).await;
@@ -1150,7 +1150,7 @@ async fn test_depth_limit() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("test-depth-limit");
+    let notification_queue = context.core.notification_queue("user", "test-depth-limit");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1194,7 +1194,7 @@ async fn test_max_extracted_in_one() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("test-extracted-in-one");
+    let notification_queue = context.core.notification_queue("user", "test-extracted-in-one");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1241,7 +1241,7 @@ async fn test_max_extracted_in_several() {
     });
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("test-extracted-in-several");
+    let notification_queue = context.core.notification_queue("user", "test-extracted-in-several");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub: Submission = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1281,7 +1281,7 @@ async fn test_caching() {
 
         context.ingest_queue.push(&sub_message).await.unwrap();
 
-        let notification_queue = context.core.notification_queue("caching");
+        let notification_queue = context.core.notification_queue("user", "caching");
         let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
         // One of the submission will get processed fully
@@ -1366,7 +1366,7 @@ async fn test_plumber_clearing() {
         reason: Some("test_plumber_clearing invocation message".to_owned()),
     }).unwrap()).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("test_plumber_clearing");
+    let notification_queue = context.core.notification_queue("user", "test_plumber_clearing");
     let dropped_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&dropped_task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1416,7 +1416,7 @@ async fn test_filter() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("text-filter");
+    let notification_queue = context.core.notification_queue("user", "text-filter");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1481,7 +1481,7 @@ async fn test_tag_filter() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("tag-filter");
+    let notification_queue = context.core.notification_queue("user", "tag-filter");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1527,7 +1527,7 @@ async fn test_partial() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("temp-data-monitor");
+    let notification_queue = context.core.notification_queue("user", "temp-data-monitor");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1587,7 +1587,7 @@ async fn test_temp_data_monitoring() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("temp-data-monitor");
+    let notification_queue = context.core.notification_queue("user", "temp-data-monitor");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
@@ -1693,7 +1693,7 @@ async fn test_final_partial() {
     }
     core_b.local_signal.notify_one();
 
-    let notification_queue = context.core.notification_queue("temp-final-partial");
+    let notification_queue = context.core.notification_queue("user", "temp-final-partial");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
 
@@ -1782,7 +1782,7 @@ async fn test_complex_extracted() {
     context.signal.notify_waiters();
 
     // Wait for the entire submission to finish
-    let notification_queue = context.core.notification_queue("complex-extracted-file");
+    let notification_queue = context.core.notification_queue("user", "complex-extracted-file");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
 
@@ -1840,7 +1840,7 @@ async fn test_service_cache() {
         context.ingest_queue.push(&sub_message).await.unwrap();
     };
 
-    let notification_queue = context.core.notification_queue("service-cache");
+    let notification_queue = context.core.notification_queue("user", "service-cache");
 
     submit_once().await;
     let first_task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
@@ -1904,7 +1904,7 @@ async fn test_resubmit() {
 
     context.ingest_queue.push(&sub_message).await.unwrap();
 
-    let notification_queue = context.core.notification_queue("text-filter");
+    let notification_queue = context.core.notification_queue("user", "text-filter");
     let task = notification_queue.pop_timeout(RESPONSE_TIMEOUT).await.unwrap().unwrap();
 
     let sub = context.core.datastore.submission.get(&task.submission.sid.to_string(), None).await.unwrap().unwrap();
