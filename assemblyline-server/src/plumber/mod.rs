@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
-use crate::constants::{service_queue_name, ServiceStage, SERVICE_QUEUE_PREFIX};
+use crate::constants::{NOTIFICATION_QUEUE_PREFIX, SERVICE_QUEUE_PREFIX, ServiceStage, service_queue_name};
 use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::elastic::collection::OperationBatch;
 use crate::elastic::Elastic;
@@ -250,7 +250,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         info!("Cleaning up notification queues for old messages...");
         while self.core.is_running() {
             // Finding all possible notification queues
-            let keys = self.core.redis_persistant.keys("nq-*").await?;
+            let keys = self.core.redis_persistant.keys(&(NOTIFICATION_QUEUE_PREFIX.to_owned() + "*")).await?;
             if keys.is_empty() {
                 info!("There are no queues right now in the system");
             }

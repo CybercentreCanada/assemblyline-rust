@@ -24,12 +24,12 @@ impl Core {
             counts.insert("name".to_owned(), json!(name));
             counts.insert("host".to_owned(), json!(host));
         }
-        
+
         self.redis_metrics.publish(METRICS_CHANNEL, &serde_json::to_vec(&counts)?).await
     }
 
-    pub fn notification_queue(&self, name: &str) -> redis_objects::Queue<IngestTask> {
-        let queue_name = NOTIFICATION_QUEUE_PREFIX.to_owned() + name;
+    pub fn notification_queue(&self, user: &str, name: &str) -> redis_objects::Queue<IngestTask> {
+        let queue_name = NOTIFICATION_QUEUE_PREFIX.to_owned() + &hex::encode_upper(user.as_bytes()) + "-" + name;
         self.redis_persistant.queue::<IngestTask>(queue_name, None)
     }
 }
