@@ -313,7 +313,8 @@ async fn test_ingest_size_error() {
         }))
         .params(json!({
             "ignore_size": false,
-            "never_drop": false
+            "never_drop": false,
+            "submitter": "user",
         }))
         .message(json!({
             "notification": {"queue": "test_ingest_size_error"}
@@ -335,7 +336,7 @@ async fn test_ingest_size_error() {
     assert_eq!(ingester.ingest_queue.length().await.unwrap(), 0);
 
     // A file was dropped
-    let queue = core.notification_queue("test_ingest_size_error");
+    let queue = core.notification_queue("user", "test_ingest_size_error");
     let task = queue.pop_timeout(std::time::Duration::from_secs(2)).await.unwrap().unwrap();
     assert!(!task.failure.is_empty());
 }
@@ -658,6 +659,6 @@ async fn test_existing_score() {
     assert_eq!(ingester.submit_manager.dispatch_submission_queue.length().await.unwrap(), 0);
 
     // We should have received a notification about our task, since it was already 'done'
-    let queue = core.notification_queue("test_existing_score");
+    let queue = core.notification_queue("USER", "test_existing_score");
     assert_eq!(queue.length().await.unwrap(), 1);
 }

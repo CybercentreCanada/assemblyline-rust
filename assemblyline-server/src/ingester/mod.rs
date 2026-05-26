@@ -1089,7 +1089,7 @@ impl Ingester {
             }
         };
 
-        let queue = self.core.notification_queue(queue_name);
+        let queue = self.core.notification_queue(&task.submission.params.submitter, queue_name);
 
         // Mark at which time an item was queued
         task.notify_time = Some(Utc::now());
