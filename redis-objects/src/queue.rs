@@ -274,7 +274,7 @@ impl RawQueue {
         }
         command.arg(timeout);
 
-        let result: Option<[String; 2]> = retry_call!(method, store.pool, command, query_async)?;
+        let result: Option<[String; 2]> = retry_call_timeout!(method, store.pool, command, query_async, timeout)?;
 
         Ok(result.map(|[a, b]| (a, b)))
     }

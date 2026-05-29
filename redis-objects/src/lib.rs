@@ -341,15 +341,15 @@ macro_rules! retry_call_timeout {
             let mut exponent = -7.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = retry_call!(get_connection, $pool, exponent);
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
                 if $timeout == 0.0 {
                     con.set_response_timeout(Duration::from_mins(60 * 24));
                 } else {
-                    con.set_response_timeout(Duration::from_secs_f64($timeout));
+                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
                 }
-                retry_call!(handle_output, con.$method($($args,)+ $timeout).await, exponent)
+                retry_call!(handle_output, $method, con.$method($($args,)+ $timeout).await, exponent)
             }
         }
     };
@@ -360,15 +360,15 @@ macro_rules! retry_call_timeout {
             let mut exponent = -7.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = retry_call!(get_connection, $pool, exponent);
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
                 if $timeout == 0.0 {
                     con.set_response_timeout(Duration::from_mins(60 * 24));
                 } else {
-                    con.set_response_timeout(Duration::from_secs_f64($timeout));
+                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
                 }
-                retry_call!(handle_output, $obj.$method(&mut *con).await, exponent)
+                retry_call!(handle_output, $method, $obj.$method(&mut *con).await, exponent)
             }
         }
     };
@@ -376,11 +376,11 @@ macro_rules! retry_call_timeout {
 
 /// A macro for retrying calls to redis when an IO error occurs
 macro_rules! retry_call {
-    (get_connection, $pool:expr, $exponent:ident) => {
+    (get_connection, $name:ident, $pool:expr, $exponent:ident) => {
         match $pool.get().await {
             Ok(connection) => connection,
             Err(bb8::RunError::User(err)) => {
-                retry_call!(handle_error, err, $exponent);
+                retry_call!(handle_error, $name, err, $exponent);
                 continue
             },
             Err(bb8::RunError::TimedOut) => {
@@ -392,7 +392,7 @@ macro_rules! retry_call {
         }
     };
 
-    (handle_error, $err:ident, $exponent:ident) => {
+    (handle_error, $name:ident, $err:ident, $exponent:ident) => {
         {
             // If the error from redis is something not related to IO let the error propagate
             if !$err.is_io_error() {
@@ -400,13 +400,13 @@ macro_rules! retry_call {
             }
 
             // For IO errors print a warning and sleep
-            log::warn!("No connection to Redis, reconnecting... [{}]", $err);
+            log::warn!("No connection to Redis, reconnecting... [{}:{}][{}]", stringify!($name), std::line!(), $err);
             tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf($exponent))).await;
             $exponent = ($exponent + 1.0).min(crate::BACKOFF_MAXIMUM);
         }
     };
 
-    (handle_output, $call:expr, $exponent:ident) => {
+    (handle_output, $name:ident, $call:expr, $exponent:ident) => {
         {
             match $call {
                 Ok(val) => {
@@ -415,7 +415,7 @@ macro_rules! retry_call {
                     }
                     break Ok(val)
                 },
-                Err(err) => retry_call!(handle_error, err, $exponent),
+                Err(err) => retry_call!(handle_error, $name, err, $exponent),
             }
         }
     };
@@ -426,10 +426,10 @@ macro_rules! retry_call {
             let mut exponent = -7.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = retry_call!(get_connection, $pool, exponent);
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                retry_call!(handle_output, con.$method($($args),+).await, exponent)
+                retry_call!(handle_output, $method, con.$method($($args),+).await, exponent)
             }
         }
     };
@@ -440,10 +440,10 @@ macro_rules! retry_call {
             let mut exponent = -7.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = retry_call!(get_connection, $pool, exponent);
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                retry_call!(handle_output, $obj.$method(&mut *con).await, exponent)
+                retry_call!(handle_output, $method, $obj.$method(&mut *con).await, exponent)
             }
         }
     };
