@@ -141,16 +141,15 @@ impl ActionWorker {
         let mut objects = default_postprocess_actions();
         if let Some(mut data) = data {
             loop {
-                match serde_yaml::from_slice(&data) {
+                match serde_yaml::from_str(&data) {
                     Ok(obj) => {
                         objects = obj;
                         break
                     },
                     Err(err) => {
                         // if the encoding is nested as a string unwrap that layer and try again
-                        if let Ok(data_string) = serde_yaml::from_slice::<String>(&data) {
-                            data.clear();
-                            data.extend_from_slice(data_string.as_bytes());
+                        if let Ok(data_string) = serde_yaml::from_str::<String>(&data) {
+                            data = data_string;
                         } else {
                             error!("Couldn't load stored actions: {err}");
                             break

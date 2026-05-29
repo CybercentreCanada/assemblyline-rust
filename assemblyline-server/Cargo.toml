@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-server"
-version = "0.2.33"
+version = "0.2.34"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -67,7 +67,7 @@ tlsh2 = "0.4"
 ffuzzy = "0.3"
 
 # Database tools
-redis-objects = { version = "1.2", path = "../redis-objects" }
+redis-objects = { version = "2.0", path = "../redis-objects" }
 
 # Data managing
 assemblyline-markings = { version = "0.2.0", path = "../assemblyline-markings" }

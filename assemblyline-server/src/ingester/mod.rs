@@ -416,7 +416,7 @@ impl Ingester {
 
         // Check if there is room for more submissions
         let length = self.scanning.length().await?;
-        if length >= self.core.config.core.ingester.max_inflight {
+        if length >= self.core.config.core.ingester.max_inflight as usize {
             self.core.sleep(Duration::from_millis(100)).await;
             return Ok(())
         }
@@ -440,7 +440,7 @@ impl Ingester {
 
         // Check if we need to drop a file for capacity reasons, but only if the
         // number of files in flight is alreay over 80%
-        if length >= (self.core.config.core.ingester.max_inflight as f64 * 0.8) as u64 && self.drop_task(&mut task).await? {
+        if length >= (self.core.config.core.ingester.max_inflight as f64 * 0.8) as usize && self.drop_task(&mut task).await? {
             // End of ingest message (dropped)
             return Ok(())
         }
@@ -880,7 +880,7 @@ impl Ingester {
                 let (low, high) = level.range();
                 if low <= priority && priority <= high {
                     if let Some(threshold) = sample_threshold.get(&level) {
-                        dropped = must_drop(self.unique_queue.count(low as f64, high as f64).await?, *threshold);
+                        dropped = must_drop(self.unique_queue.count(low as f64, high as f64).await? as u64, *threshold);
                         break
                     }
                 }

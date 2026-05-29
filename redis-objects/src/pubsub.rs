@@ -3,7 +3,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use futures::StreamExt;
 use log::error;
-use redis::{AsyncCommands, Msg};
+use redis::{AsyncTypedCommands, Msg};
 use serde::Serialize;
 use tokio::sync::mpsc;
 use serde::de::DeserializeOwned;
@@ -181,13 +181,13 @@ impl Publisher {
 
     /// Publish a message in a serializable type
     #[instrument(skip(data))]
-    pub async fn publish<T: Serialize>(&self, data: &T) -> Result<(), ErrorTypes> {
-        self.publish_data(&serde_json::to_vec(data)?).await
+    pub async fn publish<T: Serialize>(&self, data: &T) -> Result<usize, ErrorTypes> {
+        self.publish_data(&serde_json::to_string(data)?).await
     }
 
     /// Publish raw data as a pubsub message
     #[instrument(skip(data))]
-    pub async fn publish_data(&self, data: &[u8]) -> Result<(), ErrorTypes> {
+    pub async fn publish_data(&self, data: &str) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, publish, self.store.pubsub_prefix.clone() + &self.channel, data)
     }
 }
