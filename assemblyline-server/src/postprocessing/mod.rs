@@ -9,7 +9,7 @@ use assemblyline_models::messages::ArchiveAction;
 use assemblyline_models::types::{ServiceName, Sid};
 use bytes::Bytes;
 use anyhow::Result;
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::mpsc;
 // use anyhow::Result;
 use itertools::Itertools;

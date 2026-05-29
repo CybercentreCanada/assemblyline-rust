@@ -63,8 +63,8 @@ impl BadlistClient {
 
         // Ensure expiry_ts is set on tag-related items
         let expiry_ts = match data.body().dtl {
-            Some(days) => if days > 0 { 
-                Some(Utc::now() + TimeDelta::days(days.into())) 
+            Some(days) => if days > 0 {
+                Some(Utc::now() + TimeDelta::days(days.into()))
             } else {
                 None
             },
@@ -80,7 +80,7 @@ impl BadlistClient {
                 // }
 
                 let mut hasher = sha2::Sha256::new();
-                hasher.write_all(format!("{}: {}", tag.tag_type, tag.value).as_bytes())?;
+                hasher.update(format!("{}: {}", tag.tag_type, tag.value).as_bytes());
                 let hashes = badlist::Hashes {
                     sha256: Some((&hasher.finalize()[..]).try_into()?),
                     ..Default::default()
@@ -96,7 +96,7 @@ impl BadlistClient {
                     hashes,
                     sources: body.sources,
                     tag: Some(tag),
-                    updated: Utc::now(),    
+                    updated: Utc::now(),
                 }
             },
             RequestBadlist::File{ body, file, hashes} => {
@@ -115,7 +115,7 @@ impl BadlistClient {
                 }
             }
         };
-       
+
         // Find the best hash to use for the key
         let qhash = badlist.hashes.label_hash();
 
@@ -287,13 +287,13 @@ impl BadlistClient {
         } else {
             old.attribution = new.attribution;
         }
-        
+
         // if let Some(attr) = old.attribution {
         //     old["attribution"] = {key: value for key, value in old["attribution"].items() if value}
         // }
 
         // Update type specific info
-        match old.hash_type { 
+        match old.hash_type {
             badlist::BadhashTypes::File => {
                 if let Some(file) = &mut old.file {
                     if let Some(mut new_file) = new.file {
@@ -306,12 +306,12 @@ impl BadlistClient {
                     }
                 } else {
                     old.file = new.file;
-                } 
+                }
             },
             badlist::BadhashTypes::Tag => {
                 old.tag = new.tag;
             }
-        }        
+        }
 
         // Merge sources
         if new.sources.is_empty() {
@@ -325,7 +325,7 @@ impl BadlistClient {
                     if old_src.source_type != src.source_type {
                         return Err(InvalidBadhash(format!("Source {} has a type conflict: {} != {}", src.name, old_src.source_type, src.source_type)).into())
                     }
-    
+
                     for reason in src.reason {
                         if !old_src.reason.contains(&reason) {
                             old_src.reason.push(reason)

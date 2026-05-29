@@ -10,7 +10,7 @@ use log::{debug, info};
 use poem::http::StatusCode;
 use poem::listener::Acceptor;
 use poem::EndpointExt;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;

@@ -24,7 +24,7 @@ use assemblyline_models::datastore::submission::Submission as DatabaseSubmission
 use chrono::{DateTime, Utc};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
-use rand::Rng;
+use rand::RngExt;
 use redis_objects::queue::MultiQueue;
 use redis_objects::{increment, AutoExportingMetrics, Hashmap, PriorityQueue, Publisher, Queue};
 use serde::{Deserialize, Deserializer, Serialize};

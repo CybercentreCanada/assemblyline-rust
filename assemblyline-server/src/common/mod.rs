@@ -18,6 +18,6 @@ pub struct PermissionError(pub String);
 /// Calculate the sha256 of a buffer
 pub fn sha256_data(body: &[u8]) -> String {
     let mut hasher = sha2::Sha256::default();
-    hasher.write_all(body).unwrap();
+    hasher.update(body);
     hex::encode(hasher.finalize())
 }

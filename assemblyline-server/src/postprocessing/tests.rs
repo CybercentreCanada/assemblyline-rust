@@ -5,7 +5,7 @@ use assemblyline_models::config::{NamedValue, PostprocessAction, Webhook};
 use chrono::{Utc, Duration};
 use poem::{listener::{Acceptor, Listener}, EndpointExt};
 use serde_json::json;
-use rand::Rng;
+use rand::RngExt;
 
 use crate::{postprocessing::{search::CacheAvailabilityStatus, ActionWorker, ParsingError, SubmissionFilter}, Core};
 

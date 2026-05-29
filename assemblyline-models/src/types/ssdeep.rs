@@ -1,5 +1,8 @@
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
+#[cfg(feature = "rand")]
+use rand::RngExt;
+
 
 use crate::{ElasticMeta, ModelError};
 

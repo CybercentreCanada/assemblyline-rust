@@ -3,6 +3,10 @@ use std::fmt::Display;
 
 use serde::Deserialize;
 
+#[cfg(feature = "rand")]
+use rand::RngExt;
+
+
 pub mod datastore;
 pub mod config;
 pub mod messages;
@@ -59,22 +63,22 @@ impl From<assemblyline_markings::errors::Errors> for ModelError {
 impl std::error::Error for ModelError {}
 
 
-const WORDS: [&str; 187] = ["The", "Cyber", "Centre", "stays", "on", "the", "cutting", "edge", "of", "technology", "by", 
-    "working", "with", "commercial", "vendors", "of", "cyber", "security", "technology", "to", "support", "their", 
-    "development", "of", "enhanced", "cyber", "defence", "tools", "To", "do", "this", "our", "experts", "survey", 
-    "the", "cyber", "security", "market", "evaluate", "emerging", "technologies", "in", "order", "to", "determine", 
-    "their", "potential", "to", "improve", "cyber", "security", "across", "the", "country", "The", "Cyber", "Centre", 
-    "supports", "innovation", "by", "collaborating", "with", "all", "levels", "of", "government", "private", "industry", 
-    "academia", "to", "examine", "complex", "problems", "in", "cyber", "security", "We", "are", "constantly", 
-    "engaging", "partners", "to", "promote", "an", "open", "innovative", "environment", "We", "invite", "partners", 
-    "to", "work", "with", "us", "but", "also", "promote", "other", "Government", "of", "Canada", "innovation", 
-    "programs", "One", "of", "our", "key", "partnerships", "is", "with", "the", "Government", "of", "Canada", "Build", 
-    "in", "Canada", "Innovation", "Program", "BCIP", "The", "BCIP", "helps", "Canadian", "companies", "of", "all", 
-    "sizes", "transition", "their", "state", "of", "the", "art", "goods", "services", "from", "the", "laboratory", 
-    "to", "the", "marketplace", "For", "certain", "cyber", "security", "innovations", "the", "Cyber", "Centre", 
-    "performs", "the", "role", "of", "technical", "authority", "We", "evaluate", "participating", "companies", 
-    "new", "technology", "provide", "feedback", "in", "order", "to", "assist", "them", "in", "bringing", "their", 
-    "product", "to", "market", "To", "learn", "more", "about", "selling", "testing", "an", "innovation", "visit", 
+const WORDS: [&str; 187] = ["The", "Cyber", "Centre", "stays", "on", "the", "cutting", "edge", "of", "technology", "by",
+    "working", "with", "commercial", "vendors", "of", "cyber", "security", "technology", "to", "support", "their",
+    "development", "of", "enhanced", "cyber", "defence", "tools", "To", "do", "this", "our", "experts", "survey",
+    "the", "cyber", "security", "market", "evaluate", "emerging", "technologies", "in", "order", "to", "determine",
+    "their", "potential", "to", "improve", "cyber", "security", "across", "the", "country", "The", "Cyber", "Centre",
+    "supports", "innovation", "by", "collaborating", "with", "all", "levels", "of", "government", "private", "industry",
+    "academia", "to", "examine", "complex", "problems", "in", "cyber", "security", "We", "are", "constantly",
+    "engaging", "partners", "to", "promote", "an", "open", "innovative", "environment", "We", "invite", "partners",
+    "to", "work", "with", "us", "but", "also", "promote", "other", "Government", "of", "Canada", "innovation",
+    "programs", "One", "of", "our", "key", "partnerships", "is", "with", "the", "Government", "of", "Canada", "Build",
+    "in", "Canada", "Innovation", "Program", "BCIP", "The", "BCIP", "helps", "Canadian", "companies", "of", "all",
+    "sizes", "transition", "their", "state", "of", "the", "art", "goods", "services", "from", "the", "laboratory",
+    "to", "the", "marketplace", "For", "certain", "cyber", "security", "innovations", "the", "Cyber", "Centre",
+    "performs", "the", "role", "of", "technical", "authority", "We", "evaluate", "participating", "companies",
+    "new", "technology", "provide", "feedback", "in", "order", "to", "assist", "them", "in", "bringing", "their",
+    "product", "to", "market", "To", "learn", "more", "about", "selling", "testing", "an", "innovation", "visit",
     "the", "BCIP", "website"];
 
 #[cfg(feature = "rand")]
@@ -103,10 +107,10 @@ pub fn random_hex<R: rand::prelude::Rng + ?Sized>(rng: &mut R, size: usize) -> S
 
 #[cfg(test)]
 mod test {
-    use rand::Rng;
+    use rand::RngExt;
 
     use crate::types::{SSDeepHash, Sha1, Sha256, MD5};
-    
+
     #[test]
     fn random_ssdeep() {
         let mut prng = rand::rng();

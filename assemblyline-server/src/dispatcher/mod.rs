@@ -31,7 +31,7 @@ use redis_objects::increment;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use rand::Rng;
+use rand::RngExt;
 use tracing::instrument;
 
 
