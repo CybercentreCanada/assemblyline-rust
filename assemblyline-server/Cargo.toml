@@ -17,7 +17,7 @@ local-ip-address = "0.6"
 # Metric collection
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features=false, features=["std", "fmt"]}
-tracing-elastic-apm = "3.4"
+tracing-elastic-apm = "4.0"
 
 # Utilities
 chrono = "0.4"
@@ -35,7 +35,7 @@ hex = "0.4"
 uuid = "1.10"
 urlencoding = "2.1"
 
-zip = "6.0"
+zip = "8.6"
 cart_container = "1.0"
 
 yara = { version = "0.32", features = ["serde", "vendored"] }
@@ -61,7 +61,7 @@ openssl = { version = "0.10" }
 sha1 = "0.11"
 sha2 = "0.11"
 md-5 = "0.11"
-tlsh2 = "0.4"
+tlsh2 = "1.1"
 # ssdeep = "0.6"
 ffuzzy = "0.3"
 
