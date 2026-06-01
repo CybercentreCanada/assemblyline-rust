@@ -1,4 +1,4 @@
-ARG build_image=rust:1.90.0-bookworm
+ARG build_image=rust:1.96-bookworm
 FROM ${build_image} AS builder
 
 # Add more build tools
