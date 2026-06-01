@@ -1,11 +1,12 @@
 //! Storing collections of unique objects in redis
 
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::time::Duration;
 
-use redis::{cmd, AsyncCommands};
+use redis::{cmd, AsyncTypedCommands};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tracing::instrument;
@@ -68,22 +69,22 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
             let ctime = chrono::Utc::now().timestamp();
             let last_expire_time: i64 = self.last_expire_time.load(std::sync::atomic::Ordering::Acquire);
             if ctime > last_expire_time + (ttl / 2) {
-                let _: () = retry_call!(self.store.pool, expire, &self.name, ttl)?;
+                let _: bool = retry_call!(self.store.pool, expire, &self.name, ttl)?;
                 self.last_expire_time.store(ctime, std::sync::atomic::Ordering::Release);
             }
         }
         Ok(())
     }
 
-    /// Insert an item into the set. 
+    /// Insert an item into the set.
     /// Return whether the item is new to the set.
     #[instrument(skip(value))]
     pub async fn add(&self, value: &T) -> Result<bool, ErrorTypes> {
-        let data = serde_json::to_vec(&value)?;
+        let data = serde_json::to_string(&value)?;
         let result = retry_call!(self.store.pool, sadd, &self.name, &data)?;
         self._conditional_expire().await?;
-        Ok(result)
-    }    
+        Ok(result > 0)
+    }
 
     /// Insert a batch of items to the set.
     /// Return how many items were new to the set.
@@ -91,7 +92,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     pub async fn add_batch(&self, values: &[T]) -> Result<usize, ErrorTypes> {
         let mut data = vec![];
         for item in values {
-            data.push(serde_json::to_vec(&item)?);
+            data.push(serde_json::to_string(&item)?);
         }
         let result = retry_call!(self.store.pool, sadd, &self.name, &data)?;
         self._conditional_expire().await?;
@@ -102,7 +103,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     #[instrument(skip(value))]
     pub async fn limited_add(&self, value: &T, size_limit: usize) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
-        let result = retry_call!(method, self.store.pool, 
+        let result = retry_call!(method, self.store.pool,
             self.limited_add.key(&self.name).arg(&data).arg(size_limit), invoke_async)?;
         self._conditional_expire().await?;
         Ok(result)
@@ -117,16 +118,16 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
 
     /// Read the number of items in the set
     #[instrument]
-    pub async fn length(&self) -> Result<u64, ErrorTypes> {
+    pub async fn length(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, scard, &self.name)
     }
 
     /// Read the entire content of the set
     #[instrument]
     pub async fn members(&self) -> Result<Vec<T>, ErrorTypes> {
-        let data: Vec<Vec<u8>> = retry_call!(self.store.pool, smembers, &self.name)?;
+        let data: HashSet<String> = retry_call!(self.store.pool, smembers, &self.name)?;
         Ok(data.into_iter()
-            .map(|v| serde_json::from_slice::<T>(&v))
+            .map(|v| serde_json::from_str::<T>(&v))
             .collect::<Result<Vec<T>, _>>()?)
     }
 
@@ -134,7 +135,8 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     #[instrument(skip(value))]
     pub async fn remove(&self, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
-        retry_call!(self.store.pool, srem, &self.name, &data)
+        let rem: usize = retry_call!(self.store.pool, srem, &self.name, &data)?;
+        Ok(rem > 0)
     }
 
     /// Try to remove multiple items from the set.
@@ -152,7 +154,7 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     #[instrument(skip(value))]
     pub async fn drop(&self, value: &T) -> Result<usize, ErrorTypes> {
         let data = serde_json::to_vec(&value)?;
-        let size: Option<usize> = retry_call!(method, self.store.pool, 
+        let size: Option<usize> = retry_call!(method, self.store.pool,
             self.drop_card_script.key(&self.name).arg(&data), invoke_async)?;
         Ok(size.unwrap_or_default())
     }
@@ -160,9 +162,9 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     /// Remove and return a random item from the set.
     #[instrument]
     pub async fn random(&self) -> Result<Option<T>, ErrorTypes>{
-        let ret_val: Option<Vec<u8>> = retry_call!(self.store.pool, srandmember, &self.name)?;
+        let ret_val: Option<String> = retry_call!(self.store.pool, srandmember, &self.name)?;
         match ret_val {
-            Some(data) => Ok(Some(serde_json::from_slice(&data)?)),
+            Some(data) => Ok(Some(serde_json::from_str(&data)?)),
             None => Ok(None),
         }
     }
@@ -178,9 +180,9 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
     /// Remove and return a single value from the set.
     #[instrument]
     pub async fn pop(&self) -> Result<Option<T>, ErrorTypes> {
-        let data: Option<Vec<u8>> = retry_call!(self.store.pool, spop, &self.name)?;
+        let data: Option<String> = retry_call!(self.store.pool, spop, &self.name)?;
         match data {
-            Some(data) => Ok(Some(serde_json::from_slice(&data)?)),
+            Some(data) => Ok(Some(serde_json::from_str(&data)?)),
             None => Ok(None),
         }
     }
@@ -191,15 +193,15 @@ impl<T: Serialize + DeserializeOwned> Set<T> {
         let length = self.length().await?;
         let mut command = cmd("SPOP");
         let command = command.arg(&self.name).arg(length);
-        let data: Vec<Vec<u8>> = retry_call!(method, self.store.pool, command, query_async)?;
+        let data: Vec<String> = retry_call!(method, self.store.pool, command, query_async)?;
         Ok(data.into_iter()
-            .map(|v| serde_json::from_slice::<T>(&v))
+            .map(|v| serde_json::from_str::<T>(&v))
             .collect::<Result<Vec<T>, _>>()?)
     }
 
     /// Remove and drop all values from the set.
     #[instrument]
-    pub async fn delete(&self) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }
 }

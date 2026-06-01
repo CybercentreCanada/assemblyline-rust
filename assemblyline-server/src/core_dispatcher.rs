@@ -25,7 +25,7 @@ impl Core {
         self.dispatcher_instances_table().keys().await
     }
 
-    pub async fn dispatcher_assignment_size(&self, instance_id: &str) -> Result<u64, redis_objects::ErrorTypes> {
+    pub async fn dispatcher_assignment_size(&self, instance_id: &str) -> Result<usize, redis_objects::ErrorTypes> {
         self.redis_persistant.hashmap::<SubmissionDispatchMessage>(DISPATCH_TASK_ASSIGNMENT.to_owned() + instance_id, None).length().await
     }
 

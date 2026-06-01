@@ -301,7 +301,7 @@ impl Core {
 
     #[cfg(test)]
     pub async fn test_custom_setup(callback: impl Fn(&mut Config)) -> (Self, TestGuard) {
-        use rand::Rng;
+        use rand::RngExt;
         let _ = env_logger::builder().is_test(true).filter_level(log::LevelFilter::Debug).try_init();
 
         static USED_DB: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);

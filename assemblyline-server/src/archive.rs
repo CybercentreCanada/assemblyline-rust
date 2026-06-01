@@ -6,7 +6,7 @@ use assemblyline_models::config::Config;
 use assemblyline_models::messages::{submission::{Submission, SubmissionMessage}, ArchivedMessage};
 use assemblyline_models::types::ServiceName;
 use log::warn;
-use rand::Rng;
+use rand::RngExt;
 use redis_objects::{Publisher, Queue};
 
 use crate::elastic::collection::OperationBatch;

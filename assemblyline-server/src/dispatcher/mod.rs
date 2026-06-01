@@ -31,7 +31,7 @@ use redis_objects::increment;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot, RwLock};
-use rand::Rng;
+use rand::RngExt;
 use tracing::instrument;
 
 
@@ -124,7 +124,7 @@ enum DispatchAction {
 #[cfg(test)]
 #[derive(Debug)]
 pub struct TestReport {
-    pub queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
+    pub queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, QueueKey, Instant)>,
     pub service_results: HashMap<(Sha256, ServiceName), ResultSummary>,
     pub service_errors: HashMap<(Sha256, ServiceName), String>,
 }
@@ -189,6 +189,17 @@ struct MonitorTask {
 //     temporary_data: JsonMap, // = defaultdict(dict,
 // }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueueKey(String);
+
+impl std::ops::Deref for QueueKey {
+    type Target = str;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl From<String> for QueueKey {
+    fn from(value: String) -> Self { Self(value) }
+}
 
 /// Dispatcher internal model for submissions
 struct SubmissionTask {
@@ -223,7 +234,7 @@ struct SubmissionTask {
     service_errors: HashMap<(Sha256, ServiceName), String>,
     service_attempts: HashMap<(Sha256, ServiceName), u32>, //] = defaultdict(int),
     running_services: HashMap<(Sha256, ServiceName), ServiceTask>,
-    queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, Vec<u8>, Instant)>,
+    queue_keys: HashMap<(Sha256, ServiceName), (ServiceTask, QueueKey, Instant)>,
 
     // mapping from file hash to a set of services that shouldn't be run on
     // any children (recursively) of that file
@@ -1017,7 +1028,7 @@ impl Dispatcher {
     #[instrument]
     async fn pull_one_submission(self: &Arc<Self>) -> Result<()> {
         // Check if we are at the submission limit globally
-        if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight {
+        if self.submissions_assignments.length().await? >= self.core.config.core.dispatcher.max_inflight as usize {
             self.core.sleep(ONE_SECOND).await;
             return Ok(())
         }
@@ -1025,7 +1036,7 @@ impl Dispatcher {
         // Check if we are maxing out our share of the submission limit
         let running = self.running_dispatchers_estimate.load(std::sync::atomic::Ordering::Acquire) as u64;
         let max_tasks = self.core.config.core.dispatcher.max_inflight / running;
-        if self.active_submissions.length().await? >= max_tasks {
+        if self.active_submissions.length().await? >= max_tasks as usize {
             self.core.sleep(ONE_SECOND).await;
             return Ok(())
         }
@@ -1968,7 +1979,7 @@ impl Dispatcher {
 
                 // Its a new task, send it to the service
                 let queue_key = service_queue.push(service_task.priority as f64, &service_task).await?;
-                task.queue_keys.insert(key.clone(), (service_task, queue_key, Instant::now()));
+                task.queue_keys.insert(key.clone(), (service_task, queue_key.into(), Instant::now()));
                 sent.push(service_name);
                 task.service_logs.entry(key).or_default().push(format!("Submitted to queue at {}", chrono::Utc::now()));
             }

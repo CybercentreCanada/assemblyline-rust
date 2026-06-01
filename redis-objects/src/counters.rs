@@ -5,8 +5,7 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use log::{error, info};
-use rand::Rng;
-use redis::AsyncCommands;
+use redis::AsyncTypedCommands;
 use serde::Serialize;
 use parking_lot::Mutex;
 use serde_json::json;
@@ -41,7 +40,7 @@ impl<Message: MetricMessage> AutoExportingMetricsBuilder<Message> {
             channel_name,
             counter_name: None,
             counter_type,
-            host: format!("{:x}", rand::rng().random::<u128>()),
+            host: format!("{:x}", rand::random::<u128>()),
             store,
             export_zero: true,
             export_interval: Duration::from_secs(5),
@@ -191,7 +190,7 @@ impl<Message: MetricMessage> AutoExportingMetrics<Message> {
 
             // send the message
             let data = serde_json::to_string(&outgoing)?;
-            let _recievers: u32 = retry_call!(self.config.store.pool, publish, self.config.store.pubsub_prefix.clone() + self.config.channel_name.as_str(), data.as_str())?;
+            let _recievers: usize = retry_call!(self.config.store.pool, publish, self.config.store.pubsub_prefix.clone() + self.config.channel_name.as_str(), data.as_str())?;
         }
         Ok(())
     }

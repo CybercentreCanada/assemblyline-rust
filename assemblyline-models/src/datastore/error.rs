@@ -1,14 +1,17 @@
 use chrono::{DateTime, TimeDelta, Utc};
-use rand::seq::IteratorRandom;
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
+#[cfg(feature = "rand")]
+use rand::{RngExt, seq::IteratorRandom};
+
 use crate::datastore::Submission;
 use crate::messages::task::{generate_conf_key, Task};
 use crate::{random_word, random_words, ElasticMeta, Readable};
 use crate::types::{ServiceName, Sha256, Text};
+
 
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy)]

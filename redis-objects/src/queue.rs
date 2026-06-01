@@ -5,12 +5,12 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use redis::AsyncCommands;
+use redis::AsyncTypedCommands;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tracing::instrument;
 
-use crate::ErrorTypes;
+use crate::{ErrorTypes, retry_call_timeout};
 
 use super::{RedisObjects, retry_call};
 
@@ -71,49 +71,49 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
 
     /// load the item that would be returned by the next call to pop
     pub async fn peek_next(&self) -> Result<Option<T>, ErrorTypes> {
-        Ok(match self.raw.peek_next().await? { 
-            Some(value) => Some(serde_json::from_slice(&value)?),
+        Ok(match self.raw.peek_next().await? {
+            Some(value) => Some(serde_json::from_str(&value)?),
             None => None
         })
     }
 
     /// Load the entire content of the queue into memory
     pub async fn content(&self) -> Result<Vec<T>, ErrorTypes> {
-        let response: Vec<Vec<u8>> = self.raw.content().await?;
+        let response: Vec<String> = self.raw.content().await?;
         let mut out = vec![];
         for data in response {
-            out.push(serde_json::from_slice(&data)?);
+            out.push(serde_json::from_str(&data)?);
         }
         Ok(out)
     }
 
     /// Clear all data for this object
-    pub async fn delete(&self) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self) -> Result<usize, ErrorTypes> {
         self.raw.delete().await
     }
 
     /// dequeue an item from the front of the queue, returning immediately if empty
     pub async fn pop(&self) -> Result<Option<T>, ErrorTypes> {
-        Ok(match self.raw.pop().await? { 
-            Some(value) => Some(serde_json::from_slice(&value)?),
+        Ok(match self.raw.pop().await? {
+            Some(value) => Some(serde_json::from_str(&value)?),
             None => None
         })
     }
 
     /// Make a blocking pop call with a timeout
     pub async fn pop_timeout(&self, timeout: Duration) -> Result<Option<T>, ErrorTypes> {
-        Ok(match self.raw.pop_timeout(timeout).await? { 
-            Some(value) => Some(serde_json::from_slice(&value)?),
+        Ok(match self.raw.pop_timeout(timeout).await? {
+            Some(value) => Some(serde_json::from_str(&value)?),
             None => None
         })
     }
 
     /// Pop as many items as possible up to a certain limit
     pub async fn pop_batch(&self, limit: usize) -> Result<Vec<T>, ErrorTypes> {
-        let response: Vec<Vec<u8>> = self.raw.pop_batch(limit).await?;
+        let response: Vec<String> = self.raw.pop_batch(limit).await?;
         let mut out = vec![];
         for data in response {
-            out.push(serde_json::from_slice(&data)?);
+            out.push(serde_json::from_str(&data)?);
         }
         Ok(out)
     }
@@ -123,7 +123,7 @@ impl<T: Serialize + DeserializeOwned> Queue<T> {
         let queues: Vec<&RawQueue> = queues.iter().map(|queue|&queue.raw).collect();
         let response = RawQueue::select(&queues, timeout).await?;
         Ok(match response {
-            Some((name, data)) => Some((name, serde_json::from_slice(&data)?)),
+            Some((name, data)) => Some((name, serde_json::from_str(&data)?)),
             None => None,
         })
     }
@@ -176,11 +176,11 @@ impl RawQueue {
                     }
                 };
 
-                // update the time in the mutex then drop it so we aren't holding the lock 
+                // update the time in the mutex then drop it so we aren't holding the lock
                 // while we make the call to the redis server
                 *last_expire_time = Some(std::time::Instant::now());
             }
-            let _: () = retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
+            let _: bool = retry_call!(self.store.pool, expire, &self.name, ttl.as_secs() as i64)?;
         }
         Ok(())
     }
@@ -188,7 +188,7 @@ impl RawQueue {
     /// enqueue a single item
     #[instrument(skip(data))]
     pub async fn push(&self, data: &[u8]) -> Result<(), ErrorTypes> {
-        let _: () = retry_call!(self.store.pool, rpush, &self.name, data)?;
+        let _: usize = retry_call!(self.store.pool, rpush, &self.name, data)?;
         self.conditional_expire().await
     }
 
@@ -206,7 +206,7 @@ impl RawQueue {
     /// Put all messages passed back at the head of the FIFO queue.
     #[instrument(skip(data))]
     pub async fn unpop(&self, data: &[u8]) -> Result<(), ErrorTypes> {
-        let _: () = retry_call!(self.store.pool, lpush, &self.name, data)?;
+        let _: usize = retry_call!(self.store.pool, lpush, &self.name, data)?;
         self.conditional_expire().await
     }
 
@@ -218,39 +218,40 @@ impl RawQueue {
 
     /// load the item that would be returned by the next call to pop
     #[instrument]
-    pub async fn peek_next(&self) -> Result<Option<Vec<u8>>, ErrorTypes> {
-        let response: Vec<Vec<u8>> = retry_call!(self.store.pool, lrange, &self.name, 0, 0)?;
+    pub async fn peek_next(&self) -> Result<Option<String>, ErrorTypes> {
+        let response: Vec<String> = retry_call!(self.store.pool, lrange, &self.name, 0, 0)?;
         Ok(response.into_iter().nth(0))
     }
 
     /// Load the entire content of the queue into memory
     #[instrument]
-    pub async fn content(&self) -> Result<Vec<Vec<u8>>, ErrorTypes> {
+    pub async fn content(&self) -> Result<Vec<String>, ErrorTypes> {
         Ok(retry_call!(self.store.pool, lrange, &self.name, 0, -1)?)
     }
 
     /// Clear all data for this object
     #[instrument]
-    pub async fn delete(&self) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }
 
     /// dequeue an item from the front of the queue, returning immediately if empty
     #[instrument]
-    pub async fn pop(&self) -> Result<Option<Vec<u8>>, ErrorTypes> {
+    pub async fn pop(&self) -> Result<Option<String>, ErrorTypes> {
         Ok(retry_call!(self.store.pool, lpop, &self.name, None)?)
     }
 
     /// Make a blocking pop call with a timeout
     #[instrument]
-    pub async fn pop_timeout(&self, timeout: Duration) -> Result<Option<Vec<u8>>, ErrorTypes> {
-        let response: Option<(String, Vec<u8>)> = retry_call!(self.store.pool, blpop, &self.name, timeout.as_secs_f64())?;
-        Ok(response.map(|(_, data)| data))
+    pub async fn pop_timeout(&self, timeout: Duration) -> Result<Option<String>, ErrorTypes> {
+        let to = timeout.as_secs_f64();
+        let response: Option<[String; 2]> = retry_call_timeout!(self.store.pool, blpop, to, &self.name)?;
+        Ok(response.map(|[_, data]| data))
     }
 
     /// Pop as many items as possible up to a certain limit
     #[instrument]
-    pub async fn pop_batch(&self, limit: usize) -> Result<Vec<Vec<u8>>, ErrorTypes> {
+    pub async fn pop_batch(&self, limit: usize) -> Result<Vec<String>, ErrorTypes> {
         let limit = match NonZeroUsize::new(limit) {
             Some(value) => value,
             None => return Ok(Default::default()),
@@ -260,18 +261,22 @@ impl RawQueue {
 
     /// Wait for up to the given timeout for any of the given queues to recieve a value
     #[instrument]
-    pub async fn select(queues: &[&RawQueue], timeout: Option<Duration>) -> Result<Option<(String, Vec<u8>)>, ErrorTypes> {
+    pub async fn select(queues: &[&RawQueue], timeout: Option<Duration>) -> Result<Option<(String, String)>, ErrorTypes> {
         let timeout = timeout.unwrap_or_default().as_secs_f64();
         if queues.is_empty() {
             return Ok(None)
         }
 
-        let store = &queues[0].store;        
-        let mut names = vec![];
+        let store = &queues[0].store;
+        let mut command = redis::cmd("BLPOP");
         for queue in queues {
-            names.push(queue.name.as_str())
+            command.arg(queue.name.as_str());
         }
-        Ok(retry_call!(store.pool, blpop, &names, timeout)?)
+        command.arg(timeout);
+
+        let result: Option<[String; 2]> = retry_call_timeout!(method, store.pool, command, query_async, timeout)?;
+
+        Ok(result.map(|[a, b]| (a, b)))
     }
 }
 
@@ -329,35 +334,35 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         self.name.as_str()
     }
 
-    fn encode(item: &T) -> Result<Vec<u8>, ErrorTypes> {
+    fn encode(item: &T) -> Result<String, ErrorTypes> {
         let vip = false;
         let vip = if vip { 0 } else { 9 };
-        
+
         let now = chrono::Utc::now().timestamp_micros();
         let data = serde_json::to_string(&item)?;
 
         // let value = f"{vip}{f'{int(time.time()*1000000):020}'}{json.dumps(data)}"
-        Ok(format!("{vip}{now:020}{data}").into_bytes())
+        Ok(format!("{vip}{now:020}{data}"))
     }
-    fn decode(data: &[u8]) -> Result<T, ErrorTypes> {
-        Ok(serde_json::from_slice(&data[SORTING_KEY_LEN..])?)
+    fn decode(data: &str) -> Result<T, ErrorTypes> {
+        Ok(serde_json::from_str(&data[SORTING_KEY_LEN..])?)
     }
 
     /// Return the number of items within the two priority values (inclusive on both ends)
     #[instrument]
-    pub async fn count(&self, lowest: f64, highest: f64) -> Result<u64, ErrorTypes> {
+    pub async fn count(&self, lowest: f64, highest: f64) -> Result<usize, ErrorTypes> {
         Ok(retry_call!(self.store.pool, zcount, &self.name, -highest, -lowest)?)
     }
 
     /// Remove all the data from this queue
     #[instrument]
-    pub async fn delete(&self) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }
 
     /// Get the number of items in the queue
     #[instrument]
-    pub async fn length(&self) -> Result<u64, ErrorTypes> {
+    pub async fn length(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, zcard, &self.name)
     }
 
@@ -367,9 +372,11 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         if num <= 0 {
             return Ok(Default::default())
         };
-        let items: Vec<(Vec<u8>, f64)> = retry_call!(self.store.pool, zpopmin, &self.name, num)?;
+        let items: Vec<String> = retry_call!(self.store.pool, zpopmin, &self.name, num)?;
+        let mut items = items.into_iter();
         let mut out = vec![];
-        for (data, _priority) in items {
+        while let Some(data) = items.next() {
+            let _priority = items.next();
             out.push(Self::decode(&data)?);
         }
         Ok(out)
@@ -378,26 +385,16 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
     /// When only one item is requested, blocking is is possible.
     #[instrument]
     pub async fn blocking_pop(&self, timeout: Duration, low_priority: bool) -> Result<Option<T>, ErrorTypes> {
-        let result: Option<(String, Vec<u8>, f64)> = if low_priority {
-            retry_call!(self.store.pool, bzpopmax, &self.name, timeout.as_secs_f64())?
+        let result: Option<(String, String, f64)> = if low_priority {
+            retry_call_timeout!(self.store.pool, bzpopmax, timeout.as_secs_f64(), &self.name)?
         } else {
-            retry_call!(self.store.pool, bzpopmin, &self.name, timeout.as_secs_f64())?
+            retry_call_timeout!(self.store.pool, bzpopmin, timeout.as_secs_f64(), &self.name)?
         };
         match result {
             Some(result) => Ok(Some(Self::decode(&result.1)?)),
             None => Ok(None)
         }
     }
-
-//     def blocking_pop(self, timeout=0, low_priority=False):
-//         """When only one item is requested, blocking is is possible."""
-//         if low_priority:
-//             result = retry_call(self.c.bzpopmax, self.name, timeout)
-//         else:
-//             result = retry_call(self.c.bzpopmin, self.name, timeout)
-//         if result:
-//             return decode(result[1][SORTING_KEY_LEN:])
-//         return None
 
     /// Dequeue a number of elements, within a specified range of scores.
     /// Limits given are inclusive, can be made exclusive, see redis docs on how to format limits for that.
@@ -422,7 +419,7 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         };
 
         let call = call.arg(inner_lower).arg(inner_upper).arg(skip).arg(num);
-        let results: Vec<Vec<u8>> = retry_call!(method, self.store.pool, call, invoke_async)?;
+        let results: Vec<String> = retry_call!(method, self.store.pool, call, invoke_async)?;
         results.iter()
             .map(|row| Self::decode(row))
             .collect()
@@ -432,9 +429,9 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
 
     /// Place an item into the queue
     #[instrument(skip(data))]
-    pub async fn push(&self, priority: f64, data: &T) -> Result<Vec<u8>, ErrorTypes> {
+    pub async fn push(&self, priority: f64, data: &T) -> Result<String, ErrorTypes> {
         let value = Self::encode(data)?;
-        if retry_call!(self.store.pool, zadd, &self.name, &value, -priority)? {
+        if retry_call!(self.store.pool, zadd, &self.name, &value, -priority)? > 0 {
             Ok(value)
         } else {
             Err(ErrorTypes::UnknownRedisError)
@@ -443,14 +440,14 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
 
     /// Given the raw encoding of an item in queue get its position
     #[instrument(skip(raw_value))]
-    pub async fn rank(&self, raw_value: &[u8]) -> Result<Option<u64>, ErrorTypes> {
+    pub async fn rank(&self, raw_value: &str) -> Result<Option<usize>, ErrorTypes> {
         retry_call!(self.store.pool, zrank, &self.name, raw_value)
     }
 
     /// Remove a specific item from the queue based on its raw value
     #[instrument(skip(raw_value))]
-    pub async fn remove(&self, raw_value: &[u8]) -> Result<bool, ErrorTypes> {
-        let count: i32 = retry_call!(self.store.pool, zrem, &self.name, raw_value)?;
+    pub async fn remove(&self, raw_value: &str) -> Result<bool, ErrorTypes> {
+        let count: usize = retry_call!(self.store.pool, zrem, &self.name, raw_value)?;
         Ok(count >= 1)
     }
 
@@ -460,9 +457,11 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         if num <= 0 {
             return Ok(Default::default())
         };
-        let items: Vec<(Vec<u8>, i32)> = retry_call!(self.store.pool, zpopmax, &self.name, num)?;
+        let items: Vec<String> = retry_call!(self.store.pool, zpopmax, &self.name, num)?;
+        let mut items = items.into_iter();
         let mut out = vec![];
-        for (data, _priority) in items {
+        while let Some(data) = items.next() {
+            let _priority = items.next();
             out.push(Self::decode(&data)?);
         }
         Ok(out)
@@ -475,13 +474,13 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
             return Ok(Default::default())
         }
 
-        let _timeout = timeout.unwrap_or_default().as_secs_f64();
+        let timeout = timeout.unwrap_or_default().as_secs_f64();
         // todo!("Waiting for deadpool-redis package to upgrade to redis-rs 0.24");
         let mut names = vec![];
         for queue in queues {
             names.push(queue.name.as_str());
         }
-        let response: Option<(String, Vec<u8>, f64)> = retry_call!(queues[0].store.pool, bzpopmin, &names, _timeout)?;
+        let response: Option<(String, String, f64)> = retry_call_timeout!(queues[0].store.pool, bzpopmin, timeout, &names)?;
 
         Ok(match response {
             Some((queue, value, _)) => Some((queue, Self::decode(&value)?)),
@@ -504,10 +503,10 @@ impl<T: Serialize + DeserializeOwned> PriorityQueue<T> {
         Ok(retry_call!(method, queues[0].store.pool, pipe, query_async)?)
     }
 
-    
+
 }
 
-/// Object represeting a colleciton of simple queues with the same prefix and message type 
+/// Object represeting a colleciton of simple queues with the same prefix and message type
 pub struct MultiQueue<Message: Serialize + DeserializeOwned> {
     store: Arc<RedisObjects>,
     prefix: String,
@@ -527,13 +526,13 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
 
     /// Delete one of the queues
     #[instrument]
-    pub async fn delete(&self, name: &str) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self, name: &str) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, del, self.prefix.clone() + name)
     }
 
     /// Get the length of one of the queues
     #[instrument]
-    pub async fn length(&self, name: &str) -> Result<u64, ErrorTypes> {
+    pub async fn length(&self, name: &str) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, llen, self.prefix.clone() + name)
     }
 
@@ -550,9 +549,10 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
     /// Pop from one of the queues, wait up to `timeout` if no values are available.
     #[instrument]
     pub async fn pop(&self, name: &str, timeout: Duration) -> Result<Option<Message>, ErrorTypes> {
-        let result: Option<(String, String)> = retry_call!(self.store.pool, blpop, self.prefix.clone() + name, timeout.as_secs_f64())?;
+        let to = timeout.as_secs_f64();
+        let result: Option<[String; 2]> = retry_call_timeout!(self.store.pool, blpop, to, self.prefix.clone() + name)?;
         match result {
-            Some((_, result)) => Ok(serde_json::from_str(&result)?),
+            Some([_, result]) => Ok(serde_json::from_str(&result)?),
             None => Ok(None),
         }
     }
@@ -560,7 +560,7 @@ impl<Message: Serialize + DeserializeOwned> MultiQueue<Message> {
     /// Insert an item into one of the queues
     #[instrument(skip(message))]
     pub async fn push(&self, name: &str, message: &Message) -> Result<(), ErrorTypes> {
-        let _: () = retry_call!(self.store.pool, rpush, self.prefix.clone() + name, serde_json::to_string(message)?)?;
+        let _: usize = retry_call!(self.store.pool, rpush, self.prefix.clone() + name, serde_json::to_string(message)?)?;
         Ok(())
     }
 }

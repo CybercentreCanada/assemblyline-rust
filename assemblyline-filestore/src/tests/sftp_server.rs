@@ -25,7 +25,7 @@ impl russh::server::Server for SshServer {
     fn new_client(&mut self, _: Option<SocketAddr>) -> Self::Handler {
         info!("New client");
         SshSession::new(self.file_root.path().to_owned())
-    }    
+    }
 }
 
 struct SshSession {
@@ -166,7 +166,7 @@ impl russh_sftp::server::Handler for SftpSession {
         Ok(russh_sftp::protocol::Attrs {
             id,
             attrs: (&meta).into(),
-        })        
+        })
     }
 
     async fn remove(&mut self, id: u32, filename: String) -> Result<russh_sftp::protocol::Status, Self::Error> {
@@ -226,7 +226,7 @@ impl russh_sftp::server::Handler for SftpSession {
         Ok(russh_sftp::protocol::Data{
             id,
             data: buffer
-        })        
+        })
     }
 
     async fn close(&mut self, id: u32, handle: String) -> Result<russh_sftp::protocol::Status, Self::Error> {
@@ -237,13 +237,13 @@ impl russh_sftp::server::Handler for SftpSession {
                 return Err("File handle invalid".into())
             }
         };
-        handle.sync_all().await?;        
+        handle.sync_all().await?;
         Ok(russh_sftp::protocol::Status{
             id,
             status_code: StatusCode::Ok,
             error_message: "".to_string(),
             language_tag: "".to_string(),
-        })        
+        })
     }
 }
 
@@ -252,6 +252,12 @@ struct Error(StatusCode);
 impl From<Error> for StatusCode {
     fn from(val: Error) -> Self {
         val.0
+    }
+}
+
+impl From<Error> for russh_sftp::server::StatusReply {
+    fn from(val: Error) -> Self {
+        russh_sftp::server::StatusReply::new(val.0)
     }
 }
 
@@ -281,11 +287,11 @@ impl From<String> for Error {
 pub async fn start_temp_sftp_server() -> String {
     let config = russh::server::Config {
         keys: vec![
-            russh::keys::PrivateKey::random(&mut russh::keys::ssh_key::rand_core::OsRng, russh::keys::Algorithm::Ed25519).unwrap(),
+            russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519).unwrap(),
         ],
         ..Default::default()
     };
-    
+
     let mut server = SshServer {
         file_root: Arc::new(tempfile::TempDir::new().unwrap())
     };

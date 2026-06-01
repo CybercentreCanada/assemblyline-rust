@@ -2,7 +2,7 @@
 use std::{marker::PhantomData, sync::Arc, collections::HashMap, time::Duration};
 
 use parking_lot::Mutex;
-use redis::AsyncCommands;
+use redis::AsyncTypedCommands;
 use serde::{de::DeserializeOwned, Serialize};
 use tracing::instrument;
 
@@ -91,7 +91,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
                 };
 
                 if call {
-                    // update the time in the mutex then drop it so we aren't holding the lock 
+                    // update the time in the mutex then drop it so we aren't holding the lock
                     // while we make the call to the redis server
                     *last_expire_time = Some(std::time::Instant::now());
                 }
@@ -100,7 +100,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
 
             if call {
                 let ttl = ttl.as_secs() as i64;
-                let _: () = retry_call!(self.store.pool, expire, &self.name, ttl)?;
+                let _: bool = retry_call!(self.store.pool, expire, &self.name, ttl)?;
             }
         }
         Ok(())
@@ -114,7 +114,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     /// If a key already exists this operation doesn't add it.
     /// Returns true if key has been added to the table, False otherwise.
     #[instrument(skip(value))]
-    pub async fn add(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {    
+    pub async fn add(&self, key: &str, value: &T) -> Result<bool, ErrorTypes> {
         let data = serde_json::to_vec(value)?;
         let result = retry_call!(self.store.pool, hset_nx, &self.name, &key, &data)?;
         self.conditional_expire().await?;
@@ -124,9 +124,9 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     /// Increment a key within a hash by the given delta
     #[instrument]
     pub async fn increment(&self, key: &str, increment: i64) -> Result<i64, ErrorTypes> {
-        let result = retry_call!(self.store.pool, hincr, &self.name, key, increment)?;
+        let result: f64 = retry_call!(self.store.pool, hincr, &self.name, key, increment)?;
         self.conditional_expire().await?;
-        Ok(result)
+        Ok(result as i64)
     }
 
     // def limited_add(self, key, value, size_limit):
@@ -147,16 +147,16 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
     /// Read the value stored at the given key
     #[instrument]
     pub async fn get(&self, key: &str) -> Result<Option<T>, ErrorTypes> {
-        let item: Option<Vec<u8>> = retry_call!(self.store.pool, hget, &self.name, key)?;
+        let item: Option<String> = retry_call!(self.store.pool, hget, &self.name, key)?;
         Ok(match item {
-            Some(data) => Some(serde_json::from_slice(&data)?),
+            Some(data) => Some(serde_json::from_str(&data)?),
             None => None,
         })
     }
 
     /// Read the value stored at the given key
     #[instrument]
-    pub async fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>, ErrorTypes> {
+    pub async fn get_raw(&self, key: &str) -> Result<Option<String>, ErrorTypes> {
         Ok(retry_call!(self.store.pool, hget, &self.name, key)?)
     }
 
@@ -168,17 +168,17 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
 
     /// Read the number of items in the hash
     #[instrument]
-    pub async fn length(&self) -> Result<u64, ErrorTypes> {
+    pub async fn length(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, hlen, &self.name)
     }
 
     /// Download the entire hash into memory
     #[instrument]
     pub async fn items(&self) -> Result<HashMap<String, T>, ErrorTypes> {
-        let items: Vec<(String, Vec<u8>)> = retry_call!(self.store.pool, hgetall, &self.name)?;
+        let items: HashMap<String, String> = retry_call!(self.store.pool, hgetall, &self.name)?;
         let mut out = HashMap::new();
         for (key, data) in items {
-            out.insert(key, serde_json::from_slice(&data)?);
+            out.insert(key, serde_json::from_str(&data)?);
         }
         Ok(out)
     }
@@ -202,7 +202,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
 
     /// Unconditionally overwrite the value stored at a given key
     #[instrument(skip(value))]
-    pub async fn set(&self, key: &str, value: &T) -> Result<i64, ErrorTypes> {
+    pub async fn set(&self, key: &str, value: &T) -> Result<usize, ErrorTypes> {
         let data = serde_json::to_vec(value)?;
         let result = retry_call!(self.store.pool, hset, &self.name, key, &data)?;
         self.conditional_expire().await?;
@@ -218,7 +218,7 @@ impl<T: Serialize + DeserializeOwned> Hashmap<T> {
 
     /// Clear the content of this hash
     #[instrument]
-    pub async fn delete(&self) -> Result<(), ErrorTypes> {
+    pub async fn delete(&self) -> Result<usize, ErrorTypes> {
         retry_call!(self.store.pool, del, &self.name)
     }
 
@@ -285,7 +285,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn expiring_hash() -> Result<(), ErrorTypes> {
         let redis = redis_connection().await;
         let eh = redis.hashmap("test-expiring-hashmap".to_string(), Duration::from_secs(1).into());

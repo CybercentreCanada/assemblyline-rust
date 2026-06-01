@@ -15,7 +15,7 @@ impl Core {
     //     on behalf of many services. At the moment the metrics system uses the hosts to count the number
     //     of instances of each service. This could be done with a single auto exporting counter for
     //     the service server, but that may require significant downstream changes in the metrics system.
-    pub async fn export_metrics_once<T: Serialize>(&self, name: &str, metrics: &T, host: Option<&str>, counter_type: Option<&str>) -> Result<u32, redis_objects::ErrorTypes> {
+    pub async fn export_metrics_once<T: Serialize>(&self, name: &str, metrics: &T, host: Option<&str>, counter_type: Option<&str>) -> Result<usize, redis_objects::ErrorTypes> {
 
         let mut counts = serde_json::to_value(metrics)?;
 

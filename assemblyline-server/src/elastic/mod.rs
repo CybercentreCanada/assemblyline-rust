@@ -35,7 +35,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
 use error::{ElasticErrorInner, WithContext};
 use log::info;
-use rand::Rng;
+use rand::RngExt;
 use reqwest::{Method, StatusCode};
 use responses::DescribeIndex;
 use serde::{Deserialize, Serialize};

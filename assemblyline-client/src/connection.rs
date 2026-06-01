@@ -109,14 +109,12 @@ impl Connection {
         let builder = match verify {
             TLSSettings::Native => {
                 reqwest::Client::builder()
-                    .tls_built_in_root_certs(true)
-                    .use_rustls_tls()
+                    .use_native_tls()
             },
             TLSSettings::CARoot(root) => {
                 reqwest::Client::builder()
-                    .tls_built_in_root_certs(true)
-                    .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(root)?)?)
                     .use_rustls_tls()
+                    .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(root)?)?)
             },
             TLSSettings::UnsafeClusterCARoot(root) => {
                 let store = to_rustls_certs(unpack_certs(root)?)?;

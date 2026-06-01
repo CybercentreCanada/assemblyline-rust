@@ -5,6 +5,9 @@ use serde::{Serialize, Deserialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
+#[cfg(feature = "rand")]
+use rand::RngExt;
+
 use crate::{ElasticMeta, Readable};
 use crate::types::{ExpandingClassification, SSDeepHash, Sha1, Sha256, Text, MD5};
 
@@ -240,10 +243,10 @@ pub struct Reaction {
 #[metadata(mapping="keyword")]
 #[strum(serialize_all = "snake_case")]
 pub enum ReactionsTypes {
-    ThumbsUp, 
-    ThumbsDown, 
-    Love, 
-    Smile, 
-    Surprised, 
+    ThumbsUp,
+    ThumbsDown,
+    Love,
+    Smile,
+    Surprised,
     Party
 }

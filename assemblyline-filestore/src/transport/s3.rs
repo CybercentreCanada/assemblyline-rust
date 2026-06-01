@@ -100,7 +100,7 @@ impl TransportS3 {
         let endpoint_url = format!("{scheme}://{host}:{port}");
 
         // Ok(S3BlobStore { client: bucket })
-        let mut loader = aws_config::defaults(BehaviorVersion::v2025_08_07());
+        let mut loader = aws_config::defaults(BehaviorVersion::v2026_01_12());
 
         // Override the region
         if let Some(region) = parameters.aws_region.clone() {
@@ -217,7 +217,7 @@ impl TransportS3 {
                             return Err(x.into())
                         }
                     }
-                }                
+                }
             } else {
                 return Err(anyhow::Error::new(err).context("head error"))
             }
@@ -385,10 +385,10 @@ impl Transport for TransportS3 {
                 .send().await
         })
     }
-    
+
     fn read_only(&self) -> bool {
         self.read_only
-    }    
+    }
 }
 
 
