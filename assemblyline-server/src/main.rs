@@ -13,7 +13,7 @@
 // remove after development, allow now so more important warnings can be seen
 // #![allow(dead_code)]
 
-use std::{path::PathBuf, process::ExitCode, sync::Arc};
+use std::{path::PathBuf, process::ExitCode, sync::Arc, fs};
 
 use anyhow::{Context, Result};
 use assemblyline_markings::classification::ClassificationParser;
@@ -95,6 +95,12 @@ enum Commands {
         /// If set and no tls configuration is provided revert to http rather than using a self signed certificate
         #[arg(long, default_value_t=false)]
         allow_http_mode: bool
+    },
+    ClassificationValidate {
+        // This command should accept a classification string that the parser will attempt to load and validate relative to the current definition
+        #[arg(last = true)]
+        classification: String,
+
     }
 }
 
@@ -105,6 +111,7 @@ impl Commands {
             Commands::Dispatcher { .. } => "dispatcher",
             Commands::Plumber { .. } => "plumber",
             Commands::ServiceAPI { .. } => "service_server",
+            Commands::ClassificationValidate { .. } => "classification_validate",
         }
     }
 }
@@ -122,6 +129,41 @@ async fn main() -> ExitCode {
     // and needs to be held until the program ends
     let _log_manager = configure_logging(&config).expect("Could not configure logging");
     info!("Configuration loaded from: {}", config_path.to_string_lossy());
+
+    // This utility command runs before initializing the core
+    if let Commands::ClassificationValidate { classification } = args.command {
+        // For troubleshooting ensure it's understood what the parser is using when performing validation
+        let c12n_config = match &config.classification.path {
+            Some(config_path) => {
+                info!("Testing against mounted classification configuration: {config_path:?}");
+                ready_classification(Some(&fs::read_to_string(config_path).expect("Could not read classification config from file"))).expect("Could not load classification config from file")
+            },
+            None => {
+                info!("No mounted classification configuration found. Proceeding with default configuration...");
+                ClassificationConfig::default()
+            }
+        };
+
+        // Validate the classification string and print the normalized result or an error
+        match ClassificationParser::new(c12n_config) {
+            Ok(parser) => {
+                match parser.normalize_classification(&classification) {
+                            Ok(norm_c12n) => {
+                                println!("Classification is valid: {norm_c12n:#?}");
+                                return ExitCode::SUCCESS;
+                            },
+                            Err(err) => {
+                                println!("Classification is invalid: {err:?}");
+                                return ExitCode::FAILURE;
+                            }
+                        }
+            },
+            Err(err) => {
+                println!("Classification configuration is invalid: {err:?}");
+                return ExitCode::FAILURE;
+            }
+        };        
+    }
 
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {
@@ -162,6 +204,10 @@ async fn main() -> ExitCode {
         }
         Commands::ServiceAPI { allow_http_mode } => {
             crate::service_api::main(core, allow_http_mode).await
+        }
+        _ => {
+            error!("Module not implemented");
+            return ExitCode::FAILURE;
         }
     };
 
