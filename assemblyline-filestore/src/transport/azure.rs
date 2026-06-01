@@ -48,12 +48,12 @@ const MAX_BACKOFF: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default)]
 pub struct AzureParameters {
-    pub access_key: String, 
+    pub access_key: String,
     pub tenant_id: String,
-    pub client_id: String, 
+    pub client_id: String,
     pub client_secret: String,
     pub emulator: bool,
-    pub allow_directory_access: bool, 
+    pub allow_directory_access: bool,
     pub use_default_credentials: bool,
 }
 
@@ -114,7 +114,7 @@ impl TransportAzure {
                 if (!tenant_id.is_empty() && !client_id.is_empty()) && (client_secret.is_empty()) {
                     todo!()
                     // Arc::new(WorkloadIdentityCredential::new(
-                    //     reqwest::Client::new(),                    
+                    //     reqwest::Client::new(),
                     //     tenant_id=tenant_id,
                     //                                             client_id=client_id
                     // ))
@@ -153,7 +153,7 @@ impl TransportAzure {
                     info!("Failed to create container, we're most likely in read only mode");
                     read_only = true;
                 }
-            }                
+            }
         }
 
         Ok(Self {
@@ -204,7 +204,7 @@ impl Transport for TransportAzure {
             client.put_block_blob(body.clone()).await
         })
     }
-    
+
     async fn upload(&self, source: &Path, dest: &str) -> Result<()> {
         if self.read_only {
             return Err(ReadOnlyError.into())
@@ -216,7 +216,7 @@ impl Transport for TransportAzure {
         retry!(ignore_result, self.connection_attempts, {
             let source = tokio::fs::File::open(source).await?;
             let source = azure_core::tokio::fs::FileStreamBuilder::new(source).build().await?;
-            client.put_block_blob(source).await    
+            client.put_block_blob(source).await
         })
 
 //         # if file exists already, it will be overwritten
@@ -401,7 +401,7 @@ impl std::fmt::Debug for TransportAzure {
 // }
 // pub (crate) use retry;
 
-fn is_not_found(err: &azure_core::Error) -> bool { 
+fn is_not_found(err: &azure_core::Error) -> bool {
     if let Some(err) = err.as_http_error() {
         if err.status() == azure_core::StatusCode::NotFound {
             return true
@@ -410,7 +410,7 @@ fn is_not_found(err: &azure_core::Error) -> bool {
     false
 }
 
-fn any_is_not_found(err: &anyhow::Error) -> bool { 
+fn any_is_not_found(err: &anyhow::Error) -> bool {
     if let Some(err) = err.downcast_ref() {
         return is_not_found(err)
     }
@@ -463,10 +463,10 @@ macro_rules! retry {
                         //     TooManyRedirectsError, ODataV4Error):
                         //     // These errors will be wrapped by TransportException
                         //     raise
-    
+
                         // log::warn!("No connection to Azure transport, retrying... [{err:?}]");
                         // tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                        // retries += 1;    
+                        // retries += 1;
                     }
                 }
             }

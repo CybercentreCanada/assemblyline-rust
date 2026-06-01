@@ -14,7 +14,8 @@ use std::time::Duration;
 use log::debug;
 use queue::MultiQueue;
 use quota::UserQuotaTracker;
-use redis::AsyncCommands;
+use redis::AsyncTypedCommands;
+use redis::IntoConnectionInfo;
 pub use redis::Msg;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -36,9 +37,12 @@ pub mod counters;
 pub mod pubsub;
 pub mod set;
 
+/// maximum exponent over 2 used in the retry loop
+pub const BACKOFF_MAXIMUM: f64 = 3.0;
+
 /// Handle for a pool of connections to a redis server.
 pub struct RedisObjects {
-    pool: deadpool_redis::Pool,
+    pool: bb8::Pool<redis::Client>,
     client: redis::Client,
     hostname: String,
     pubsub_prefix: String,
@@ -53,29 +57,23 @@ impl std::fmt::Debug for RedisObjects {
 impl RedisObjects {
     /// Open given more limited connection info
     pub fn open_host(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
-        Self::open(redis::ConnectionInfo{
-            addr: redis::ConnectionAddr::Tcp(host.to_string(), port),
-            redis: redis::RedisConnectionInfo {
-                db,
-                ..Default::default()
-            },
-        })
+        let info = redis::ConnectionAddr::Tcp(host.to_string(), port).into_connection_info()?;
+        let settings = info.redis_settings().clone();
+        let info = info.set_redis_settings(settings.set_db(db));
+        Self::open(info)
     }
 
     /// Open a connection using the local tls configuration
     pub fn open_host_native_tls(host: &str, port: u16, db: i64) -> Result<Arc<Self>, ErrorTypes> {
-        Self::open(redis::ConnectionInfo{
-            addr: redis::ConnectionAddr::TcpTls {
-                host: host.to_string(),
-                port,
-                insecure: false,
-                tls_params: None,
-            },
-            redis: redis::RedisConnectionInfo {
-                db,
-                ..Default::default()
-            },
-        })
+        let info = redis::ConnectionAddr::TcpTls {
+            host: host.to_string(),
+            port,
+            insecure: false,
+            tls_params: None,
+        }.into_connection_info()?;
+        let settings = info.redis_settings().clone();
+        let info = info.set_redis_settings(settings.set_db(db));
+        Self::open(info)
     }
 
     /// Construct a builder to construct a redis connection
@@ -91,16 +89,24 @@ impl RedisObjects {
     /// Open a connection pool
     fn _open(config: redis::ConnectionInfo, pubsub_prefix: String) -> Result<Arc<Self>, ErrorTypes> {
         debug!("Create redis connection pool.");
+
+        let hostname = config.addr().to_string();
+
+        let settings = config.tcp_settings().clone()
+            .set_keepalive(redis::io::tcp::socket2::TcpKeepalive::new().with_interval(Duration::from_secs(5)))
+            .set_nodelay(true);
+        let config = config.set_tcp_settings(settings);
+
+        let client = redis::Client::open(config)?;
+
         // configuration for the pool manager itself
-        let hostname = config.addr.to_string();
-        let mut pool_cfg = deadpool_redis::PoolConfig::new(1024);
-        pool_cfg.timeouts.wait = Some(Duration::from_secs(5));
+        let pool = bb8::Pool::builder()
+            .max_size(1024)
+            .test_on_check_out(false)
+            .connection_timeout(Duration::from_mins(5))
+            .build_unchecked(client.clone());
 
         // load redis configuration and create the pool
-        let mut cfg = deadpool_redis::Config::from_connection_info(config.clone());
-        cfg.pool = Some(pool_cfg);
-        let pool = cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
-        let client = redis::Client::open(config)?;
         Ok(Arc::new(Self{
             pool,
             client,
@@ -136,13 +142,13 @@ impl RedisObjects {
 
     /// Write a message directly to the channel given
     #[instrument]
-    pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<u32, ErrorTypes> {
+    pub async fn publish(&self, channel: &str, data: &[u8]) -> Result<usize, ErrorTypes> {
         retry_call!(self.pool, publish, self.pubsub_prefix.clone() + channel, data)
     }
 
     /// Write a json message directly to the channel given
     #[instrument(skip(value))]
-    pub async fn publish_json<T: Serialize>(&self, channel: &str, value: &T) -> Result<u32, ErrorTypes> {
+    pub async fn publish_json<T: Serialize>(&self, channel: &str, value: &T) -> Result<usize, ErrorTypes> {
         self.publish(channel, &serde_json::to_vec(value)?).await
     }
 
@@ -196,7 +202,7 @@ impl RedisObjects {
     /// Erase all data on the redis server
     pub async fn wipe(&self) -> Result<(), ErrorTypes> {
         let mut con = self.pool.get().await?;
-        let _: () = redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut con).await?;
+        let _: () = redis::cmd("FLUSHDB").arg("SYNC").query_async(&mut *con).await?;
         Ok(())
     }
 
@@ -259,26 +265,18 @@ impl Builder {
     /// finalize the building process and create the redis object
     pub fn build(self) -> Result<Arc<RedisObjects>, ErrorTypes> {
         let config = if self.native_tls {
-            redis::ConnectionInfo{
-                addr: redis::ConnectionAddr::TcpTls {
-                    host: self.host,
-                    port: self.port,
-                    insecure: false,
-                    tls_params: None,
-                },
-                redis: redis::RedisConnectionInfo {
-                    db: self.db,
-                    ..Default::default()
-                },
-            }
+            let info = redis::ConnectionAddr::TcpTls {
+                host: self.host,
+                port: self.port,
+                insecure: false,
+                tls_params: None,
+            }.into_connection_info()?;
+            let settings = info.redis_settings().clone();
+            info.set_redis_settings(settings.set_db(self.db))
         } else {
-            redis::ConnectionInfo{
-                addr: redis::ConnectionAddr::Tcp(self.host, self.port),
-                redis: redis::RedisConnectionInfo {
-                    db: self.db,
-                    ..Default::default()
-                },
-            }
+            let info = redis::ConnectionAddr::Tcp(self.host, self.port).into_connection_info()?;
+            let settings = info.redis_settings().clone();
+            info.set_redis_settings(settings.set_db(self.db))
         };
 
         RedisObjects::_open(config, self.pubsub_prefix)
@@ -287,17 +285,19 @@ impl Builder {
 
 
 /// Enumeration over all possible errors
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ErrorTypes {
-    /// There is something wrong with the redis configuration
-    Configuration(Box<deadpool_redis::CreatePoolError>),
     /// Could not get a connection from the redis connection pool
-    Pool(Box<deadpool_redis::PoolError>),
-    /// Returned by the redis server
+    #[error("Could not get a connection from the redis connection pool")]
+    Pool,
+    /// Redis runtime error
+    #[error("Redis runtime error: {0}")]
     Redis(Box<redis::RedisError>),
-    /// Unexpected result from the redis server
+    /// Unexpected response from redis server
+    #[error("Unexpected response from redis server")]
     UnknownRedisError,
-    /// Could not serialize or deserialize a payload
+    /// Encoding or decoding issue
+    #[error("Encoding issue with message: {0}")]
     Serde(serde_json::Error),
 }
 
@@ -308,25 +308,13 @@ impl ErrorTypes {
     }
 }
 
-
-impl std::fmt::Display for ErrorTypes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorTypes::Configuration(err) => write!(f, "Redis configuration: {err}"),
-            ErrorTypes::Pool(err) => write!(f, "Redis connection pool: {err}"),
-            ErrorTypes::Redis(err) => write!(f, "Redis runtime error: {err}"),
-            ErrorTypes::UnknownRedisError => write!(f, "Unexpected response from redis server"),
-            ErrorTypes::Serde(err) => write!(f, "Encoding issue with message: {err}"),
+impl From<bb8::RunError<redis::RedisError>> for ErrorTypes {
+    fn from(value: bb8::RunError<redis::RedisError>) -> Self {
+        match value {
+            bb8::RunError::User(err) => err.into(),
+            bb8::RunError::TimedOut => Self::Pool,
         }
     }
-}
-
-impl From<deadpool_redis::CreatePoolError> for ErrorTypes {
-    fn from(value: deadpool_redis::CreatePoolError) -> Self { Self::Configuration(Box::new(value)) }
-}
-
-impl From<deadpool_redis::PoolError> for ErrorTypes {
-    fn from(value: deadpool_redis::PoolError) -> Self { Self::Pool(Box::new(value)) }
 }
 
 impl From<redis::RedisError> for ErrorTypes {
@@ -337,8 +325,6 @@ impl From<serde_json::Error> for ErrorTypes {
     fn from(value: serde_json::Error) -> Self { Self::Serde(value) }
 }
 
-impl std::error::Error for ErrorTypes {}
-
 /// A convenience trait that lets you pass an i32 value or None for arguments
 pub trait Ii32: Into<Option<i32>> + Copy {}
 impl<T: Into<Option<i32>> + Copy> Ii32 for T {}
@@ -348,10 +334,65 @@ pub trait Iusize: Into<Option<usize>> + Copy {}
 impl<T: Into<Option<usize>> + Copy> Iusize for T {}
 
 
+macro_rules! retry_call_timeout {
+    ($pool:expr, $method:ident, $timeout:expr, $($args:expr),+) => {
+        {
+            // track our backoff parameters
+            let mut exponent = -7.0;
+            loop {
+                // get a (fresh if needed) connection form the pool
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
+
+                // execute the method given with the argments specified
+                if $timeout == 0.0 {
+                    con.set_response_timeout(Duration::from_mins(60 * 24));
+                } else {
+                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
+                }
+                retry_call!(handle_output, $method, con.$method($($args,)+ $timeout).await, exponent)
+            }
+        }
+    };
+
+    (method, $pool:expr, $obj:expr, $method:ident, $timeout:expr) => {
+        {
+            // track our backoff parameters
+            let mut exponent = -7.0;
+            loop {
+                // get a (fresh if needed) connection form the pool
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
+
+                // execute the method given with the argments specified
+                if $timeout == 0.0 {
+                    con.set_response_timeout(Duration::from_mins(60 * 24));
+                } else {
+                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
+                }
+                retry_call!(handle_output, $method, $obj.$method(&mut *con).await, exponent)
+            }
+        }
+    };
+}
+
 /// A macro for retrying calls to redis when an IO error occurs
 macro_rules! retry_call {
+    (get_connection, $name:ident, $pool:expr, $exponent:ident) => {
+        match $pool.get().await {
+            Ok(connection) => connection,
+            Err(bb8::RunError::User(err)) => {
+                retry_call!(handle_error, $name, err, $exponent);
+                continue
+            },
+            Err(bb8::RunError::TimedOut) => {
+                log::warn!("Timed out getting redis connection, will retry...");
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf($exponent))).await;
+                $exponent = ($exponent + 1.0).min(crate::BACKOFF_MAXIMUM);
+                continue
+            }
+        }
+    };
 
-    (handle_error, $err:ident, $exponent:ident, $maximum:ident) => {
+    (handle_error, $name:ident, $err:ident, $exponent:ident) => {
         {
             // If the error from redis is something not related to IO let the error propagate
             if !$err.is_io_error() {
@@ -359,13 +400,13 @@ macro_rules! retry_call {
             }
 
             // For IO errors print a warning and sleep
-            log::warn!("No connection to Redis, reconnecting... [{}]", $err);
+            log::warn!("No connection to Redis, reconnecting... [{}:{}][{}]", stringify!($name), std::line!(), $err);
             tokio::time::sleep(tokio::time::Duration::from_secs_f64(2f64.powf($exponent))).await;
-            $exponent = ($exponent + 1.0).min($maximum);
+            $exponent = ($exponent + 1.0).min(crate::BACKOFF_MAXIMUM);
         }
     };
 
-    (handle_output, $call:expr, $exponent:ident, $maximum:ident) => {
+    (handle_output, $name:ident, $call:expr, $exponent:ident) => {
         {
             match $call {
                 Ok(val) => {
@@ -374,7 +415,7 @@ macro_rules! retry_call {
                     }
                     break Ok(val)
                 },
-                Err(err) => retry_call!(handle_error, err, $exponent, $maximum),
+                Err(err) => retry_call!(handle_error, $name, err, $exponent),
             }
         }
     };
@@ -383,20 +424,12 @@ macro_rules! retry_call {
         {
             // track our backoff parameters
             let mut exponent = -7.0;
-            let maximum = 3.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = match $pool.get().await {
-                    Ok(connection) => connection,
-                    Err(deadpool_redis::PoolError::Backend(err)) => {
-                        retry_call!(handle_error, err, exponent, maximum);
-                        continue
-                    },
-                    Err(err) => break Err(err.into())
-                };
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                retry_call!(handle_output, con.$method($($args),+).await, exponent, maximum)
+                retry_call!(handle_output, $method, con.$method($($args),+).await, exponent)
             }
         }
     };
@@ -405,41 +438,30 @@ macro_rules! retry_call {
         {
             // track our backoff parameters
             let mut exponent = -7.0;
-            let maximum = 3.0;
             loop {
                 // get a (fresh if needed) connection form the pool
-                let mut con = match $pool.get().await {
-                    Ok(connection) => connection,
-                    Err(deadpool_redis::PoolError::Backend(err)) => {
-                        retry_call!(handle_error, err, exponent, maximum);
-                        continue
-                    },
-                    Err(err) => break Err(err.into())
-                };
+                let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                retry_call!(handle_output, $obj.$method(&mut con).await, exponent, maximum)
+                retry_call!(handle_output, $method, $obj.$method(&mut *con).await, exponent)
             }
         }
     };
 }
 
-pub (crate) use retry_call;
+pub (crate) use {retry_call, retry_call_timeout};
 
 #[cfg(test)]
 pub (crate) mod test {
     use std::sync::Arc;
 
-    use redis::ConnectionInfo;
+    use redis::IntoConnectionInfo;
 
     use crate::{ErrorTypes, PriorityQueue, Queue, RedisObjects};
 
 
     pub (crate) async fn redis_connection() -> Arc<RedisObjects> {
-        RedisObjects::open(ConnectionInfo{
-            addr: redis::ConnectionAddr::Tcp("localhost".to_string(), 6379),
-            redis: Default::default(),
-        }).unwrap()
+        RedisObjects::open(redis::ConnectionAddr::Tcp("localhost".to_string(), 6379).into_connection_info().unwrap()).unwrap()
     }
 
     fn init() {
@@ -562,7 +584,7 @@ pub (crate) mod test {
         let z_key = pq.push(99.0, &"z".to_string()).await?;
         assert_eq!(pq.rank(&a_key).await?.unwrap(), 0);
         assert_eq!(pq.rank(&z_key).await?.unwrap(), pq.length().await? - 1);
-        assert!(pq.rank(b"onethuosentuh").await?.is_none());
+        assert!(pq.rank("onethuosentuh").await?.is_none());
 
         assert_eq!(pq.pop(1).await?, ["a"]);
         assert_eq!(pq.unpush(1).await?, ["z"]);

@@ -14,7 +14,7 @@ use assemblyline_models::messages::submission::{File, SubmissionParams};
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256, Sid, UpperString, Wildcard};
 use itertools::Itertools;
-use rand::Rng;
+use rand::RngExt;
 use serde_json::json;
 use tokio::sync::mpsc;
 

@@ -8,6 +8,9 @@ use serde_json::{json, Value};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
+#[cfg(feature = "rand")]
+use rand::RngExt;
+
 use crate::types::{ClassificationString, ExpandingClassification, JsonMap, ServiceName, Sha256, Sid, Text, UpperString, Wildcard};
 use crate::{ElasticMeta, Readable};
 

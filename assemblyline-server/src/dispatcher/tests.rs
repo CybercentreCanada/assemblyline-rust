@@ -16,7 +16,7 @@ use assemblyline_models::types::{ClassificationString, ServiceName, Sha256, Expa
 use log::{debug, info};
 use poem::listener::Acceptor;
 use poem::EndpointExt;
-use rand::Rng;
+use rand::RngExt;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
 

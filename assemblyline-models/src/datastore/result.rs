@@ -1,19 +1,12 @@
-// from collections import defaultdict
-// from typing import Any, Dict
-
-// from assemblyline import odm
-// from assemblyline.common import forge
-// from assemblyline.common.caching import generate_conf_key
-// from assemblyline.common.dict_utils import flatten
-// from assemblyline.common.tagging import tag_dict_to_list
-// from assemblyline.odm.models.tagging import Tagging
-
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
+
+#[cfg(feature = "rand")]
+use rand::RngExt;
 
 use crate::datastore::tagging::LayoutError;
 use crate::messages::task::{generate_conf_key, TagEntry, Task};

@@ -1,12 +1,12 @@
 //! Object specialized in tracking user quotas
-        
+
 // import redis
 // from assemblyline.remote.datatypes import get_client, retry_call
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use redis::AsyncCommands;
+use redis::AsyncTypedCommands;
 use tracing::instrument;
 
 use crate::{retry_call, ErrorTypes, RedisObjects};
@@ -26,7 +26,7 @@ use crate::{retry_call, ErrorTypes, RedisObjects};
         //     self.log.info(f"[{sid}] Submission no longer counts toward {submission.params.submitter.upper()} quota")
         //     self.quota_tracker.end(submission.params.submitter)
 
-       
+
 const BEGIN_SCRIPT: &str = r#"
 local t = redis.call('time')
 local key = tonumber(t[1] .. string.format("%06d", t[2]))
@@ -68,7 +68,7 @@ impl UserQuotaTracker {
             timeout: Duration::from_secs(120)
         }
     }
-    
+
     /// Set the time before a task started by a user will age out if not ended normally.
     pub fn set_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -90,7 +90,7 @@ impl UserQuotaTracker {
     /// End the longest running task owned by the given user
     #[instrument]
     pub async fn end(&self, user: &str) -> Result<(), ErrorTypes> {
-        let _: () = retry_call!(self.store.pool, zpopmin, &self.queue_name(user), 1)?;
+        let _: Vec<String> = retry_call!(self.store.pool, zpopmin, &self.queue_name(user), 1)?;
         Ok(())
     }
 }

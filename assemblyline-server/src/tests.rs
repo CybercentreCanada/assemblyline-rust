@@ -19,7 +19,7 @@ use log::{debug, error, info};
 use parking_lot::Mutex;
 use serde::Deserialize;
 use sha2::Digest;
-use rand::Rng;
+use rand::RngExt;
 use serde_json::{Value, from_value, json};
 use tokio::sync::{mpsc, Notify};
 

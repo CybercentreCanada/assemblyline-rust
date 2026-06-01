@@ -1,6 +1,6 @@
 [package]
 name = "assemblyline-filestore"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/cybercentreCanada/assemblyline-rust"
@@ -29,11 +29,11 @@ anyhow = "1.0"
 thiserror = "2.0"
 
 # FTP client
-suppaftp = { version = "^7", features=["tokio-async-native-tls"] }
+suppaftp = { version = "^8", features=["tokio-async-native-tls"] }
 
 # SFTP client
-russh = "0.55"
-russh-sftp = "2.1"
+russh = "0.61"
+russh-sftp = "2.3"
 
 # Azure cloud service libraries
 azure_core = { version = "0.21", features = ["tokio-fs"]}
@@ -43,7 +43,7 @@ azure_storage_blobs = "0.21"
 
 # Amazon cloud service libraries
 aws-config = "1.8"
-aws-sdk-s3 = "1.101"
+aws-sdk-s3 = "1.133"
 aws-types = "1.3"
 aws-smithy-http-client = { version = "1.0", features = [ "rustls-ring", "hyper-014" ] }
 
@@ -54,10 +54,11 @@ legacy-rustls = { package = "rustls", version = "0.21.8", features = ["dangerous
 [dev-dependencies]
 tempfile = "3.15"
 env_logger = "0.11"
-libunftp = { version = "0.21.0" }
-unftp-sbe-fs = "0.3.0"
+libunftp = { version = "0.23.0" }
+unftp-core = "0.1.0"
+unftp-sbe-fs = "0.4.0"
 openssl = "0.10"
 chrono = "0.4"
 async-trait = "0.1"
 uuid = "1.18"
-rand = "0.9"
+rand = "0.10"

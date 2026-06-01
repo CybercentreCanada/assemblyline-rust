@@ -104,7 +104,7 @@ mod tests {
 
     use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
     use assemblyline_models::types::ClassificationString;
-    use rand::Rng;
+    use rand::RngExt;
 
     use crate::{Authentication, Client, Connection};
 
@@ -119,11 +119,11 @@ mod tests {
         let key = std::env::var("ASSEMBLYLINE_KEY").unwrap();
 
         let connection = Connection::connect(
-            url, 
-            Authentication::ApiKey { username, key }, 
-            Some(2), 
-            crate::TLSSettings::Native, 
-            Default::default(), 
+            url,
+            Authentication::ApiKey { username, key },
+            Some(2),
+            crate::TLSSettings::Native,
+            Default::default(),
             Some(30.0)
         ).await.unwrap();
         Client::from_connection(Arc::new(connection)).await.unwrap()

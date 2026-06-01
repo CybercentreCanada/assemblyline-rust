@@ -2,8 +2,10 @@ use std::collections::HashMap;
 
 use log::debug;
 use md5::Digest;
-use rand::Rng;
 use serde::{Serialize, Deserialize};
+
+#[cfg(feature = "rand")]
+use rand::RngExt;
 
 use crate::datastore::tagging::TagValue;
 use crate::random_word;

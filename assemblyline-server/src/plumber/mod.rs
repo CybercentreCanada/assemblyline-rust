@@ -357,7 +357,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         info!("Watching {service_name} service queue...");
         let service_queue = self.core.get_service_queue(&service_name);
         while self.core.is_running() && !stop_signal.read() {
-            while service_queue.length().await? > limit.load(std::sync::atomic::Ordering::Relaxed) as u64 {
+            while service_queue.length().await? > limit.load(std::sync::atomic::Ordering::Relaxed) as usize {
                 let task = self.dispatch_client.request_work("plumber", service_name, "0", None, false, Some(true)).await?;
                 let task = match task {
                     Some(task) => task,
