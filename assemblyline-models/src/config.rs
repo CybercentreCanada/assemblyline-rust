@@ -1483,6 +1483,121 @@ impl Default for Services {
 // }
 
 
+// ── MCP Agent Configuration ─────────────────────────────────────────
+
+/// Registration of an MCP server whose tools become available to AI agents
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct MCPServerRegistration {
+    /// Unique name for this MCP server (e.g. 'assemblyline', 'sandbox')
+    pub name: String,
+    /// URL of the MCP server (SSE endpoint)
+    pub url: String,
+    /// MCP transport type
+    pub transport: MCPTransport,
+    /// Headers to send when connecting
+    pub headers: HashMap<String, String>,
+    /// Use Federated Identity Credentials to authenticate
+    pub use_fic: bool,
+    /// Verify SSL certificates
+    pub verify: bool,
+    /// Timeout in seconds for tool calls
+    pub timeout: u64,
+}
+
+/// MCP transport type
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MCPTransport {
+    Sse,
+    StreamableHttp,
+}
+
+impl Default for MCPTransport {
+    fn default() -> Self { Self::Sse }
+}
+
+impl Default for MCPServerRegistration {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            url: String::new(),
+            transport: MCPTransport::Sse,
+            headers: HashMap::new(),
+            use_fic: false,
+            verify: true,
+            timeout: 120,
+        }
+    }
+}
+
+/// An agent profile that bundles MCP tools with a system prompt
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIAgentProfile {
+    /// Agent name (e.g. 'analyst', 'triage')
+    pub name: String,
+    /// Description of this agent's purpose
+    pub description: String,
+    /// System prompt for this agent
+    pub system_message: String,
+    /// MCP server names whose tools this agent can use
+    pub mcp_servers: Vec<String>,
+    /// Specific tool names to include (empty = all from listed servers)
+    pub tools: Vec<String>,
+    /// Tool names to exclude
+    pub excluded_tools: Vec<String>,
+    /// Maximum agentic loop iterations
+    pub max_iterations: u32,
+    /// Max tokens for LLM responses
+    pub max_tokens: u32,
+    /// Additional LLM options
+    pub options: HashMap<String, serde_json::Value>,
+    /// Additional role required to use this agent
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_role: Option<String>,
+}
+
+impl Default for AIAgentProfile {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            system_message: String::new(),
+            mcp_servers: Vec::new(),
+            tools: Vec::new(),
+            excluded_tools: Vec::new(),
+            max_iterations: 25,
+            max_tokens: 4096,
+            options: HashMap::new(),
+            require_role: None,
+        }
+    }
+}
+
+/// AI backends configuration
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIBackends {
+    /// Is AI support enabled?
+    pub enabled: bool,
+    /// MCP servers to connect to for agentic tool discovery
+    pub mcp_servers: Vec<MCPServerRegistration>,
+    /// Agent profiles that scope tools and system prompts
+    pub agent_profiles: Vec<AIAgentProfile>,
+}
+
+impl Default for AIBackends {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mcp_servers: Vec::new(),
+            agent_profiles: Vec::new(),
+        }
+    }
+}
+
+
 /// UI Configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -1490,6 +1605,9 @@ pub struct UI {
 //     alerting_meta: AlertingMeta = odm.Compound(AlertingMeta, default=DEFAULT_ALERTING_META,description="Alerting metadata fields")
     /// Allow user to tell in advance the system that a file is malicious?
     pub allow_malicious_hinting: bool,
+    /// AI multi-backend and MCP agent configuration
+    #[serde(default)]
+    pub ai_backends: AIBackends,
 //     allow_raw_downloads: bool = odm.Boolean(description="Allow user to download raw files?")
 //     allow_zip_downloads: bool = odm.Boolean(description="Allow user to download files as password protected ZIPs?")
 //     allow_replay: bool = odm.Boolean(description="Allow users to request replay on another server?")
@@ -1530,6 +1648,7 @@ impl Default for UI {
 // DEFAULT_UI = {
 //     "alerting_meta": DEFAULT_ALERTING_META,
             allow_malicious_hinting: false,
+            ai_backends: AIBackends::default(),
 //     "allow_raw_downloads": True,
 //     "allow_zip_downloads": True,
 //     "allow_replay": False,
