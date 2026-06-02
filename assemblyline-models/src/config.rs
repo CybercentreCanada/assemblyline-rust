@@ -1483,6 +1483,186 @@ impl Default for Services {
 // }
 
 
+// ── AI Agent Configuration ──────────────────────────────────────────
+
+/// JSON Schema type for an AI tool parameter
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AIToolParameterType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Array,
+    Object,
+}
+
+impl Default for AIToolParameterType {
+    fn default() -> Self { Self::String }
+}
+
+/// Parameter definition for an AI tool
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIToolParameter {
+    /// Parameter name
+    pub name: String,
+    /// JSON Schema type for this parameter
+    #[serde(rename = "type")]
+    pub param_type: AIToolParameterType,
+    /// Description of what this parameter does
+    pub description: String,
+    /// Is this parameter required?
+    pub required: bool,
+    /// Allowed values for this parameter
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#enum: Option<Vec<String>>,
+    /// Default value for this parameter
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+}
+
+impl Default for AIToolParameter {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            param_type: AIToolParameterType::String,
+            description: String::new(),
+            required: false,
+            r#enum: None,
+            default: None,
+        }
+    }
+}
+
+/// Type of AI tool
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AIToolType {
+    /// AL-native operations (search, file access, etc.)
+    Builtin,
+    /// HTTP calls to external APIs
+    ExternalHttp,
+}
+
+impl Default for AIToolType {
+    fn default() -> Self { Self::Builtin }
+}
+
+/// HTTP method for external AI tool calls
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum AIToolHttpMethod {
+    GET,
+    POST,
+    PUT,
+}
+
+impl Default for AIToolHttpMethod {
+    fn default() -> Self { Self::POST }
+}
+
+/// Definition of a tool available to AI agents
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIToolDefinition {
+    /// Unique tool name (e.g. 'search_index', 'call_external_analyzer')
+    pub name: String,
+    /// Description of what this tool does, shown to the LLM
+    pub description: String,
+    /// Type of tool: 'builtin' for AL-native operations, 'external_http' for external APIs
+    pub tool_type: AIToolType,
+    /// Parameter definitions for this tool
+    pub parameters: Vec<AIToolParameter>,
+    /// URL to call for external_http tools. Supports {param} substitution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_url: Option<String>,
+    /// HTTP method for external_http tools
+    pub http_method: AIToolHttpMethod,
+    /// Headers to send with external_http tool calls
+    pub endpoint_headers: HashMap<String, String>,
+    /// Use Federated Identity Credentials for external_http tool auth
+    pub use_fic: bool,
+    /// Timeout in seconds for external tool calls
+    pub timeout: u64,
+}
+
+impl Default for AIToolDefinition {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            tool_type: AIToolType::Builtin,
+            parameters: Vec::new(),
+            endpoint_url: None,
+            http_method: AIToolHttpMethod::POST,
+            endpoint_headers: HashMap::new(),
+            use_fic: false,
+            timeout: 120,
+        }
+    }
+}
+
+/// An agent profile that bundles tools with a system prompt
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIAgentProfile {
+    /// Agent name (e.g. 'investigation', 'hunt')
+    pub name: String,
+    /// Description of this agent's purpose
+    pub description: String,
+    /// System prompt for this agent
+    pub system_message: String,
+    /// List of tool names available to this agent
+    pub tools: Vec<String>,
+    /// Maximum agentic loop iterations
+    pub max_iterations: u32,
+    /// Max tokens for LLM responses
+    pub max_tokens: u32,
+    /// Additional LLM options (temperature, etc.)
+    pub options: HashMap<String, serde_json::Value>,
+    /// Additional role required to use this agent (beyond assistant_use)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_role: Option<String>,
+}
+
+impl Default for AIAgentProfile {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            system_message: String::new(),
+            tools: Vec::new(),
+            max_iterations: 25,
+            max_tokens: 4096,
+            options: HashMap::new(),
+            require_role: None,
+        }
+    }
+}
+
+/// AI backends configuration block
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct AIBackends {
+    /// Is AI support enabled?
+    pub enabled: bool,
+    /// Tools available to AI agents for agentic workflows
+    pub tools: Vec<AIToolDefinition>,
+    /// Agent profiles that bundle tools with system prompts
+    pub agent_profiles: Vec<AIAgentProfile>,
+}
+
+impl Default for AIBackends {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tools: Vec::new(),
+            agent_profiles: Vec::new(),
+        }
+    }
+}
+
+
 /// UI Configuration
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
@@ -1490,6 +1670,9 @@ pub struct UI {
 //     alerting_meta: AlertingMeta = odm.Compound(AlertingMeta, default=DEFAULT_ALERTING_META,description="Alerting metadata fields")
     /// Allow user to tell in advance the system that a file is malicious?
     pub allow_malicious_hinting: bool,
+    /// AI multi-backend support configuration
+    #[serde(default)]
+    pub ai_backends: AIBackends,
 //     allow_raw_downloads: bool = odm.Boolean(description="Allow user to download raw files?")
 //     allow_zip_downloads: bool = odm.Boolean(description="Allow user to download files as password protected ZIPs?")
 //     allow_replay: bool = odm.Boolean(description="Allow users to request replay on another server?")
@@ -1530,6 +1713,7 @@ impl Default for UI {
 // DEFAULT_UI = {
 //     "alerting_meta": DEFAULT_ALERTING_META,
             allow_malicious_hinting: false,
+            ai_backends: AIBackends::default(),
 //     "allow_raw_downloads": True,
 //     "allow_zip_downloads": True,
 //     "allow_replay": False,
