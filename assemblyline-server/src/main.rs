@@ -126,15 +126,15 @@ async fn main() -> ExitCode {
     // Load configuration
     let (config, config_path) = load_configuration(args.config).await.expect("Could not load configuration");
 
-    // configure logging, the object returned here owns the log processing internals
-    // and needs to be held until the program ends
-    let _log_manager: flexi_logger::LoggerHandle = configure_logging(&config).expect("Could not configure logging");
-    info!("Configuration loaded from: {}", config_path.to_string_lossy());
-
     // This utility command runs before initializing the core
     if let Commands::ValidateClassification { classification } = args.command {
         return crate::validate_classification::main(classification, config.clone());       
     }
+
+    // configure logging, the object returned here owns the log processing internals
+    // and needs to be held until the program ends
+    let _log_manager: flexi_logger::LoggerHandle = configure_logging(&config).expect("Could not configure logging");
+    info!("Configuration loaded from: {}", config_path.to_string_lossy());
 
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {
