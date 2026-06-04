@@ -198,7 +198,7 @@ impl TransportS3 {
         // make sure the bucket exists
         let head_result = retry!(connection_attempts, {
             client.head_bucket().bucket(&parameters.s3_bucket).send().await
-        });
+        }, "init: head bucket");
 
         if let Err(err) = head_result {
             let err = err.downcast::<SdkError<aws_sdk_s3::operation::head_bucket::HeadBucketError>>()?;
@@ -208,7 +208,7 @@ impl TransportS3 {
                 if !read_only{
                     let create_result = retry!(connection_attempts, {
                         client.create_bucket().bucket(&parameters.s3_bucket).send().await
-                    });
+                    }, "init: create bucket");
                     if let Err(err) = create_result {
                         let err = err.downcast::<SdkError<aws_sdk_s3::operation::create_bucket::CreateBucketError>>()?;
                         let x = err.into_service_error();
@@ -275,7 +275,7 @@ impl Transport for TransportS3 {
                 .key(label.clone())
                 .body(body.clone().into())
                 .send().await
-        })
+        }, "put object")
     }
 
     async fn upload(&self, path: &Path, name: &str) -> Result<()> {
@@ -288,7 +288,7 @@ impl Transport for TransportS3 {
                 .key(label.clone())
                 .body(ByteStream::from_path(path).await?)
                 .send().await
-        })
+        }, "upload: put object")
     }
 
     async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
@@ -317,7 +317,7 @@ impl Transport for TransportS3 {
                 Err(err) if is_not_found(&err) => Ok(None),
                 Err(err) => Err(err)
             }
-        })
+        }, "get object")
     }
     async fn exists(&self, name: &str) -> Result<bool> {
         let label = self.normalize(name)?;
@@ -342,7 +342,7 @@ impl Transport for TransportS3 {
                 Err(err) if is_not_found(&err) => Ok(false),
                 Err(err) => Err(err)
             }
-        })
+        }, "head object")
     }
 
     /// read blob into stream
@@ -383,7 +383,8 @@ impl Transport for TransportS3 {
                 .bucket(&self.parameters.s3_bucket)
                 .key(label.clone())
                 .send().await
-        })
+        }, "delete object")
+
     }
 
     fn read_only(&self) -> bool {
@@ -574,16 +575,16 @@ mod verifier {
 
 
 macro_rules! retry {
-    (ignore_result, $connection_attempts: expr, $body: expr) => {
+    (ignore_result, $connection_attempts: expr, $body: expr, $context: expr) => {
         {
-            match retry!($connection_attempts, $body) {
+            match retry!($connection_attempts, $body, $context) {
                 Ok(_) => Ok(()),
                 Err(err) => Err(err)
             }
         }
     };
 
-    ($connection_attempts: expr, $body: expr) => {
+    ($connection_attempts: expr, $body: expr, $context: expr) => {
         {
             let mut backoff = MIN_BACKOFF;
             let mut retries = 0;
@@ -611,13 +612,13 @@ macro_rules! retry {
                     },
                     // always retry on these error types, they are usually networking or IO errors
                     Err(SdkError::TimeoutError(timeout)) => {
-                        warn!("Connection timeout ({timeout:?}) for S3 transport, retrying...");
+                        warn!("Connection timeout ({:?}) for S3 transport during ({:?}), retrying...", timeout, $context);
                     }
                     Err(SdkError::DispatchFailure(failure)) => {
-                        warn!("Dispach failure ({failure:?}) for S3 transport, retrying...");
+                        warn!("Dispach failure ({:?}) for S3 transport during ({:?}), retrying...", failure, $context);
                     }
                     Err(SdkError::ResponseError(_)) => {
-                        warn!("Corrupted response from S3 transport, retrying...");
+                        warn!("Corrupted response from S3 transport during ({:?}), retrying...", $context);
                     }
                     // Server side error, genuinely unclear when we should retry on this one, could be lots of things
                     // Err(SdkError::ServiceError(error)) =>
