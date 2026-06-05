@@ -410,7 +410,7 @@ impl Transport for TransportS3 {
 //                 yield chunk['Key']
 
 
-mod verifier {
+pub mod verifier {
     use legacy_rustls::client::{ServerCertVerified, ServerCertVerifier};
 
     /// A dummy certificate verifier that just accepts anything
