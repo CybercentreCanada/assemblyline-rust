@@ -9,7 +9,7 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
-use log::warn;
+use log::{warn, debug};
 
 use super::Transport;
 
@@ -193,6 +193,10 @@ impl TransportS3 {
         } else {
             aws_sdk_s3::config::Builder::from(&sdk_config).build()
         };
+
+        // As a diagnostic measure, log the final S3 client configuration to troubleshoot potential misconfigurations.
+        debug!("S3 Client Config: {:?}", s3_config);
+
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
         // make sure the bucket exists
