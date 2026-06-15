@@ -1,4 +1,6 @@
 
+#[cfg(test)]
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use assemblyline_markings::classification::ClassificationParser;
@@ -12,7 +14,8 @@ use serde_json::json;
 
 use crate::json::{AllFields, JsonFilter};
 use crate::lucene::Query;
-use crate::tables::RelationRow;
+use crate::tables::{Database, RelationRow};
+use crate::tidb::TiDb;
 use crate::yugabyte::Yugabyte;
 
 fn init() {
@@ -332,11 +335,19 @@ fn test_subobject_filters() {
     assert!(AllFields::test(&fltr, &document).unwrap());
 }
 
-#[allow(clippy::bool_assert_comparison)]
-#[tokio::test]
-async fn insert_submission() {
-    init();
+#[cfg(test)]
+struct Sample {
+    submission: datastore::Submission,
+    results: HashMap<String, datastore::Result>,
+    error: datastore::Error,
+    errors: HashMap<String, datastore::Error>,
+    files: Vec<datastore::File>,
+    fileinfo: HashMap<String, datastore::File>,
+    tags: FlatTags,
+}
 
+#[cfg(test)]
+fn example_submission() -> Sample {
     let files: Vec<datastore::File> = vec![
         rand::random(),
         rand::random(),
@@ -344,6 +355,7 @@ async fn insert_submission() {
     ];
 
     let mut submission: datastore::Submission = rand::random();
+    submission.params.deep_scan = false;
     submission.files[0].sha256 = files[0].sha256.clone();
     submission.metadata.insert("collection".to_string(), "B".into());
 
@@ -388,59 +400,74 @@ async fn insert_submission() {
         allow_dynamic_recursion: Default::default(),
     });
 
-    let mut db = Yugabyte::development().await.unwrap();
     let results = [(result.build_key(None).unwrap(), result)].into_iter().collect();
     let errors = [(error.build_key(None, None).unwrap(), error.clone())].into_iter().collect();
     let fileinfo = files.iter().map(|file|(file.sha256.to_string(), file.clone())).collect();
-    db.insert_submission(&submission, &results, &errors, &fileinfo).await.unwrap();
-    assert!(db.submission_exists(submission.sid).await.unwrap());
+    Sample{submission, results, error, errors, fileinfo, files, tags}
+}
 
-    {
-        let loaded = db.fetch_submission(submission.sid).await.unwrap().unwrap();
-        assert_eq!(submission, loaded);
-    }
 
-    {
-        let loaded = db.fetch_submission_errors(submission.sid).await.unwrap();
-        assert_eq!(vec![error], loaded);
-    }
+#[allow(clippy::bool_assert_comparison)]
+#[tokio::test]
+async fn insert_submission() {
+    init();
 
-    {
-        let loaded = db.fetch_submission_files(submission.sid).await.unwrap();
-        assert_eq!(fileinfo, loaded);
-    }
+    let Sample{submission, results, error, errors, fileinfo, files, tags} = example_submission();
 
-    {
-        let loaded = db.fetch_submission_results(submission.sid).await.unwrap();
-        assert_eq!(results, loaded);
-    }
+    // let mut db = Yugabyte::development(true).await.unwrap();
+    let db = TiDb::development(true).await.unwrap();
+    crate::tables::init_database_tables(&Database::Ti(db), true).await.unwrap();
 
-    {
-        let loaded = db.fetch_submission_tags_merged(submission.sid).await.unwrap();
-        assert_eq!(tags, loaded);
-    }
+    todo!();
+    // db.insert_submission(&submission, &results, &errors, &fileinfo).await.unwrap();
+    // assert!(db.submission_exists(submission.sid).await.unwrap());
 
-    {
-        let loaded = db.fetch_submission_metadata(submission.sid).await.unwrap();
-        assert_eq!(submission.metadata, loaded.into_iter().map(|(k, v)|(k, v.into())).collect());
-    }
+    // {
+    //     let loaded = db.fetch_submission(submission.sid).await.unwrap().unwrap();
+    //     assert_eq!(submission, loaded);
+    // }
 
-    {
-        let loaded = db.fetch_submission_relations(submission.sid).await.unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(*loaded[0].parent, *files[0].sha256);
-        assert_eq!(*loaded[1].parent, *files[0].sha256);
-        if *loaded[0].child == *files[1].sha256 {
-            assert_eq!(loaded[0].supplementary, false);
-            assert_eq!(*loaded[1].child, *files[2].sha256);
-            assert_eq!(loaded[1].supplementary, true);
-        } else if *loaded[0].child == *files[2].sha256 {
-            assert_eq!(loaded[0].supplementary, true);
-            assert_eq!(*loaded[1].child, *files[1].sha256);
-            assert_eq!(loaded[1].supplementary, false);
-        } else {
-            panic!();
-        }
-    }
+    // {
+    //     let loaded = db.fetch_submission_errors(submission.sid).await.unwrap();
+    //     assert_eq!(vec![error], loaded);
+    // }
+
+    // {
+    //     let loaded = db.fetch_submission_files(submission.sid).await.unwrap();
+    //     assert_eq!(fileinfo, loaded);
+    // }
+
+    // {
+    //     let loaded = db.fetch_submission_results(submission.sid).await.unwrap();
+    //     assert_eq!(results, loaded);
+    // }
+
+    // {
+    //     let loaded = db.fetch_submission_tags_merged(submission.sid).await.unwrap();
+    //     assert_eq!(tags, loaded);
+    // }
+
+    // {
+    //     let loaded = db.fetch_submission_metadata(submission.sid).await.unwrap();
+    //     assert_eq!(submission.metadata, loaded.into_iter().map(|(k, v)|(k, v.into())).collect());
+    // }
+
+    // {
+    //     let loaded = db.fetch_submission_relations(submission.sid).await.unwrap();
+    //     assert_eq!(loaded.len(), 2);
+    //     assert_eq!(*loaded[0].parent, *files[0].sha256);
+    //     assert_eq!(*loaded[1].parent, *files[0].sha256);
+    //     if *loaded[0].child == *files[1].sha256 {
+    //         assert_eq!(loaded[0].supplementary, false);
+    //         assert_eq!(*loaded[1].child, *files[2].sha256);
+    //         assert_eq!(loaded[1].supplementary, true);
+    //     } else if *loaded[0].child == *files[2].sha256 {
+    //         assert_eq!(loaded[0].supplementary, true);
+    //         assert_eq!(*loaded[1].child, *files[1].sha256);
+    //         assert_eq!(loaded[1].supplementary, false);
+    //     } else {
+    //         panic!();
+    //     }
+    // }
 
 }

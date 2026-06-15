@@ -9,5 +9,8 @@ pub mod tables;
 pub mod lucene;
 pub mod json;
 pub mod yugabyte;
+pub mod search;
+pub mod tidb;
+
 #[cfg(test)]
 mod tests;

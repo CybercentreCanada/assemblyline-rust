@@ -2,11 +2,12 @@
 
 
 use std::fmt::Display;
+use std::ops::Sub;
 use std::str::FromStr;
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Months, NaiveDate, NaiveDateTime, NaiveTime, Utc, Datelike, Timelike, SubsecRound};
-use nom::{IResult, Parser};
+use nom::{IResult, Offset, Parser};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while, escaped_transform, is_not, take_while1, tag_no_case, is_a};
 use nom::character::complete::{alphanumeric1, multispace0, multispace1, one_of};
@@ -15,27 +16,44 @@ use nom::error::ParseError;
 use nom::multi::{count, many_till, many1, separated_list1};
 use nom::number::complete::double;
 use nom::sequence::{delimited, pair, terminated};
+use nom_locate::LocatedSpan;
 
 // MARK: AST
+
 
 /// Root of the AST for lucene queries we have parsed.
 /// The parsing done in this module is just for syntax and doesn't validate against
 /// any particular set of target fields.
 #[derive(Debug, Clone)]
 pub enum Query {
-    And(Vec<Query>),
-    Or(Vec<Query>),
-    Not(Box<Query>),
-    MatchAny(StringQuery),
-    RegexAny(regex::Regex),
-    MatchField(Vec<String>, FieldQuery),
-    FieldExists(Vec<String>),
+    And(Vec<Query>, Location),
+    Or(Vec<Query>, Location),
+    Not(Box<Query>, Location),
+    MatchAny(StringQuery, Location),
+    RegexAny(regex::Regex, Location),
+    WildcardAny(WildcardQuery, Location),
+    MatchField(Vec<String>, FieldQuery, Location),
+    FieldExists(Vec<String>, Location),
 }
 
 impl Query {
+    pub fn location(&self) -> Location {
+        match self {
+            Query::And(_, location) => location.clone(),
+            Query::Or(_, location) => location.clone(),
+            Query::Not(_, location) => location.clone(),
+            Query::MatchAny(_, location) => location.clone(),
+            Query::RegexAny(_, location) => location.clone(),
+            Query::WildcardAny(_, location) => location.clone(),
+            Query::MatchField(_, _, location) => location.clone(),
+            Query::FieldExists(_, location) => location.clone(),
+        }
+    }
+
     pub fn parse(query: &str) -> Result<Query, ParsingError> {
         // jsut make sure we can parse the query at all
-        let (remain, query) = match expression(query) {
+        let span = Span::new(query);
+        let (remain, query) = match expression(span) {
             Ok(row) => row,
             Err(err) => return Err(ParsingError::CouldNotParseSubmissionFilter(err.to_string()))
         };
@@ -48,19 +66,19 @@ impl Query {
     pub fn list_fields(&self) -> Vec<Vec<String>> {
         let mut fields = vec![];
         match self {
-            Query::And(parts) => for part in parts {
+            Query::And(parts, _) => for part in parts {
                 fields.extend(part.list_fields().into_iter());
             },
-            Query::Or(parts) => for part in parts {
+            Query::Or(parts, _) => for part in parts {
                 fields.extend(part.list_fields().into_iter());
             },
-            Query::Not(part) => fields.extend(part.list_fields()),
-            Query::MatchAny(_) | Query::RegexAny(_) => fields.push(vec![]),
-            Query::FieldExists(field) => {
+            Query::Not(part, _) => fields.extend(part.list_fields()),
+            Query::MatchAny(..) | Query::RegexAny(..) | Query::WildcardAny(..) => fields.push(vec![]),
+            Query::FieldExists(field, ..) => {
                 fields.push(field.clone());
             },
-            Query::MatchField(field, query) => {
-                if let FieldQuery::Nested(query) = query {
+            Query::MatchField(field, query, ..) => {
+                if let FieldQuery::Nested(query, ..) = query {
                     for part in query.list_fields() {
                         let mut field = field.clone();
                         field.extend(part);
@@ -79,14 +97,15 @@ impl Query {
 
 #[derive(Debug, Clone)]
 pub enum FieldQuery {
-    Regex(regex::Regex),
-    Number(NumberQuery),
-    Match(StringQuery),
-    Range(RangeQuery),
-    Or(Vec<FieldQuery>),
-    And(Vec<FieldQuery>),
-    Not(Box<FieldQuery>),
-    Nested(Box<Query>),
+    Regex(regex::Regex, Location),
+    Number(NumberQuery, Location),
+    Match(StringQuery, Location),
+    Wildcard(WildcardQuery, Location),
+    Range(RangeQuery, Location),
+    Or(Vec<FieldQuery>, Location),
+    And(Vec<FieldQuery>, Location),
+    Not(Box<FieldQuery>, Location),
+    Nested(Box<Query>, Location),
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +146,67 @@ pub struct NumberQuery {
     pub operator: Option<PrefixOperator>,
     pub value: f64,
 }
+
+#[derive(Debug, Clone)]
+pub struct WildcardQuery {
+    // pub operator: Option<PrefixOperator>,
+    pub query: Vec<WildcardToken>,
+}
+
+impl WildcardQuery {
+    pub fn to_regex(&self) -> Result<regex::Regex, regex::Error> {
+        let mut buffer = String::new();
+        for token in &self.query {
+            match token {
+                WildcardToken::Single => buffer += ".",
+                WildcardToken::Multiple => buffer += ".*",
+                WildcardToken::Literal(value) => buffer += &regex::escape(value),
+            }
+        }
+        regex::Regex::new(&buffer)
+    }
+
+    pub fn to_sql(&self) -> String {
+        let mut buffer = String::new();
+        for token in &self.query {
+            match token {
+                WildcardToken::Single => buffer += "_",
+                WildcardToken::Multiple => buffer += "%",
+                WildcardToken::Literal(chars) => {
+                    for char in chars.chars() {
+                        match char {
+                            '_' => {
+                                buffer.push('\\');
+                                buffer.push('_');
+                            }
+                            '%' => {
+                                buffer.push('\\');
+                                buffer.push('%');
+
+                            }
+                            '\\' => {
+                                buffer.push('\\');
+                                buffer.push('\\');
+                            }
+                            other => {
+                                buffer.push(other);
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        buffer
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum WildcardToken {
+    Single,
+    Multiple,
+    Literal(String)
+}
+
 
 #[derive(Debug, Clone, Copy)]
 pub enum RangeBound {
@@ -303,8 +383,8 @@ impl std::error::Error for ParsingError {}
 
 // MARK: Parser
 
-
-pub fn expression(input: &str) -> IResult<&str, Query> {
+type Span<'a> = LocatedSpan<&'a str>;
+fn expression(input: Span) -> IResult<Span, Query> {
     // println!("expression: {input}");
     // terminated(or_expr, eof).parse(input)
     or_expr(input)
@@ -316,38 +396,38 @@ pub fn expression(input: &str) -> IResult<&str, Query> {
 // {
 //     delimited(multispace0, inner, multispace0)
 // }
-pub fn ws<'a, O, E: ParseError<&'a str>, F>(
+fn ws<'a, O, E: ParseError<Span<'a>>, F>(
     inner: F,
-) -> impl Parser<&'a str, Output = O, Error = E>
+) -> impl Parser<Span<'a>, Output = O, Error = E>
 where
-    F: Parser<&'a str, Output = O, Error = E>,
+    F: Parser<Span<'a>, Output = O, Error = E>,
 {
     delimited(multispace0, inner, multispace0)
 }
 
-fn or_expr(input: &str) -> IResult<&str, Query> {
+fn or_expr(input: Span) -> IResult<Span, Query> {
     let (remain, mut sub_queries) = separated_list1(or_operator, and_expr).parse(input)?;
     if sub_queries.len() == 1 {
         Ok((remain, sub_queries.pop().unwrap()))
     } else {
-        Ok((remain, Query::Or(sub_queries)))
+        Ok((remain, Query::Or(sub_queries, Location::used(input, remain))))
     }
 }
-fn or_operator(input: &str) -> IResult<&str, ()> {
+fn or_operator(input: Span) -> IResult<Span, ()> {
     let (remain, _) = ws(alt((tag("OR"), tag("||")))).parse(input)?;
     return Ok((remain, ()))
 }
 
 // and_expr: not_expr ("AND" not_expr)*
-fn and_expr(input: &str) -> IResult<&str, Query> {
+fn and_expr(input: Span) -> IResult<Span, Query> {
     let (remain, mut sub_queries) = separated_list1(and_operator, not_expr).parse(input)?;
     if sub_queries.len() == 1 {
         Ok((remain, sub_queries.pop().unwrap()))
     } else {
-        Ok((remain, Query::And(sub_queries)))
+        Ok((remain, Query::And(sub_queries, Location::used(input, remain))))
     }
 }
-fn and_operator(input: &str) -> IResult<&str, ()> {
+fn and_operator(input: Span) -> IResult<Span, ()> {
     let (remain, _) = ws(alt((tag("AND"), tag("&&")))).parse(input)?;
     return Ok((remain, ()))
 }
@@ -355,15 +435,15 @@ fn and_operator(input: &str) -> IResult<&str, ()> {
 
 // not_expr: NOT_OPERATOR? atom
 // NOT_OPERATOR: "NOT"
-fn not_expr(input: &str) -> IResult<&str, Query> {
+fn not_expr(input: Span) -> IResult<Span, Query> {
     let (remain, (not_operator, sub_query)) = (opt(not_operator), atom).parse(input)?;
     if not_operator.is_some() {
-        Ok((remain, Query::Not(Box::new(sub_query))))
+        Ok((remain, Query::Not(Box::new(sub_query), Location::used(input, remain))))
     } else {
         Ok((remain, sub_query))
     }
 }
-fn not_operator(input: &str) -> IResult<&str, ()> {
+fn not_operator(input: Span) -> IResult<Span, ()> {
     let (remain, _) = ws(alt((tag("NOT"), tag("!")))).parse(input)?;
     return Ok((remain, ()))
 }
@@ -372,7 +452,7 @@ fn not_operator(input: &str) -> IResult<&str, ()> {
 //     | exists
 //     | field
 //     | term
-fn atom(input: &str) -> IResult<&str, Query> {
+fn atom(input: Span) -> IResult<Span, Query> {
     // println!("atom: {input}");
     alt((
         delimited(ws(tag("(")), expression, ws(tag(")"))),
@@ -382,37 +462,38 @@ fn atom(input: &str) -> IResult<&str, Query> {
     )).parse(input)
 }
 
+
 // term: PREFIX_OPERATOR? (phrase_term | SIMPLE_TERM)
-fn term(input: &str) -> IResult<&str, Query> {
+fn term(input: Span) -> IResult<Span, Query> {
     // println!("term: {input}");
     alt((
-        map(string_query, Query::MatchAny),
-        map(pattern_term, Query::RegexAny),
+        map(string_query, |(q, l)|Query::MatchAny(q, l)),
+        map(pattern_term, |(q, l)| Query::WildcardAny(WildcardQuery { query: q }, l)),
     )).parse(input)
 }
 
-fn number_term(input: &str) -> IResult<&str, FieldQuery> {
+fn number_term(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, (operator, value)) = (opt(ws(prefix_operator)), double).parse(input)?;
-    Ok((remain, FieldQuery::Number(NumberQuery { operator, value })))
+    Ok((remain, FieldQuery::Number(NumberQuery { operator, value }, Location::used(input, remain))))
 }
 
 // field_term: PREFIX_OPERATOR? (phrase_term | SIMPLE_TERM)
-fn field_term(input: &str) -> IResult<&str, FieldQuery> {
+fn field_term(input: Span) -> IResult<Span, FieldQuery> {
     // println!("field_term: {input}");
     alt((
-        map(string_query, FieldQuery::Match),
-        map(pattern_term, FieldQuery::Regex),
+        map(string_query, |(q, l)|FieldQuery::Match(q, l)),
+        map(pattern_term, |(q, l)|FieldQuery::Wildcard(WildcardQuery { query: q }, l)),
     )).parse(input)
 }
-fn string_query(input: &str) -> IResult<&str, StringQuery> {
+fn string_query(input: Span) -> IResult<Span, (StringQuery, Location)> {
     // println!("string_query: {input}");
     let (remain, (operator, value)) = (opt(ws(prefix_operator)), alt((phrase_term, simple_term))).parse(input)?;
-    Ok((remain, StringQuery { operator, value }))
+    Ok((remain, (StringQuery { operator, value }, Location::used(input, remain))))
 }
 
 // PREFIX_OPERATOR: "-" | "+" | ">=" | "<=" | ">" | "<"
-fn prefix_operator(input: &str) -> IResult<&str, PrefixOperator> {
-    map_res(alt((tag("-"), tag("+"), tag(">="), tag("<="), tag(">"), tag("<"))), PrefixOperator::from_str).parse(input)
+fn prefix_operator(input: Span) -> IResult<Span, PrefixOperator> {
+    map_res(alt((tag("-"), tag("+"), tag(">="), tag("<="), tag(">"), tag("<"))), |r: Span| PrefixOperator::from_str(*r)).parse(input)
 }
 
 // SIMPLE_TERM: ("\\+" | "\\-" | "\\&&" | "\\&" | "\\||" | "\\|" | "\\!" | "\\(" | "\\)" | "\\{"
@@ -422,7 +503,7 @@ fn prefix_operator(input: &str) -> IResult<&str, PrefixOperator> {
 fn is_special(value: char) -> bool {
     matches!(value, '_' | '-' | '.')
 }
-fn primitive_simple_term(input: &str) -> IResult<&str, String> {
+fn primitive_simple_term(input: Span) -> IResult<Span, String> {
     // println!("simple_term: {input}");
     map_res(escaped_transform(
         alt((alphanumeric1, take_while1(is_special))),
@@ -459,26 +540,26 @@ fn primitive_simple_term(input: &str) -> IResult<&str, String> {
     }).parse(input)
 }
 
-fn simple_term(input: &str) -> IResult<&str, String> {
+fn simple_term(input: Span) -> IResult<Span, String> {
     // println!("simple_term: {input}");
     terminated(primitive_simple_term, end_term).parse(input)
 }
 
-fn pattern_term(input: &str) -> IResult<&str, regex::Regex> {
-    map_res(many_till(
+fn pattern_term(input: Span) -> IResult<Span, (Vec<WildcardToken>, Location)> {
+    let (remain, out) = map_res(many_till(
         alt((
-            map(tag("*"), |_|{String::from(".*")}),
-            map(tag("?"), |_|{String::from(".")}),
-            map(primitive_simple_term, |row|{regex::escape(&row)}),
+            map(tag("*"), |_|{WildcardToken::Multiple}),
+            map(tag("?"), |_|{WildcardToken::Single}),
+            map(primitive_simple_term, |row|{WildcardToken::Literal(row)}),
         )),
         end_term
     ), |(parts, _)|{
-        let pattern = parts.join("");
-        regex::Regex::new(&pattern)
-    }).parse(input)
+        anyhow::Ok(parts)
+    }).parse(input)?;
+    Ok((remain, (out, Location::used(input, remain))))
 }
 
-fn end_term(input: &str) -> IResult<&str, ()> {
+fn end_term(input: Span) -> IResult<Span, ()> {
     alt((
         map(peek(tag(")")), |_| ()),
         map(peek(tag("}")), |_| ()),
@@ -488,40 +569,40 @@ fn end_term(input: &str) -> IResult<&str, ()> {
 }
 
 // phrase_term: ESCAPED_STRING
-fn phrase_term(input: &str) -> IResult<&str, String> {
+fn phrase_term(input: Span) -> IResult<Span, String> {
     quoted_string(input)
 }
 
 // field: FIELD_LABEL ":" field_value
-fn field(input: &str) -> IResult<&str, Query> {
+fn field(input: Span) -> IResult<Span, Query> {
     // println!("field: {input}");
     let (remain, (label, _, query)) = (field_label, ws(tag(":")), field_value).parse(input)?;
-    Ok((remain, Query::MatchField(label, query)))
+    Ok((remain, Query::MatchField(label, query, Location::used(input, remain))))
 }
 
 // exists: "_exists_" ":" FIELD_LABEL
-fn exists(input: &str) -> IResult<&str, Query> {
+fn exists(input: Span) -> IResult<Span, Query> {
     let (remain, (_, _, label)) = (ws(tag_no_case("_exists_")), ws(tag(":")), field_label).parse(input)?;
-    Ok((remain, Query::FieldExists(label)))
+    Ok((remain, Query::FieldExists(label, Location::used(input, remain))))
 }
 
 // FIELD_LABEL: CNAME ["." CNAME]*
-fn field_label(input: &str) -> IResult<&str, Vec<String>> {
+fn field_label(input: Span) -> IResult<Span, Vec<String>> {
     separated_list1(tag("."), cname).parse(input)
 }
 
-fn cname(input: &str) -> IResult<&str, String> {
+fn cname(input: Span) -> IResult<Span, String> {
     // println!("cname: {input}");
     let (remain, (a, b)) = (take_while1(|item: char| item.is_alphabetic() || item == '_'), take_while(|item: char| item.is_alphanumeric() || item == '_')).parse(input)?;
     // println!("cname X: {a} {b}");
-    Ok((remain, a.to_owned() + b))
+    Ok((remain, a.to_string() + *b))
 }
 
 // field_value: range
 //            | field_term
 //            | REGEX_TERM
 //            | "(" field_expression ")"
-fn field_value(input: &str) -> IResult<&str, FieldQuery> {
+fn field_value(input: Span) -> IResult<Span, FieldQuery> {
     // println!("field_value: {input}");
     alt((
         range,
@@ -533,17 +614,17 @@ fn field_value(input: &str) -> IResult<&str, FieldQuery> {
     )).parse(input)
 }
 
-fn nested(input: &str) -> IResult<&str, FieldQuery> {
+fn nested(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, expression) = nested_inner(input)?;
-    Ok((remain, FieldQuery::Nested(Box::new(expression))))
+    Ok((remain, FieldQuery::Nested(Box::new(expression), Location::used(input, remain))))
 }
 
-fn nested_inner(input: &str) -> IResult<&str, Query> {
+fn nested_inner(input: Span) -> IResult<Span, Query> {
     delimited(ws(tag("{")), expression, ws(tag("}"))).parse(input)
 }
 
 // REGEX_TERM: /\/([^\/]|(\\\/))*\//
-fn regex_term(input: &str) -> IResult<&str, FieldQuery> {
+fn regex_term(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, regex) = map_res(delimited(tag("/"), escaped_transform(
         is_not("/"),
         '\\',
@@ -551,80 +632,80 @@ fn regex_term(input: &str) -> IResult<&str, FieldQuery> {
             value("/", tag("/")),
         ))
     ), tag("/")), |pattern| regex::Regex::new(&pattern)).parse(input)?;
-    Ok((remain, FieldQuery::Regex(regex)))
+    Ok((remain, FieldQuery::Regex(regex, Location::used(input, remain))))
 }
 
 // range: RANGE_START first_range_term "TO" second_range_term RANGE_END
 // RANGE_START: "[" | "{"
 // RANGE_END: "]" | "}"
-fn range(input: &str) -> IResult<&str, FieldQuery> {
+fn range(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, (start_bound, start, _, end, end_bound)) = (range_start, first_range_term, ws(tag("TO")), second_range_term, range_end).parse(input)?;
     Ok((remain, FieldQuery::Range(RangeQuery{
         start,
         end,
         start_bound,
-        end_bound
-    })))
+        end_bound,
+    }, Location::used(input, remain))))
 }
-fn range_start(input: &str) -> IResult<&str, RangeBound> {
+fn range_start(input: Span) -> IResult<Span, RangeBound> {
     ws(alt((value(RangeBound::Exclusive, tag("{")), value(RangeBound::Inclusive, tag("["))))).parse(input)
 }
-fn range_end(input: &str) -> IResult<&str, RangeBound> {
+fn range_end(input: Span) -> IResult<Span, RangeBound> {
     ws(alt((value(RangeBound::Exclusive, tag("}")), value(RangeBound::Inclusive, tag("]"))))).parse(input)
 }
 
 // field_expression: field_or_expr
-fn field_expression(input: &str) -> IResult<&str, FieldQuery> {
+fn field_expression(input: Span) -> IResult<Span, FieldQuery> {
     field_or_expr(input)
 }
 // field_or_expr: field_and_expr ("OR" field_and_expr)*
-fn field_or_expr(input: &str) -> IResult<&str, FieldQuery> {
+fn field_or_expr(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, mut sub_queries) = separated_list1(or_operator, field_and_expr).parse(input)?;
     if sub_queries.len() == 1 {
         Ok((remain, sub_queries.pop().unwrap()))
     } else {
-        Ok((remain, FieldQuery::Or(sub_queries)))
+        Ok((remain, FieldQuery::Or(sub_queries, Location::used(input, remain))))
     }
 }
 // field_and_expr: field_not_expr ("AND" field_not_expr)*
-fn field_and_expr(input: &str) -> IResult<&str, FieldQuery> {
+fn field_and_expr(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, mut sub_queries) = separated_list1(and_operator, field_not_expr).parse(input)?;
     if sub_queries.len() == 1 {
         Ok((remain, sub_queries.pop().unwrap()))
     } else {
-        Ok((remain, FieldQuery::And(sub_queries)))
+        Ok((remain, FieldQuery::And(sub_queries, Location::used(input, remain))))
     }
 }
 // field_not_expr: NOT_OPERATOR? field_atom
-fn field_not_expr(input: &str) -> IResult<&str, FieldQuery> {
+fn field_not_expr(input: Span) -> IResult<Span, FieldQuery> {
     let (remain, (not_operator, sub_query)) = (opt(not_operator), field_atom).parse(input)?;
     if not_operator.is_some() {
-        Ok((remain, FieldQuery::Not(Box::new(sub_query))))
+        Ok((remain, FieldQuery::Not(Box::new(sub_query), Location::used(input, remain))))
     } else {
         Ok((remain, sub_query))
     }
 }
 // field_atom: field_term
 //           | "(" field_expression ")"
-fn field_atom(input: &str) -> IResult<&str, FieldQuery> {
+fn field_atom(input: Span) -> IResult<Span, FieldQuery> {
     alt((delimited(ws(tag("(")), field_expression, ws(tag(")"))), field_term)).parse(input)
 }
 
 // first_range_term: RANGE_WILD | DATE_EXPRESSION | QUOTED_RANGE | FIRST_RANGE
-fn first_range_term(input: &str) -> IResult<&str, RangeTerm> {
+fn first_range_term(input: Span) -> IResult<Span, RangeTerm> {
     alt((range_wild, range_date, range_number, quoted_range, first_range)).parse(input)
 }
 // second_range_term: RANGE_WILD | DATE_EXPRESSION QUOTED_RANGE | SECOND_RANGE
-fn second_range_term(input: &str) -> IResult<&str, RangeTerm> {
+fn second_range_term(input: Span) -> IResult<Span, RangeTerm> {
     alt((range_wild, range_date, range_number, quoted_range, second_range)).parse(input)
 }
 // QUOTED_RANGE: ESCAPED_STRING
-fn quoted_range(input: &str) -> IResult<&str, RangeTerm> {
+fn quoted_range(input: Span) -> IResult<Span, RangeTerm> {
     let (remain, string) = quoted_string.parse(input)?;
     Ok((remain, RangeTerm::Value(string)))
 }
 // FIRST_RANGE: /[^ ]+/
-fn first_range(input: &str) -> IResult<&str, RangeTerm> {
+fn first_range(input: Span) -> IResult<Span, RangeTerm> {
     let (remain, value) = escaped_transform(
         is_not(" "),
         '\\',
@@ -635,7 +716,7 @@ fn first_range(input: &str) -> IResult<&str, RangeTerm> {
     Ok((remain, RangeTerm::Value(value)))
 }
 // SECOND_RANGE: /[^\]\}]+/
-fn second_range(input: &str) -> IResult<&str, RangeTerm> {
+fn second_range(input: Span) -> IResult<Span, RangeTerm> {
     let (remain, value) = escaped_transform(
         is_not(" ]}"),
         '\\',
@@ -648,15 +729,15 @@ fn second_range(input: &str) -> IResult<&str, RangeTerm> {
     Ok((remain, RangeTerm::Value(value)))
 }
 // RANGE_WILD: "*"
-fn range_wild(input: &str) -> IResult<&str, RangeTerm> {
+fn range_wild(input: Span) -> IResult<Span, RangeTerm> {
     value(RangeTerm::Wildcard, ws(tag("*"))).parse(input)
 }
-fn range_number(input: &str) -> IResult<&str, RangeTerm> {
+fn range_number(input: Span) -> IResult<Span, RangeTerm> {
     let (remain, value) = nom::number::complete::double.parse(input)?;
     Ok((remain, RangeTerm::Numeric(value)))
 }
 
-fn quoted_string(input: &str) -> IResult<&str, String> {
+fn quoted_string(input: Span) -> IResult<Span, String> {
     delimited(tag("\""), escaped_transform(
         is_not("\""),
         '\\',
@@ -666,23 +747,23 @@ fn quoted_string(input: &str) -> IResult<&str, String> {
     ), tag("\"")).parse(input)
 }
 
-fn range_date(input: &str) -> IResult<&str, RangeTerm> {
+fn range_date(input: Span) -> IResult<Span, RangeTerm> {
     let (remain, value) = date_expression.parse(input)?;
     Ok((remain, RangeTerm::Date(value)))
 }
 
-fn date_expression(input: &str) -> IResult<&str, DateExpression> {
+fn date_expression(input: Span) -> IResult<Span, DateExpression> {
     alt((relative_date_expression, fixed_date_expression)).parse(input)
 }
 
 // date_expression: "now" [offset] [truncate]
-fn relative_date_expression(input: &str) -> IResult<&str, DateExpression> {
+fn relative_date_expression(input: Span) -> IResult<Span, DateExpression> {
     let (remain, (_, offset, truncation)) = (tag_no_case("now"), opt(de_offset), opt(de_truncate)).parse(input)?;
     Ok((remain, DateExpression::Relative{changes: offset.unwrap_or_default(), truncation}))
 }
 
 // date_expression: date ["T" time] [timezone] [offset] [truncate]
-fn fixed_date_expression(input: &str) -> IResult<&str, DateExpression> {
+fn fixed_date_expression(input: Span) -> IResult<Span, DateExpression> {
     let (remain, (date, time, timezone, changes)) = (de_date, opt((tag("T"), de_time)), opt(de_timezone), opt((ws(tag("||")), opt(de_offset), opt(de_truncate)))).parse(input)?;
     // merge date and time
     let mut date: NaiveDateTime = match time {
@@ -713,12 +794,12 @@ fn fixed_date_expression(input: &str) -> IResult<&str, DateExpression> {
 }
 
 // date: yyyymmdd | yyyyddd | yyyy-ddd | yyyy-mm[-dd] | yyyy-"W"ww[-d] | yyyy"W"ww[-d]
-fn de_date(input: &str) -> IResult<&str, NaiveDate> {
+fn de_date(input: Span) -> IResult<Span, NaiveDate> {
     alt((de_date_undelimited, de_date_ordinal, de_date_delimited, de_date_week)).parse(input)
 }
 
 // yyyymmdd
-fn de_date_undelimited(input: &str) -> IResult<&str, NaiveDate> {
+fn de_date_undelimited(input: Span) -> IResult<Span, NaiveDate> {
     map_opt((
         count(one_of("0123456789"), 4),
         count(one_of("0123456789"), 2),
@@ -732,7 +813,7 @@ fn de_date_undelimited(input: &str) -> IResult<&str, NaiveDate> {
     // date.map_err(|_| ParsingError::invalid_date(input))
 }
 // yyyyddd | yyyy-ddd
-fn de_date_ordinal(input: &str) -> IResult<&str, NaiveDate> {
+fn de_date_ordinal(input: Span) -> IResult<Span, NaiveDate> {
     map_res((
         count(one_of("0123456789"), 4),
         opt(tag("-")),
@@ -744,7 +825,7 @@ fn de_date_ordinal(input: &str) -> IResult<&str, NaiveDate> {
     }).parse(input)
 }
 // yyyy-mm[-dd]
-fn de_date_delimited(input: &str) -> IResult<&str, NaiveDate> {
+fn de_date_delimited(input: Span) -> IResult<Span, NaiveDate> {
     map_res((
         count(one_of("0123456789"), 4),
         tag("-"),
@@ -761,7 +842,7 @@ fn de_date_delimited(input: &str) -> IResult<&str, NaiveDate> {
     }).parse(input)
 }
 // yyyy-"W"ww[-d] | yyyy"W"ww[-d]
-fn de_date_week(input: &str) -> IResult<&str, NaiveDate> {
+fn de_date_week(input: Span) -> IResult<Span, NaiveDate> {
     map_res((
         count(one_of("0123456789"), 4),
         opt(tag("-")),
@@ -789,7 +870,7 @@ fn de_date_week(input: &str) -> IResult<&str, NaiveDate> {
 }
 
 // time: hh[:mm[:ss[.sss]]] | hh[mm[ss[.sss]]]
-fn de_time(input: &str) -> IResult<&str, NaiveTime> {
+fn de_time(input: Span) -> IResult<Span, NaiveTime> {
     let (remain, time) = map_res((
         sixty,
         opt((
@@ -819,19 +900,19 @@ fn de_time(input: &str) -> IResult<&str, NaiveTime> {
                 }
             }
         }
-        NaiveTime::from_hms_nano_opt(hours as u32, min, sec, nano).ok_or(ParsingError::InvalidTime(input.to_owned()))
+        NaiveTime::from_hms_nano_opt(hours as u32, min, sec, nano).ok_or(ParsingError::InvalidTime(input.to_string()))
     }).parse(input)?;
     return Ok((remain, time))
 }
 
-fn sixty(input: &str) -> IResult<&str, i64> {
+fn sixty(input: Span) -> IResult<Span, i64> {
     map_res((one_of("012345"), one_of("0123456789")),
     |(a, b)| {
         String::from_iter([a, b]).parse::<i64>()
     }).parse(input)
 }
 
-fn two_digit(input: &str) -> IResult<&str, i64> {
+fn two_digit(input: Span) -> IResult<Span, i64> {
     map_res((one_of("0123456789"), one_of("0123456789")),
     |(a, b)| {
         String::from_iter([a, b]).parse::<i64>()
@@ -839,7 +920,7 @@ fn two_digit(input: &str) -> IResult<&str, i64> {
 }
 
 // timezone: "Z" | (+|-) hh ([:mm] | [mm])
-fn de_timezone(input: &str) -> IResult<&str, f64> {
+fn de_timezone(input: Span) -> IResult<Span, f64> {
     alt((value(0.0, tag("Z")), map((
         alt((value(1.0, tag("+")), value(-1.0, tag("-")))),
         two_digit, opt(pair(opt(tag(":")), sixty))
@@ -854,7 +935,7 @@ fn de_timezone(input: &str) -> IResult<&str, f64> {
 }
 
 // offset: (+|-) number((year|y)|(month)|(day|d)|(hour|h)|(minute|m)|(second|s)) number
-fn de_offset(input: &str) -> IResult<&str, Vec<(i64, DateUnit)>> {
+fn de_offset(input: Span) -> IResult<Span, Vec<(i64, DateUnit)>> {
     let (remain, changes) = many1((
         ws(alt((value(1, tag("+")), value(-1, tag("-"))))),
         ws(take_while1(|x: char| x.is_ascii_digit())),
@@ -872,12 +953,12 @@ fn de_offset(input: &str) -> IResult<&str, Vec<(i64, DateUnit)>> {
 }
 
 // round: "/"
-fn de_truncate(input: &str) -> IResult<&str, DateUnit> {
+fn de_truncate(input: Span) -> IResult<Span, DateUnit> {
     let (remain, (_, unit)) = pair(ws(tag("/")), date_unit).parse(input)?;
     Ok((remain, unit))
 }
 
-fn date_unit(input: &str) -> IResult<&str, DateUnit> {
+fn date_unit(input: Span) -> IResult<Span, DateUnit> {
     alt((
         value(DateUnit::Year, tag_no_case("years")),
         value(DateUnit::Year, tag_no_case("year")),
@@ -903,3 +984,41 @@ fn date_unit(input: &str) -> IResult<&str, DateUnit> {
     )).parse(input)
 }
 
+
+#[derive(Debug, Clone)]
+pub struct Location {
+    pub offset: usize,
+    pub length: usize,
+}
+
+impl Location {
+    pub fn used(original: Span, remaining: Span) -> Self {
+        Self {
+            offset: original.location_offset(),
+            length: original.len().saturating_sub(remaining.len())
+        }
+    }
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}:{}", self.offset, self.length))
+    }
+}
+
+// impl From<Span<'_>> for Location {
+//     fn from(value: Span) -> Self {
+//         Location { offset: value.location_offset(), length: value.len() }
+//     }
+// }
+
+// impl Sub<Span<'_>> for Location {
+//     type Output = Self;
+
+//     fn sub(self, rhs: Span) -> Self::Output {
+//         Self {
+//             offset: self.offset,
+//             length: self.length.saturating_sub(rhs.len())
+//         }
+//     }
+// }

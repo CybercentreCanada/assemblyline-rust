@@ -1,7 +1,10 @@
 #![allow(clippy::collapsible_if)]
 
 mod yugabyte;
+mod tidb;
 mod tables;
+mod lucene;
+mod search;
 use clap::{Parser, Subcommand};
 
 /// Commands for managing relational index tables in assemblyline
@@ -27,9 +30,10 @@ async fn main() {
 
     match args.command {
         Commands::Init { wipe } => {
-            tables::init_database_tables(yugabyte::Yugabyte::development().await.unwrap(), wipe).await.unwrap();
+            // let client = yugabyte::Yugabyte::development(false).await.unwrap();
+            let client = tidb::TiDb::development(false).await.unwrap();
+            tables::init_database_tables(&tables::Database::Ti(client), wipe).await.unwrap();
         },
     }
-
 
 }

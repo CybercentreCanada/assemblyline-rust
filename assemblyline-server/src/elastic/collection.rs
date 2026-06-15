@@ -559,19 +559,38 @@ impl<T: CollectionType> Collection<T> {
 
             // fetch all the documents
             let response = self.make_request_json(&Request::mget_doc(&self.database.host, &index)?, &body).await.context("mget request")?;
+            // let response = response.text().await?;
+            // if index.contains("error") {
+            //     // let response = response.text().await?;
+            //     // println!("{response}");
+            //     let response: responses::Multiget<serde_json::Value, ()> = serde_json::from_str(&response).unwrap();
+            //     for row in response.docs {
+            //         println!("found: {}; {index} {}/{}", row.found, row._index, row._id);
+            //         match row._source {
+            //             Some(get) => {
+            //                 let x: assemblyline_models::datastore::Error = serde_json::from_value(get).unwrap();
+            //                 println!("{}", x.response.service_name);
+            //             },
+            //             None => todo!("empty"),
+            //         }
+            //     }
+            // }
+            // let response = self.make_request_json(&Request::mget_doc(&self.database.host, &index)?, &body).await.context("mget request")?;
             let response: responses::Multiget<RT, ()> = response.json().await?;
+            // let response: responses::Multiget<RT, ()> = serde_json::from_str(&response).unwrap();
 
             // track which ones we have found
             outstanding.clear();
             for row in response.docs {
                 // handle partial results for when the document isn't found at all
-                let row = match row {
-                    responses::MaybeGet::Get(get) => get,
-                    responses::MaybeGet::Empty { _id, .. } => {
-                        outstanding.push(_id);
-                        continue
-                    },
-                };
+                // let row = match row {
+                //     responses::MaybeGet::Get(get) => get,
+                //     responses::MaybeGet::Empty(responses::Missing { _index, _id, found, .. }) => {
+                //         println!("empty row; found: {found}; {_index}/{_id}");
+                //         outstanding.push(_id);
+                //         continue
+                //     },
+                // };
 
                 // handle full results, which may or may not actually have what we requested in them
                 let _id = row._id.clone();
@@ -585,6 +604,7 @@ impl<T: CollectionType> Collection<T> {
                         error!("MGet returned multiple documents for id: {}", row._id);
                     }
                 } else {
+                    println!("row missing source");
                     outstanding.push(_id)
                 }
             }
@@ -765,7 +785,8 @@ impl<T: CollectionType> Collection<T> {
     /// :param as_obj: Return objects instead of dictionaries
     /// :param index_type: Type of indices to target
     /// :return: a generator of dictionary of field list results
-    pub async fn stream_search<RT: Debug + DeserializeOwned + Debug + Readable>(&'_ self,
+    pub async fn stream_search<RT: Debug + DeserializeOwned + Debug + Readable>(
+        &'_ self,
         query: &str,
         fl: String,
         mut filters: Vec<String>,

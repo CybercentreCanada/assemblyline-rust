@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::str::FromStr;
 
 use assemblyline_models::types::JsonMap;
@@ -8,45 +9,99 @@ use serde_json::Value;
 use strum::Display;
 
 
+// {
+//     "_index":"error_hot",
+//     "_id":"71b47b2d78856337545190c5e92bf2cdfd5f91209ef7d9732ca7026cc6ac662e.Characterize.v0.c0.e30",
+//     "_version":173,
+//     "_seq_no":84172168,
+//     "_primary_term":146,
+//     "found":true,
+//     "_source": {
+//     }
+// }
+
+
+
 #[derive(Debug, Deserialize)]
 pub struct Get<Source, Field> {
-    /// The name of the index the document belongs to. 
+    /// The name of the index the document belongs to.
     pub _index: String,
-    /// The unique identifier for the document. 
+    /// The unique identifier for the document.
     pub _id: String,
-    /// The document version. Incremented each time the document is updated. 
-    pub _version: u64,
-    /// The sequence number assigned to the document for the indexing operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control. 
+    /// The document version. Incremented each time the document is updated.
+    pub _version: i64,
+    /// The sequence number assigned to the document for the indexing operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control.
     pub _seq_no: i64,
-    /// The primary term assigned to the document for the indexing operation. See Optimistic concurrency control. 
+    /// The primary term assigned to the document for the indexing operation. See Optimistic concurrency control.
     pub _primary_term: i64,
-    /// Indicates whether the document exists: true or false. 
+    /// Indicates whether the document exists: true or false.
     pub found: bool,
-    /// The explicit routing, if set. 
+    /// The explicit routing, if set.
+    #[serde(default)]
     pub _routing: Option<String>,
-    /// If found is true, contains the document data formatted in JSON. Excluded if the _source parameter is set to false or the stored_fields parameter is set to true. 
+    /// If found is true, contains the document data formatted in JSON. Excluded if the _source parameter is set to false or the stored_fields parameter is set to true.
+    #[serde(default="default_source")]
     pub _source: Option<Source>,
-    /// If the stored_fields parameter is set to true and found is true, contains the document fields stored in the index. 
+    /// If the stored_fields parameter is set to true and found is true, contains the document fields stored in the index.
+    #[serde(default="default_source")]
     pub _fields: Option<Field>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum MaybeGet<Source, Field> {
-    Get(Get<Source, Field>),
-    Empty {
-        /// The name of the index the document belongs to. 
-        _index: String,
-        /// The unique identifier for the document. 
-        _id: String,
-        /// Indicates whether the document exists: true or false. 
-        found: bool,
-    }
+// #[derive(Deserialize)]
+// pub struct Missing<Source, Field> {
+//     /// The name of the index the document belongs to.
+//     pub _index: String,
+//     /// The unique identifier for the document.
+//     pub _id: String,
+//     /// Indicates whether the document exists: true or false.
+//     pub found: bool,
+
+//     #[serde(default)]
+//     _source: PhantomData<Source>,
+//     #[serde(default)]
+//     _field: PhantomData<Field>,
+// }
+
+// #[derive(Deserialize)]
+// #[serde(untagged)]
+// pub enum MaybeGet<Source, Field> {
+//     Get(Get<Source, Field>),
+//     Empty(Missing<Source, Field>)
+// }
+
+
+#[derive(Debug, Deserialize)]
+pub struct MultiGetRow<Source, Field> {
+    /// The name of the index the document belongs to.
+    pub _index: String,
+    /// The unique identifier for the document.
+    pub _id: String,
+    /// The document version. Incremented each time the document is updated.
+    #[serde(default)]
+    pub _version: Option<i64>,
+    /// The sequence number assigned to the document for the indexing operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control.
+    #[serde(default)]
+    pub _seq_no: Option<i64>,
+    /// The primary term assigned to the document for the indexing operation. See Optimistic concurrency control.
+    #[serde(default)]
+    pub _primary_term: Option<i64>,
+    /// Indicates whether the document exists: true or false.
+    pub found: bool,
+    /// The explicit routing, if set.
+    #[serde(default)]
+    pub _routing: Option<String>,
+    /// If found is true, contains the document data formatted in JSON. Excluded if the _source parameter is set to false or the stored_fields parameter is set to true.
+    #[serde(default="default_source")]
+    pub _source: Option<Source>,
+    /// If the stored_fields parameter is set to true and found is true, contains the document fields stored in the index.
+    #[serde(default="default_source")]
+    pub _fields: Option<Field>,
 }
+
 
 #[derive(Deserialize)]
 pub struct Multiget<Source, Field> {
-    pub docs: Vec<MaybeGet<Source, Field>>
+    pub docs: Vec<MultiGetRow<Source, Field>>
 }
 
 #[derive(Deserialize)]
@@ -69,21 +124,21 @@ pub struct Command {
 
 #[derive(Deserialize)]
 pub struct Index {
-    /// Provides information about the replication process of the index operation. 
+    /// Provides information about the replication process of the index operation.
     pub _shards: Shards,
-    /// The name of the index the document was added to. 
+    /// The name of the index the document was added to.
     pub _index: String,
-    /// The document type. Elasticsearch indices now support a single document type, _doc. 
+    /// The document type. Elasticsearch indices now support a single document type, _doc.
     pub _type: Option<String>,
-    /// The unique identifier for the added document. 
+    /// The unique identifier for the added document.
     pub _id: String,
-    /// The document version. Incremented each time the document is updated. 
+    /// The document version. Incremented each time the document is updated.
     pub _version: i64,
-    /// The sequence number assigned to the document for the indexing operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control. 
+    /// The sequence number assigned to the document for the indexing operation. Sequence numbers are used to ensure an older version of a document doesn’t overwrite a newer version. See Optimistic concurrency control.
     pub _seq_no: i64,
-    /// The primary term assigned to the document for the indexing operation. See Optimistic concurrency control. 
+    /// The primary term assigned to the document for the indexing operation. See Optimistic concurrency control.
     pub _primary_term: i64,
-    /// The result of the indexing operation, created or updated. 
+    /// The result of the indexing operation, created or updated.
     pub result: IndexResult
 }
 
@@ -114,23 +169,23 @@ impl FromStr for IndexResult {
 
 #[derive(Deserialize)]
 pub struct Shards {
-    /// Indicates how many shard copies (primary and replica shards) the index operation should be executed on. 
+    /// Indicates how many shard copies (primary and replica shards) the index operation should be executed on.
     pub total: i64,
     /// Indicates the number of shard copies the index operation succeeded on. When the index operation is successful, successful is at least 1.
-    /// 
+    ///
     /// Replica shards might not all be started when an indexing operation returns successfully—​by default, only the primary is required. Set wait_for_active_shards to change this default behavior. See Active shards.
     pub successful: i64,
-    /// An array that contains replication-related errors in the case an index operation failed on a replica shard. 0 indicates there were no failures. 
+    /// An array that contains replication-related errors in the case an index operation failed on a replica shard. 0 indicates there were no failures.
     pub failed: ShardsFailure
 }
-    
+
 #[derive(Debug, Deserialize)]
 pub struct BulkShards {
-    ///     (integer) Number of shards the operation attempted to execute on. 
+    ///     (integer) Number of shards the operation attempted to execute on.
     pub total: i64,
-    //     (integer) Number of shards the operation succeeded on. 
+    //     (integer) Number of shards the operation succeeded on.
     pub successful: i64,
-    //     (integer) Number of shards the operation attempted to execute on but failed. 
+    //     (integer) Number of shards the operation attempted to execute on but failed.
     pub failed: i64,
 }
 
@@ -147,7 +202,7 @@ pub enum ShardsFailure {
 #[derive(Deserialize)]
 #[allow(unused)]
 pub(crate) struct Status {
-    /// The name of the cluster. 
+    /// The name of the cluster.
     pub cluster_name: String,
     /// Health status of the cluster, based on the state of its primary and replica shards. Statuses are:
     ///
@@ -155,31 +210,31 @@ pub(crate) struct Status {
     /// yellow: All primary shards are assigned, but one or more replica shards are unassigned. If a node in the cluster fails, some data could be unavailable until that node is repaired.
     /// red: One or more primary shards are unassigned, so some data is unavailable. This can occur briefly during cluster startup as primary shards are assigned.
     pub status: String,
-    /// (Boolean) If false the response returned within the period of time that is specified by the timeout parameter (30s by default). 
+    /// (Boolean) If false the response returned within the period of time that is specified by the timeout parameter (30s by default).
     pub timed_out: bool,
-    /// (integer) The number of nodes within the cluster. 
+    /// (integer) The number of nodes within the cluster.
     pub number_of_nodes: i64,
-    /// (integer) The number of nodes that are dedicated data nodes. 
+    /// (integer) The number of nodes that are dedicated data nodes.
     pub number_of_data_nodes: i64,
-    /// (integer) The number of active primary shards. 
+    /// (integer) The number of active primary shards.
     pub active_primary_shards: i64,
-    /// (integer) The total number of active primary and replica shards. 
+    /// (integer) The total number of active primary and replica shards.
     pub active_shards: i64,
-    /// (integer) The number of shards that are under relocation. 
+    /// (integer) The number of shards that are under relocation.
     pub relocating_shards: i64,
-    /// (integer) The number of shards that are under initialization. 
+    /// (integer) The number of shards that are under initialization.
     pub initializing_shards: i64,
-    /// (integer) The number of shards that are not allocated. 
+    /// (integer) The number of shards that are not allocated.
     pub unassigned_shards: i64,
-    /// (integer) The number of shards whose allocation has been delayed by the timeout settings. 
+    /// (integer) The number of shards whose allocation has been delayed by the timeout settings.
     pub delayed_unassigned_shards: i64,
-    /// (integer) The number of cluster-level changes that have not yet been executed. 
+    /// (integer) The number of cluster-level changes that have not yet been executed.
     pub number_of_pending_tasks: i64,
-    /// (integer) The number of unfinished fetches. 
+    /// (integer) The number of unfinished fetches.
     pub number_of_in_flight_fetch: i64,
-    /// (integer) The time expressed in milliseconds since the earliest initiated task is waiting for being performed. 
+    /// (integer) The time expressed in milliseconds since the earliest initiated task is waiting for being performed.
     pub task_max_waiting_in_queue_millis: i64,
-    /// (float) The ratio of active shards in the cluster expressed as a percentage. 
+    /// (float) The ratio of active shards in the cluster expressed as a percentage.
     pub active_shards_percent_as_number: f64,
 }
 
@@ -215,7 +270,7 @@ pub struct SearchHitTotals {
     pub relation: String,
 }
 
-/// entry returned for a single document matched by a search 
+/// entry returned for a single document matched by a search
 #[derive(Debug, Deserialize)]
 pub struct SearchHitItem<FieldType, SourceType> {
     /// index document was returned from (search may be over many indices)
@@ -224,10 +279,10 @@ pub struct SearchHitItem<FieldType, SourceType> {
     pub _id: String,
     /// score describing the match of this result to the search parameters
     pub _score: Option<f64>,
-    /// the source document (or fields of the source document) requested in the search 
+    /// the source document (or fields of the source document) requested in the search
     #[serde(default="default_source")]
     pub _source: Option<SourceType>,
-    /// entry describing this document's position in the sorting of the result set, useful for pagination 
+    /// entry describing this document's position in the sorting of the result set, useful for pagination
     pub sort: serde_json::Value,
     /// Fields returned by the search from the indexed data (as opposed to source document)
     #[serde(default)]
@@ -239,11 +294,11 @@ fn default_source<T>() -> Option<T> { None }
 
 #[derive(Deserialize)]
 pub struct Delete {
-    pub _index: String, 
-    pub _id: String, 
-    pub _version: i64, 
-    pub result: DeleteResult, 
-    pub _shards: Shards, 
+    pub _index: String,
+    pub _id: String,
+    pub _version: i64,
+    pub result: DeleteResult,
+    pub _shards: Shards,
     pub _seq_no: i64,
     pub _primary_term: i64,
 }
@@ -313,11 +368,11 @@ pub struct DescribeIndex {
 pub struct IndexDescription {
     #[serde(default)]
     pub aliases: HashMap<String, AliasDetails>,
-    
+
     pub mappings: assemblyline_models::meta::Mappings,
 
     #[serde(flatten)]
-    other: HashMap<String, Value>,    
+    other: HashMap<String, Value>,
 }
 
 
@@ -331,7 +386,7 @@ pub struct TaskId {
 
 #[derive(Debug, Deserialize)]
 pub struct TaskBody {
-    pub response: TaskResponse, 
+    pub response: TaskResponse,
     pub completed: bool,
     pub task: Task
 }
@@ -354,12 +409,12 @@ pub struct Task {
     pub cancellable: bool,
     pub cancelled: bool,
     pub description: String,
-    pub headers: JsonMap, 
+    pub headers: JsonMap,
     pub id: u64,
     pub node: String,
     pub running_time_in_nanos: u64,
     pub start_time_in_millis: u64,
-    pub status: TaskStatus, 
+    pub status: TaskStatus,
     #[serde(rename="type")]
     pub type_: String,
 }
@@ -371,7 +426,7 @@ pub struct TaskStatus {
     pub deleted: u64,
     pub noops: u64,
     pub requests_per_second: f64,
-    pub retries: TaskRetries, 
+    pub retries: TaskRetries,
     pub throttled_millis: u64,
     pub throttled_until_millis: u64,
     pub total: u64,
@@ -388,9 +443,9 @@ pub struct TaskRetries {
 
 #[derive(Debug, Deserialize)]
 pub struct Bulk {
-    /// (integer) How long, in milliseconds, it took to process the bulk request.     
+    /// (integer) How long, in milliseconds, it took to process the bulk request.
     pub took: u64,
-    /// (Boolean) If true, one or more of the operations in the bulk request did not complete successfully. 
+    /// (Boolean) If true, one or more of the operations in the bulk request did not complete successfully.
     pub errors: bool,
     /// (array of objects) Contains the result of each operation in the bulk request, in the order they were submitted.
     pub items: Vec<BulkItem>,
@@ -423,16 +478,16 @@ impl std::ops::Deref for BulkItem {
 /// The parameter value is an object that contains information for the associated operation.
 #[derive(Debug, Deserialize)]
 pub struct BulkItemData {
-    /// (string) Name of the index associated with the operation. If the operation targeted a data stream, this is the backing index into which the document was written. 
+    /// (string) Name of the index associated with the operation. If the operation targeted a data stream, this is the backing index into which the document was written.
     pub _index: String,
-    /// The document ID associated with the operation. 
+    /// The document ID associated with the operation.
     pub _id: String,
     /// (integer) The document version associated with the operation. The document version is incremented each time the document is updated.
     ///
     /// This parameter is only returned for successful actions.
     #[serde(default)]
     pub _version: Option<i64>,
-    /// (string) Result of the operation. Successful values are created, deleted, and updated. Other valid values are noop and not_found. 
+    /// (string) Result of the operation. Successful values are created, deleted, and updated. Other valid values are noop and not_found.
     pub result: BulkResult,
     /// (object) Contains shard information for the operation.
     /// This parameter is only returned for successful operations.
@@ -449,24 +504,24 @@ pub struct BulkItemData {
     #[serde(default)]
     pub _primary_term: Option<i64>,
 
-    /// (integer) HTTP status code returned for the operation. 
+    /// (integer) HTTP status code returned for the operation.
     pub status: i32,
-        
+
     // (object) Contains additional information about the failed operation.
 
     // The parameter is only returned for failed operations.
     // Properties of error
 
     // type
-    //     (string) Error type for the operation. 
+    //     (string) Error type for the operation.
     // reason
-    //     (string) Reason for the failed operation. 
+    //     (string) Reason for the failed operation.
     // index_uuid
-    //     (string) The universally unique identifier (UUID) of the index associated with the failed operation. 
+    //     (string) The universally unique identifier (UUID) of the index associated with the failed operation.
     // shard
-    //     (string) ID of the shard associated with the failed operation. 
+    //     (string) ID of the shard associated with the failed operation.
     // index
-    //     (string) Name of the index associated with the failed operation. If the operation targeted a data stream, this is the backing index into which the document was attempted to be written. 
+    //     (string) Name of the index associated with the failed operation. If the operation targeted a data stream, this is the backing index into which the document was attempted to be written.
     #[serde(default)]
     pub error: serde_json::Value,
 }
@@ -485,6 +540,6 @@ pub enum BulkResult {
 pub struct CreateIndex {
     pub index: String,
     pub shards_acknowledged: bool,
-    pub acknowledged: bool,    
+    pub acknowledged: bool,
 }
 

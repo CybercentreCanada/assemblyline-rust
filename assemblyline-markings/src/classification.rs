@@ -770,41 +770,58 @@ impl ClassificationParser {
 //         out.pop('_classification_cache_short', None)
 //         return out
 
-    /// Returns a dictionary containing the different access parameters Lucene needs to build it's queries
+    /// Returns a struct containing the different access parameters Lucene needs to build it's queries
     ///
     /// Args:
     ///     c12n: The classification to get the parts from
     ///     user_classification: Is a user classification, (old default = false)
-    pub fn get_access_control_parts(&self, c12n: &str, user_classification: bool) -> Result<serde_json::Value> {
+    pub fn get_access_control_values(&self, c12n: &str, user_classification: bool) -> Result<AccessControlValues> {
         let c12n = if !self.enforce || self.invalid_mode {
             self.unrestricted.clone()
         } else {
             c12n.to_owned()
         };
 
-        let result: Result<serde_json::Value> = (||{
+        let result: Result<AccessControlValues> = (||{
             // Normalize the classification before gathering the parts
             let parts = self.get_classification_parts(&c12n, false, true, !user_classification)?;
 
-            return Ok(serde_json::json!({
-                "__access_lvl__": parts.level,
-                "__access_req__": parts.required,
-                "__access_grp1__": if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
-                "__access_grp2__": if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups }
-            }))
+            return Ok(AccessControlValues {
+                level: parts.level,
+                required: parts.required,
+                groups1: if parts.groups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.groups },
+                groups2: if parts.subgroups.is_empty() { vec!["__EMPTY__".to_owned()] } else { parts.subgroups }
+            })
         })();
 
         if let Err(Errors::InvalidClassification(_)) = &result {
             if !self.enforce || self.invalid_mode {
-                return Ok(serde_json::json!({
-                    "__access_lvl__": NULL_LVL,
-                    "__access_req__": [],
-                    "__access_grp1__": ["__EMPTY__"],
-                    "__access_grp2__": ["__EMPTY__"]
-                }))
+                return Ok(AccessControlValues {
+                    level: NULL_LVL,
+                    required: vec![],
+                    groups1: vec!["__EMPTY__".to_owned()],
+                    groups2: vec!["__EMPTY__".to_owned()],
+                })
             }
         }
         return result
+    }
+
+
+    /// Returns a dictionary containing the different access parameters Lucene needs to build it's queries
+    ///
+    /// Args:
+    ///     c12n: The classification to get the parts from
+    ///     user_classification: Is a user classification, (old default = false)
+    pub fn get_access_control_parts(&self, c12n: &str, user_classification: bool) -> Result<serde_json::Value> {
+        let values = self.get_access_control_values(c12n, user_classification)?;
+
+        Ok(serde_json::json!({
+            "__access_lvl__": values.level,
+            "__access_req__": values.required,
+            "__access_grp1__": values.groups1,
+            "__access_grp2__": values.groups2
+        }))
     }
 
 //     def get_access_control_req(self) -> Union[KeysView, List]:
@@ -1256,6 +1273,14 @@ impl NormalizeOptions {
     pub fn short() -> Self {
         Self{long_format: false, ..Default::default()}
     }
+}
+
+/// A classification reformated for database row filtering
+pub struct AccessControlValues {
+    pub level: i32,
+    pub required: Vec<String>,
+    pub groups1: Vec<String>,
+    pub groups2: Vec<String>,
 }
 
 // pub struct NormalizeBuilder<'a> {

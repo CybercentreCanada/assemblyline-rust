@@ -1075,6 +1075,25 @@ fn test_datastore_type_serialization() {
     assert_eq!(serde_json::to_string(&sample).unwrap(), "{\"ds\":\"elasticsearch\"}");
 }
 
+/// Database Configuration
+#[derive(Serialize, Deserialize)]
+#[serde(default)]
+pub struct Database {
+    /// Address and parameters for connecting to the database
+    pub url: String,
+    /// Address of the microservice providing search translation
+    pub search_service: String,
+}
+
+impl Default for Database {
+    fn default() -> Self {
+        Self {
+            url: "postgresql://localhost:5433/yugabyte?user=yugabyte&password=yugabyte".to_owned(),
+            search_service: "search-workers".to_string()
+        }
+    }
+}
+
 
 /// Datastore Configuration
 #[derive(Serialize, Deserialize)]
@@ -1761,6 +1780,9 @@ pub struct Config {
     pub core: Core,
     /// Datastore configuration
     pub datastore: Datastore,
+    /// Database configuration
+    pub database: Database,
+
     // /// Datasources configuration
     // #[serde(default = "default_datasources")]
     // pub datasources: HashMap<String, Datasource>,

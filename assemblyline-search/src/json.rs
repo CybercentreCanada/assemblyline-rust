@@ -37,7 +37,7 @@ pub trait JsonFilter {
 
     fn test(query: &Query, data: &serde_json::Value) -> Result<bool> {
         match query {
-            Query::And(parts) => {
+            Query::And(parts, ..) => {
                 for part in parts {
                     if !Self::test(part, data)? {
                         return Ok(false)
@@ -45,7 +45,7 @@ pub trait JsonFilter {
                 }
                 return Ok(true)
             },
-            Query::Or(parts) => {
+            Query::Or(parts, ..) => {
                 for part in parts {
                     if Self::test(part, data)? {
                         return Ok(true)
@@ -53,8 +53,8 @@ pub trait JsonFilter {
                 }
                 return Ok(false)
             },
-            Query::Not(part) => Ok(!Self::test(part, data)?),
-            Query::MatchAny(query) => {
+            Query::Not(part, ..) => Ok(!Self::test(part, data)?),
+            Query::MatchAny(query, ..) => {
                 for field in Self::get_full_text_fields(data) {
                     if Self::test_string(query, field)? {
                         return Ok(true)
@@ -62,7 +62,10 @@ pub trait JsonFilter {
                 }
                 return Ok(false)
             },
-            Query::RegexAny(query) => {
+            Query::WildcardAny(query, location) => {
+                Self::test(&Query::RegexAny(query.to_regex()?, location.clone()), data)
+            }
+            Query::RegexAny(query, ..) => {
                 for field in Self::get_full_text_fields(data) {
                     let temp: String;
                     let data = match field.as_str() {
@@ -78,7 +81,7 @@ pub trait JsonFilter {
                 }
                 return Ok(false)
             },
-            Query::MatchField(field, query) => {
+            Query::MatchField(field, query, ..) => {
                 let fields = Self::get_field(data, field);
                 // println!("Field list: {field:?} ");
                 // println!("\t{:?}", data);
@@ -93,7 +96,7 @@ pub trait JsonFilter {
                 }
                 return Ok(false)
             },
-            Query::FieldExists(field) => {
+            Query::FieldExists(field, ..) => {
                 Ok(!Self::get_field(data, field).is_empty())
             },
         }
@@ -115,7 +118,10 @@ pub trait JsonFilter {
 
     fn test_field(field: &FieldQuery, data: &serde_json::Value) -> Result<bool> {
         match field {
-            FieldQuery::Regex(regex) => {
+            FieldQuery::Wildcard(query, location) => {
+                Self::test_field(&FieldQuery::Regex(query.to_regex()?, location.clone()), data)
+            }
+            FieldQuery::Regex(regex, ..) => {
                 let temp: String;
                 let data = match data.as_str() {
                     Some(data) => data.trim(),
@@ -127,10 +133,10 @@ pub trait JsonFilter {
                 // println!("Regex {regex} on {data}, {}", regex.is_match(data));
                 Ok(regex.is_match(data))
             },
-            FieldQuery::Match(query) => Self::test_string(query, data),
-            FieldQuery::Number(query) => Self::test_number(query, data),
-            FieldQuery::Range(query) => Self::test_range(query, data),
-            FieldQuery::Or(parts) => {
+            FieldQuery::Match(query, ..) => Self::test_string(query, data),
+            FieldQuery::Number(query, ..) => Self::test_number(query, data),
+            FieldQuery::Range(query, ..) => Self::test_range(query, data),
+            FieldQuery::Or(parts, ..) => {
                 for part in parts {
                     if Self::test_field(part, data)? {
                         return Ok(true)
@@ -138,7 +144,7 @@ pub trait JsonFilter {
                 }
                 Ok(false)
             },
-            FieldQuery::And(parts) => {
+            FieldQuery::And(parts, ..) => {
                 for part in parts {
                     if !Self::test_field(part, data)? {
                         return Ok(false)
@@ -146,8 +152,8 @@ pub trait JsonFilter {
                 }
                 Ok(true)
             },
-            FieldQuery::Not(part) => Ok(!Self::test_field(part, data)?),
-            FieldQuery::Nested(query) => {
+            FieldQuery::Not(part, ..) => Ok(!Self::test_field(part, data)?),
+            FieldQuery::Nested(query, ..) => {
                 if let Some(data) = data.as_array() {
                     for row in data {
                         if Self::test(query, row)? {

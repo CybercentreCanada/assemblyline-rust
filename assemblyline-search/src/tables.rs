@@ -13,6 +13,7 @@ use log::{error, warn};
 
 use struct_metadata::{Described, Entry, Kind, MetadataKind};
 
+use crate::tidb::TiDb;
 use crate::yugabyte::Yugabyte;
 
 pub const ANALYSIS_SUBMISSIONS_TABLE: &str = "analysis_submissions";
@@ -50,7 +51,8 @@ pub enum PostgresTypes {
     TextInvert,
     TextTrigram,
     // JsonInverse,
-    BigSerial,
+    RandomUuid,
+    Uuid,
     Float,
     Double,
 }
@@ -70,7 +72,8 @@ impl PostgresTypes {
             PostgresTypes::TextArrayInvert => "text[]".to_owned(),
             PostgresTypes::TextInvert => "text".to_owned(),
             // PostgresTypes::JsonInverse => "jsonb".to_owned(),
-            PostgresTypes::BigSerial => "bigserial".to_owned(),
+            PostgresTypes::RandomUuid => "uuid DEFAULT uuid_generate_v4()".to_owned(),
+            PostgresTypes::Uuid => "uuid".to_owned(),
             PostgresTypes::Float => "real".to_owned(),
             PostgresTypes::Double => "double precision".to_owned(),
             PostgresTypes::Enum(name) => name.to_string(),
@@ -78,7 +81,7 @@ impl PostgresTypes {
     }
 
     pub fn generated(&self) -> bool {
-        matches!(self, PostgresTypes::BigSerial)
+        matches!(self, PostgresTypes::RandomUuid)
     }
 }
 
@@ -90,41 +93,6 @@ pub struct Field {
     pub kind: PostgresTypes,
 }
 
-// impl Field {
-//     pub fn extract(&self, data: &Value) -> Option<String> {
-//         self._extract(self.extraction.as_ref()?, data)
-//     }
-
-//     fn _extract(&self, path: &[String], data: &Value) -> Option<String> {
-//         if path.is_empty() {
-//             match self.kind {
-//                 PostgresTypes::Timestamp
-//                 | PostgresTypes::SmallInt
-//                 | PostgresTypes::Int
-//                 | PostgresTypes::BigInt => {
-//                     Some(data.as_number()?.as_i64()?.to_string())
-//                 }
-//                 PostgresTypes::Float | PostgresTypes::Double => {
-//                     Some(data.as_number()?.as_f64()?.to_string())
-//                 }
-//                 PostgresTypes::Boolean => {
-//                     Some(data.as_bool()?.to_string())
-//                 },
-//                 // PostgresTypes::Uuid => todo!(),
-//                 PostgresTypes::Enum(_) => todo!(),
-//                 PostgresTypes::Char(_) => todo!(),
-//                 PostgresTypes::Text => todo!(),
-//                 PostgresTypes::TextArrayInvert => todo!(),
-//                 PostgresTypes::TextInvert => todo!(),
-//                 PostgresTypes::TextTrigram => todo!(),
-//                 // PostgresTypes::JsonInverse => todo!(),
-//                 PostgresTypes::BigSerial => None,
-//             }
-//         } else {
-//             self._extract(&path[1..], data.get(&path[0])?)
-//         }
-//     }
-// }
 
 #[derive(Debug, Clone)]
 pub enum Index {
@@ -246,7 +214,7 @@ impl Table {
         for index in &self.indices {
             match index {
                 Index::Custom(custom) => {
-                    indices.push(format!("CREATE INDEX {0}_{1} ON {0}({custom})", self.name, indices.len()));
+                    indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{1} ON {0}({custom})", self.name, indices.len()));
                 },
                 Index::Default(name) => {
 
@@ -259,11 +227,12 @@ impl Table {
                     };
 
                     match field.kind {
-                        PostgresTypes::BigSerial => {
-                            panic!("Serial type used outside of primary key?");
+                        PostgresTypes::RandomUuid => {
+                            panic!("id type used outside of primary key?");
                         }
 
                         PostgresTypes::Text
+                        | PostgresTypes::Uuid
                         | PostgresTypes::Char(_)
                         | PostgresTypes::SmallInt
                         | PostgresTypes::Boolean
@@ -272,25 +241,25 @@ impl Table {
                         | PostgresTypes::Float
                         | PostgresTypes::Double
                         | PostgresTypes::Timestamp => {
-                            indices.push(format!("CREATE INDEX {0}_{name} ON {0}({name} ASC)", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} ASC)", self.name));
                         }
 
                         PostgresTypes::Enum(_) => { // | PostgresTypes::Uuid => {
-                            indices.push(format!("CREATE INDEX {0}_{name} ON {0}({name} HASH)", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} HASH)", self.name));
                         }
 
                         PostgresTypes::TextArrayInvert => { //| PostgresTypes::JsonInverse => {
-                            indices.push(format!("CREATE INDEX {0}_{name} ON {0} USING ybgin({name})", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0} USING ybgin({name})", self.name));
                         }
 
                         PostgresTypes::TextTrigram => {
-                            indices.push(format!("CREATE INDEX {0}_{name} ON {0}({name} ASC)", self.name));
-                            indices.push(format!("CREATE INDEX {0}_{name}_tgram ON {0} USING ybgin({name} gin_trgm_ops)", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} ASC)", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name}_tgram ON {0} USING ybgin({name} gin_trgm_ops)", self.name));
                         }
 
                         PostgresTypes::TextInvert => {
                             fields.push(format!("{name}_vectored tsvector"));
-                            indices.push(format!("CREATE INDEX {0}_{name} ON {0} USING ybgin({name}_vectored)", self.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0} USING ybgin({name}_vectored)", self.name));
                         },
                     }
                 }
@@ -565,10 +534,10 @@ pub fn init_error_table() -> Table {
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
 
     // add indexed field for submission this error is associated with
-    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
+    table.add_index_field("sid".to_string(), PostgresTypes::Text, "sid HASH".to_owned());
 
     // insert primary key field
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
 
     table
 }
@@ -622,10 +591,10 @@ pub fn init_result_table() -> Table {
     // insert raw fields
     table.add_default_field("key".to_string(), PostgresTypes::Text);
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
-    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
+    table.add_index_field("sid".to_string(), PostgresTypes::Text, "sid HASH".to_owned());
 
     // insert primary key field
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
 
     table
 }
@@ -673,10 +642,10 @@ pub fn init_file_table() -> Table {
 
     // insert raw fields
     table.add_default_field("raw".to_string(), PostgresTypes::TextInvert);
-    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH".to_owned());
+    table.add_index_field("sid".to_string(), PostgresTypes::Text, "sid HASH".to_owned());
 
     // insert primary key field
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
 
     table
 }
@@ -685,8 +654,8 @@ pub fn init_file_table() -> Table {
 pub struct TagRow<'a> {
     // pub id: PostgresTypes::BigSerial);
     pub expiry_ts: Option<DateTime<Utc>>,
-    pub submission: &'a str,
-    pub result: i64,
+    pub sid: &'a str,
+    pub result: uuid::Uuid,
     pub key: &'a str,
     pub score: i32,
     pub heuristic: bool,
@@ -701,10 +670,10 @@ pub fn init_tag_table() -> Table {
         indices: vec![],
     };
 
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
     table.add_unindexed_field("expiry_ts".to_string(), PostgresTypes::Timestamp);
-    table.add_index_field("submission".to_string(), PostgresTypes::Text, "submission HASH, key ASC, value ASC".to_string());
-    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::BigInt, "result HASH".to_string());
+    table.extract_index_field("sid".to_string(), &["sid"], PostgresTypes::Text, "sid HASH, key ASC, value ASC".to_string());
+    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::Uuid, "result HASH".to_string());
     table.extract_index_field("key".to_string(), &["key"], PostgresTypes::Text, "key ASC, value ASC".to_string());
     table.extract_default_field("score".to_string(), &["score"], PostgresTypes::Int);
     table.extract_default_field("heuristic".to_string(), &["heuristic"], PostgresTypes::Boolean);
@@ -717,7 +686,8 @@ pub fn init_tag_table() -> Table {
 pub struct RelationRow<'a> {
     // pub id: PostgresTypes::BigSerial);
     pub expiry_ts: Option<DateTime<Utc>>,
-    pub result: i64,
+    pub result: uuid::Uuid,
+    pub sid: Cow<'a, str>,
     pub parent: Cow<'a, str>,
     pub child: Cow<'a, str>,
     pub name: Cow<'a, str>,
@@ -733,9 +703,10 @@ pub fn init_file_relation_table() -> Table {
         indices: vec![],
     };
 
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
     table.add_unindexed_field("expiry_ts".to_string(), PostgresTypes::Timestamp);
-    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::BigInt, "result HASH".to_string());
+    table.extract_index_field("result".to_string(), &["result"], PostgresTypes::Uuid, "result HASH".to_string());
+    table.extract_index_field("sid".to_string(), &["sid"], PostgresTypes::Text, "sid HASH".to_string());
     table.extract_index_field("parent".to_string(), &["parent"], PostgresTypes::Text, "parent HASH, child ASC".to_string());
     table.extract_index_field("child".to_string(), &["child"], PostgresTypes::Text, "child HASH, parent ASC".to_string());
     table.extract_default_field("name".to_string(), &["name"], PostgresTypes::Text);
@@ -778,7 +749,7 @@ pub fn init_file_relation_table() -> Table {
 #[derive(Serialize, Deserialize)]
 pub struct MetadataRow {
     // pub id: u64,
-    pub submission: String,
+    pub sid: String,
     pub key: String,
     pub value: String,
     pub expiry_ts: Option<DateTime<Utc>>,
@@ -793,12 +764,12 @@ pub fn init_metadata_table() -> Table {
         indices: vec![],
     };
 
-    table.add_unindexed_field("id".to_string(), PostgresTypes::BigSerial);
+    table.add_unindexed_field("id".to_string(), PostgresTypes::RandomUuid);
 
-    let index = table.add_index_field("submission".to_string(),  PostgresTypes::Text, "submission HASH, key ASC, value ASC".to_string());
-    table.fields[index].extraction = Some(vec!["submission".to_string()]);
+    let index = table.add_index_field("sid".to_string(),  PostgresTypes::Text, "sid HASH, key ASC, value ASC".to_string());
+    table.fields[index].extraction = Some(vec!["sid".to_string()]);
 
-    let index = table.add_index_field("key".to_string(), PostgresTypes::Text, "key ASC, value ASC, submission ASC".to_string());
+    let index = table.add_index_field("key".to_string(), PostgresTypes::Text, "key ASC, value ASC, sid ASC".to_string());
     table.fields[index].extraction = Some(vec!["key".to_string()]);
 
     let index = table.add_default_field("value".to_string(), PostgresTypes::TextTrigram);
@@ -809,7 +780,21 @@ pub fn init_metadata_table() -> Table {
     table
 }
 
-pub async fn init_database_tables(client: Yugabyte, wipe: bool) -> Result<()> {
+pub enum Database {
+    Yugabyte(Yugabyte),
+    Ti(TiDb),
+}
+
+impl Database {
+    pub async fn register_type<Type: strum::IntoEnumIterator + Into<&'static str>>(&self, name: &str) -> Result<()> {
+        match self {
+            Database::Yugabyte(yugabyte) => yugabyte.register_type::<Type>(name).await,
+            Database::Ti(ti) => todo!(),
+        }
+    }
+}
+
+pub async fn init_database_tables(client: &Database, wipe: bool) -> Result<()> {
 
     // register types
     client.register_type::<assemblyline_models::datastore::error::StatusDiscriminants>("error_status").await?;
@@ -832,4 +817,3 @@ pub async fn init_database_tables(client: Yugabyte, wipe: bool) -> Result<()> {
 
     Ok(())
 }
-

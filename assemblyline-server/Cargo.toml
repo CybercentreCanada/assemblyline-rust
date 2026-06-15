@@ -48,6 +48,7 @@ ort = {version = "=2.0.0-rc.10", features = ["download-binaries"]}
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 futures = "0.3"
+flume = "0.12"
 
 # Network libraries
 reqwest = { version = "0.13", features = ["json", "native-tls"] }

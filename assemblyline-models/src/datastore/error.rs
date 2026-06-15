@@ -1,6 +1,5 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use postgres_types::ToSql;
-use rand::seq::IteratorRandom;
 use serde::{Serialize, Deserialize};
 use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
@@ -101,6 +100,17 @@ impl rand::distr::Distribution<ErrorTypes> for rand::distr::StandardUniform {
     }
 }
 
+//             "message":"The number of retries has passed the limit.\n\nSubmitted to queue at 2026-05-21 22:50:57.246448164 UTC\nPopped from queue and running a
+// t 2026-05-21 22:53:29.061509121 UTC on worker alsvc-characterize-bbb4b688d-b9lm9\nService timeout at 2026-05-21 22:54:34.215387222 UTC on worker alsvc-characterize-bbb4b688d-b9lm9\nSubmitt
+// ed to queue at 2026-05-21 22:54:35.218105755 UTC\nPopped from queue and running at 2026-05-21 22:55:24.686299784 UTC on worker alsvc-characterize-bbb4b688d-t49s8\nService timeout at 2026-0
+// 5-21 22:56:30.406198658 UTC on worker alsvc-characterize-bbb4b688d-t49s8\nSubmitted to queue at 2026-05-21 22:56:31.408527337 UTC\nPopped from queue and running at 2026-05-21 22:56:45.9998
+// 35067 UTC on worker alsvc-characterize-bbb4b688d-fm4gf\nService timeout at 2026-05-21 22:57:51.163680932 UTC on worker alsvc-characterize-bbb4b688d-fm4gf",
+//             "service_debug_info":null,
+//             "service_name":"Characterize",
+//             "service_tool_version":null,
+//             "service_version":"0",
+//             "status":"FAIL_NONRECOVERABLE"
+
 /// Error Response from a Service
 #[derive(Debug, Serialize, Deserialize, Described, Clone, PartialEq)]
 #[metadata_type(ElasticMeta)]
@@ -137,6 +147,16 @@ impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
         }
     }
 }
+
+//         "archive_ts":null,
+//         "created":"2026-05-21T22:57:51.164684998Z",
+//         "expiry_ts":"2026-06-20T21:38:33.014457790Z",
+//         "id":"71b47b2d78856337545190c5e92bf2cdfd5f91209ef7d9732ca7026cc6ac662e.Characterize.v0.c0.e30",
+//         "response":{
+//         },
+//         "severity":"error",
+//         "sha256":"71b47b2d78856337545190c5e92bf2cdfd5f91209ef7d9732ca7026cc6ac662e",
+//         "type":"TASK PRE-EMPTED"
 
 
 /// Error Model used by Error Viewer
