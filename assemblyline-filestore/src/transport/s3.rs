@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
+use aws_credential_types::provider::ProvideCredentials;
 use bytes::Bytes;
 use log::{warn, debug};
 
@@ -56,6 +57,7 @@ pub struct S3Parameters {
     pub verify: bool,
     pub boto_defaults: bool,
     pub compatability: bool,
+    pub enable_debug: bool,
 }
 
 impl Default for S3Parameters {
@@ -67,6 +69,7 @@ impl Default for S3Parameters {
             verify: true,
             boto_defaults: false,
             compatability: true,
+            enable_debug: false,
         }
     }
 }
@@ -110,7 +113,7 @@ impl TransportS3 {
         }
 
         // configure endpoint
-        loader = loader.endpoint_url(endpoint_url);
+        loader = loader.endpoint_url(&endpoint_url);
 
         // Configure keys
         if let Some(key) = &accesskey {
@@ -184,6 +187,12 @@ impl TransportS3 {
 
         // Build the client
         let sdk_config = loader.load().await;
+
+        // Log the credential provider being when debugging is enabled for the transport
+        if parameters.enable_debug {
+            debug!("Credential provider for {}: {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
+        }
+
         let s3_config = if parameters.compatability {
             aws_sdk_s3::config::Builder::from(&sdk_config)
                 .force_path_style(true)
@@ -193,9 +202,6 @@ impl TransportS3 {
         } else {
             aws_sdk_s3::config::Builder::from(&sdk_config).build()
         };
-
-        // As a diagnostic measure, log the final S3 client configuration to troubleshoot potential misconfigurations.
-        debug!("S3 Client Config: {:?}", s3_config);
 
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
