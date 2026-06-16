@@ -57,7 +57,7 @@ pub struct S3Parameters {
     pub verify: bool,
     pub boto_defaults: bool,
     pub compatability: bool,
-    pub enable_debug: bool,
+    pub debug: bool,
 }
 
 impl Default for S3Parameters {
@@ -69,7 +69,7 @@ impl Default for S3Parameters {
             verify: true,
             boto_defaults: false,
             compatability: true,
-            enable_debug: false,
+            debug: false,
         }
     }
 }
@@ -189,7 +189,7 @@ impl TransportS3 {
         let sdk_config = loader.load().await;
 
         // Log the credential provider being when debugging is enabled for the transport
-        if parameters.enable_debug {
+        if parameters.debug {
             debug!("Credential provider for {}: {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
         }
 
