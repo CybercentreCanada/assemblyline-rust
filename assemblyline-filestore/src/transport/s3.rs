@@ -189,9 +189,7 @@ impl TransportS3 {
         let sdk_config = loader.load().await;
 
         // Log the credential provider being when debugging is enabled for the transport
-        if parameters.debug {
-            debug!("Credential provider for {}: {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
-        }
+        println!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
 
         let s3_config = if parameters.compatability {
             aws_sdk_s3::config::Builder::from(&sdk_config)
