@@ -128,7 +128,20 @@ async fn main() -> ExitCode {
 
     // This utility command runs before initializing the core
     if let Commands::ValidateClassification { classification } = args.command {
-        return crate::validate_classification::main(classification, config.clone());       
+
+        // For troubleshooting ensure it's understood what the parser is using when performing validation
+        let c12n_config = match &config.classification.path {
+            Some(config_path) => {
+                println!("Testing against mounted classification configuration: {config_path:?}");
+                ready_classification(Some(&fs::read_to_string(config_path).expect("Could not read classification config from file"))).expect("Could not load classification config from file")
+            },
+            None => {
+                println!("No mounted classification configuration found. Proceeding with default configuration...");
+                ClassificationConfig::default()
+            }
+        };        
+
+        return crate::validate_classification::main(classification, c12n_config);       
     }
 
     // configure logging, the object returned here owns the log processing internals

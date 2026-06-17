@@ -1,26 +1,10 @@
 // Used for validating a classification string against the current configuration from the command-line
-use std::{fs};
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use assemblyline_markings::classification::ClassificationParser;
-use assemblyline_markings::config::{ClassificationConfig, ready_classification};
-use assemblyline_models::config::Config;
+use assemblyline_markings::config::ClassificationConfig;
 
-pub fn main(classification: String, config: Arc<Config>) -> std::process::ExitCode {
-
-    // For troubleshooting ensure it's understood what the parser is using when performing validation
-    let c12n_config = match &config.classification.path {
-        Some(config_path) => {
-            println!("Testing against mounted classification configuration: {config_path:?}");
-            ready_classification(Some(&fs::read_to_string(config_path).expect("Could not read classification config from file"))).expect("Could not load classification config from file")
-        },
-        None => {
-            println!("No mounted classification configuration found. Proceeding with default configuration...");
-            ClassificationConfig::default()
-        }
-    };
-
+pub fn main(classification: String, c12n_config: ClassificationConfig) -> std::process::ExitCode {
     // Validate the classification string and print the normalized result or an error
     match ClassificationParser::new(c12n_config) {
         Ok(parser) => {
@@ -45,27 +29,32 @@ pub fn main(classification: String, config: Arc<Config>) -> std::process::ExitCo
 #[cfg(test)]
 mod tests {
     use super::main;
-    use crate::load_configuration;
+    use assemblyline_markings::config::{ClassificationConfig, ready_classification};
+
+    async fn setup() -> ClassificationConfig {
+        // Create a default classification configuration for testing
+        let mut c12n_config = ready_classification(None).unwrap();
+
+        // Enable enforcement of classification rules for testing purposes
+        c12n_config.enforce = true;
+        c12n_config
+    }
 
     #[tokio::test]
     async fn test_valid_classification() {
-        // Load configuration
-        let (config, _) = load_configuration(None).await.expect("Could not load configuration");
-
         // A simple test to ensure the validation function works as expected with a valid classification string
+        let c12n_config = setup().await;
         let classification = "TLP:W//REL CSE".to_string();
-        let result = main(classification, config.clone());
+        let result = main(classification, c12n_config);
         assert_eq!(result, std::process::ExitCode::SUCCESS);
     }
 
     #[tokio::test]
     async fn test_invalid_classification() {
-        // Load configuration
-        let (config, _) = load_configuration(None).await.expect("Could not load configuration");
-
         // A simple test to ensure the validation function works as expected with an invalid classification string
         let invalid_classification = "TLP:R//REL CSE".to_string();
-        let result = main(invalid_classification, config.clone());
+        let c12n_config = setup().await;
+        let result = main(invalid_classification, c12n_config);
         assert_eq!(result, std::process::ExitCode::FAILURE);
     }
 }
