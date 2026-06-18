@@ -112,9 +112,6 @@ impl TransportS3 {
             loader = loader.region(aws_types::region::Region::from_static("ca-central-1"))
         }
 
-        // configure endpoint
-        loader = loader.endpoint_url(&endpoint_url);
-
         // Configure keys
         if let Some(key) = &accesskey {
             std::env::set_var("AWS_ACCESS_KEY_ID", key);
@@ -189,17 +186,21 @@ impl TransportS3 {
         let sdk_config = loader.load().await;
 
         // Log the credential provider being when debugging is enabled for the transport
-        println!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
-
-        let s3_config = if parameters.compatability {
+        if parameters.debug{
+            debug!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
+        }
+        
+        let s3_builder = if parameters.compatability {
             aws_sdk_s3::config::Builder::from(&sdk_config)
                 .force_path_style(true)
                 .request_checksum_calculation(aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired)
                 .response_checksum_validation(aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired)
-                .build()
         } else {
-            aws_sdk_s3::config::Builder::from(&sdk_config).build()
+            aws_sdk_s3::config::Builder::from(&sdk_config)
         };
+        
+        // Set the endpoint URL and build the S3 configuration for the client
+        let s3_config = s3_builder.endpoint_url(endpoint_url).build();
 
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
