@@ -1,7 +1,7 @@
 #![allow(clippy::collapsible_if)]
 
 mod yugabyte;
-mod tidb;
+mod titanium;
 mod tables;
 mod lucene;
 mod search;
@@ -31,8 +31,8 @@ async fn main() {
     match args.command {
         Commands::Init { wipe } => {
             // let client = yugabyte::Yugabyte::development(false).await.unwrap();
-            let client = tidb::TiDb::development(false).await.unwrap();
-            tables::init_database_tables(&tables::Database::Ti(client), wipe).await.unwrap();
+            let client = titanium::Titanium::development(false).await.unwrap();
+            tables::init_database_tables(&client, wipe).await.unwrap();
         },
     }
 

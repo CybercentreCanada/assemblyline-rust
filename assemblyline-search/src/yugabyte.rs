@@ -9,7 +9,7 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore;
 use assemblyline_models::datastore::tagging::{FlatTags, TagInformation, get_tag_information};
 use assemblyline_models::types::{ExpandingClassification, Sha256, Sid};
-use chrono::{DateTime, TimeDelta, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, TimeZone, Utc};
 use rand::distr::{Alphabetic, SampleString};
 use serde::Serialize;
 use serde_json::Value;
@@ -19,10 +19,11 @@ use yb_tokio_postgres::{Client, NoTls, Transaction, connect};
 pub use bb8;
 
 use anyhow::{Context, Result, bail};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
-use crate::tables::{ALL_ANALYSIS_TABLES, ANALYSIS_ERRORS_TABLE, ANALYSIS_FILES_TABLE, ANALYSIS_METADATA_TABLE, ANALYSIS_RELATIONS_TABLE, ANALYSIS_RESULTS_TABLE, ANALYSIS_TAGS_TABLE, MetadataRow, PostgresTypes, RelationRow, Table, TagRow, init_error_table, init_file_relation_table, init_file_table, init_metadata_table, init_result_table, init_submission_table, init_tag_table};
+use crate::tables::{ALL_ANALYSIS_TABLES, ANALYSIS_ERRORS_TABLE, ANALYSIS_FILES_TABLE, ANALYSIS_METADATA_TABLE, ANALYSIS_RELATIONS_TABLE, ANALYSIS_RESULTS_TABLE, ANALYSIS_TAGS_TABLE, Index, MetadataRow, RelationRow, Table, TableTypes, TagRow, init_error_table, init_file_relation_table, init_file_table, init_metadata_table, init_result_table, init_submission_table, init_tag_table};
 use crate::tables::ANALYSIS_SUBMISSIONS_TABLE;
+use crate::yugabyte::PartitionScheme::Weekly;
 
 
 
@@ -55,6 +56,7 @@ pub struct Yugabyte {
     relation_table: Table,
     error_table: Table,
     file_table: Table,
+    partition_scheme: PartitionScheme
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,6 +98,7 @@ impl Yugabyte {
             relation_table: init_file_relation_table(),
             error_table: init_error_table(),
             file_table: init_file_table(),
+            partition_scheme: Weekly,
         })
     }
 
@@ -154,9 +157,97 @@ impl Yugabyte {
         Ok(())
     }
 
+
+    pub fn create_table_command(table: &Table) -> (String, Vec<String>) {
+        let mut fields = vec![];
+        let mut indices = vec![];
+        // let mut primary = None;
+
+        for field in &table.fields {
+            let mut string = field.name.clone();
+            string += " ";
+            string += &field.kind.postgres_type_string();
+
+            if !field.optional {
+                string += " NOT NULL";
+            }
+
+            fields.push(string);
+        }
+
+        let primary = match &table.primary {
+            Index::Custom(custom) => custom.clone(),
+            Index::Default(name) => format!("{name} HASH"),
+        };
+
+
+        for index in &table.indices {
+            match index {
+                Index::Custom(custom) => {
+                    indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{1} ON {0}({custom})", table.name, indices.len()));
+                },
+                Index::Default(name) => {
+
+                    let field = match table.get_field(name) {
+                        Some(field) => field,
+                        None => {
+                            warn!("Tried to build index on missing field: {name}");
+                            continue
+                        }
+                    };
+
+                    match field.kind {
+                        // TableTypes::RandomId => {
+                        //     panic!("id type used outside of primary key?");
+                        // }
+
+                        TableTypes::Text
+                        | TableTypes::Id
+                        | TableTypes::Char(_)
+                        | TableTypes::SmallInt
+                        | TableTypes::Boolean
+                        | TableTypes::Int
+                        | TableTypes::BigInt
+                        | TableTypes::Float
+                        | TableTypes::Double
+                        | TableTypes::Timestamp => {
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} ASC)", table.name));
+                        }
+
+                        TableTypes::Enum(_) => { // | PostgresTypes::Uuid => {
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} HASH)", table.name));
+                        }
+
+                        TableTypes::TextArrayInvert => { //| PostgresTypes::JsonInverse => {
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0} USING ybgin({name})", table.name));
+                        }
+
+                        TableTypes::TextTrigram => {
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0}({name} ASC)", table.name));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name}_tgram ON {0} USING ybgin({name} gin_trgm_ops)", table.name));
+                        }
+
+                        TableTypes::TextInvert => {
+                            fields.push(format!("{name}_vectored tsvector"));
+                            indices.push(format!("CREATE INDEX IF NOT EXISTS {0}_{name} ON {0} USING ybgin({name}_vectored)", table.name));
+                        },
+                    }
+                }
+            }
+        }
+
+        let create = format!(
+            "CREATE TABLE IF NOT EXISTS {} (\n    {},\n    PRIMARY KEY({})\n) PARTITION BY RANGE (expiry_ts);",
+            table.name, fields.join(",\n    "), primary
+        );
+
+        (create, indices)
+    }
+
+
     pub async fn create_table(&self, table: &Table, wipe: bool) -> Result<()> {
         info!("Creating table {} ...", table.name);
-        let (create_table, create_indices) = table.create_table_command();
+        let (create_table, create_indices) = Self::create_table_command(table);
         debug!("{create_table}");
         if wipe {
             self.client.execute(&format!("drop table if exists {}", table.name), &[]).await?;
@@ -260,16 +351,17 @@ impl Yugabyte {
         let rows = self.client.query(&command, &[&sub.to_string()]).await?;
         let mut output = vec![];
         for row in rows {
-            output.push(RelationRow {
-                expiry_ts: row.try_get("expiry_ts")?,
-                sid: Cow::Owned(sub.to_string()),
-                result: row.try_get("result")?,
-                parent: Cow::Owned(row.try_get("parent")?),
-                child: Cow::Owned(row.try_get("child")?),
-                name: Cow::Owned(row.try_get("name")?),
-                relation: Cow::Owned(row.try_get("relation")?),
-                supplementary: row.try_get("supplementary")?,
-            });
+            todo!()
+            // output.push(RelationRow {
+            //     expiry_ts: row.try_get("expiry_ts")?,
+            //     sid: Cow::Owned(sub.to_string()),
+            //     result: row.try_get("result")?,
+            //     parent: Cow::Owned(row.try_get("parent")?),
+            //     child: Cow::Owned(row.try_get("child")?),
+            //     name: Cow::Owned(row.try_get("name")?),
+            //     relation: Cow::Owned(row.try_get("relation")?),
+            //     supplementary: row.try_get("supplementary")?,
+            // });
         }
         Ok(output)
     }
@@ -343,88 +435,89 @@ impl Yugabyte {
         let cmd = InsertBuilder::new(&self.submission_table, &sid, sub.expiry_ts)
             .build(&sub)?;
         transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
+        todo!();
 
         // metadata
-        for (key, value) in sub.metadata.iter() {
-            let metadata = MetadataRow {
-                sid: sub.sid.to_string(),
-                key: key.clone(),
-                value: value.to_string(),
-                expiry_ts: sub.expiry_ts,
-            };
+        // for (key, value) in sub.metadata.iter() {
+        //     let metadata = MetadataRow {
+        //         sid: sub.sid.to_string(),
+        //         name: key.clone(),
+        //         value: value.to_string(),
+        //         expiry_ts: sub.expiry_ts,
+        //     };
 
-            let cmd = InsertBuilder::new(&self.metadata_table, &sid, sub.expiry_ts)
-                .build(&metadata)?;
-            transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
-        }
+        //     let cmd = InsertBuilder::new(&self.metadata_table, &sid, sub.expiry_ts)
+        //         .build(&metadata)?;
+        //     transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
+        // }
 
-        // results
-        for (key, result) in results.iter() {
-            let cmd = InsertBuilder::new(&self.result_table, &sid, result.expiry_ts)
-                .key(key)
-                .return_id("id")
-                .build(result)?;
-            let row = transaction.query_one(&cmd.statement, &cmd.parameters.params()).await?;
+        // // results
+        // for (key, result) in results.iter() {
+        //     let cmd = InsertBuilder::new(&self.result_table, &sid, result.expiry_ts)
+        //         .key(key)
+        //         .return_id("id")
+        //         .build(result)?;
+        //     let row = transaction.query_one(&cmd.statement, &cmd.parameters.params()).await?;
 
-            let id: uuid::Uuid = row.try_get("id")?;
+        //     let id: uuid::Uuid = row.try_get("id").context("id_as_uuid")?;
 
-            // tags
-            for section in &result.result.sections {
-                let tags = section.tags.to_list(None)?;
-                for tag in tags {
-                    let row = TagRow {
-                        expiry_ts: result.expiry_ts,
-                        sid: &sid,
-                        result: id,
-                        key: &tag.tag_type,
-                        score: tag.score,
-                        heuristic: false,
-                        value: &tag.value.to_string(),
-                    };
+        //     // tags
+        //     for section in &result.result.sections {
+        //         let tags = section.tags.to_list(None)?;
+        //         for tag in tags {
+        //             let row = TagRow {
+        //                 expiry_ts: result.expiry_ts,
+        //                 sid: &sid,
+        //                 result: id,
+        //                 name: &tag.tag_type,
+        //                 score: tag.score,
+        //                 heuristic: false,
+        //                 value: &tag.value.to_string(),
+        //             };
 
-                    let cmd = InsertBuilder::new(&self.tag_table, &sid, result.expiry_ts)
-                        .build(&row)?;
-                    transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
-                }
+        //             let cmd = InsertBuilder::new(&self.tag_table, &sid, result.expiry_ts)
+        //                 .build(&row)?;
+        //             transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
+        //         }
 
-                if let Some(heuristic) = &section.heuristic {
-                    let row = TagRow {
-                        expiry_ts: result.expiry_ts,
-                        sid: &sid,
-                        result: id,
-                        key: &heuristic.heur_id,
-                        score: heuristic.score,
-                        heuristic: true,
-                        value: "",
-                    };
+        //         if let Some(heuristic) = &section.heuristic {
+        //             let row = TagRow {
+        //                 expiry_ts: result.expiry_ts,
+        //                 sid: &sid,
+        //                 result: id,
+        //                 name: &heuristic.heur_id,
+        //                 score: heuristic.score,
+        //                 heuristic: true,
+        //                 value: "",
+        //             };
 
-                    let cmd = InsertBuilder::new(&self.tag_table, &sid, result.expiry_ts)
-                        .build(&row)?;
-                    transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
-                }
-            }
+        //             let cmd = InsertBuilder::new(&self.tag_table, &sid, result.expiry_ts)
+        //                 .build(&row)?;
+        //             transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
+        //         }
+        //     }
 
-            // file relations
-            for (relations, supplementary) in [(result.response.extracted.iter(), false), (result.response.supplementary.iter(), true)] {
-                for relation in relations {
-                    let row = RelationRow {
-                        expiry_ts: result.expiry_ts,
-                        sid: Cow::Borrowed(&sid),
-                        result: id,
-                        parent: Cow::Borrowed(&result.sha256),
-                        child: Cow::Borrowed(&relation.sha256),
-                        name: Cow::Borrowed(&relation.name),
-                        relation: Cow::Borrowed(relation.parent_relation.as_str()),
-                        supplementary,
-                    };
+        //     // file relations
+        //     for (relations, supplementary) in [(result.response.extracted.iter(), false), (result.response.supplementary.iter(), true)] {
+        //         for relation in relations {
+        //             let row = RelationRow {
+        //                 expiry_ts: result.expiry_ts,
+        //                 sid: Cow::Borrowed(&sid),
+        //                 result: id,
+        //                 parent: Cow::Borrowed(&result.sha256),
+        //                 child: Cow::Borrowed(&relation.sha256),
+        //                 name: Cow::Borrowed(&relation.name),
+        //                 relation: Cow::Borrowed(relation.parent_relation.as_str()),
+        //                 supplementary,
+        //             };
 
-                    let cmd = InsertBuilder::new(&self.relation_table, &sid, result.expiry_ts)
-                        .build(&row)?;
-                    transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
-                }
-            }
+        //             let cmd = InsertBuilder::new(&self.relation_table, &sid, result.expiry_ts)
+        //                 .build(&row)?;
+        //             transaction.execute(&cmd.statement, &cmd.parameters.params()).await?;
+        //         }
+        //     }
 
-        }
+        // }
 
         // errors
         for error in errors.values() {
@@ -474,7 +567,7 @@ impl Yugabyte {
             times.push(result.expiry_ts);
         }
         times.sort_unstable();
-        times.dedup_by(|a, b| date_label(a) == date_label(b));
+        times.dedup_by(|a, b| self.partition_scheme.date_label(a) == self.partition_scheme.date_label(b));
         for time in times {
             self.create_partition_on(ANALYSIS_RESULTS_TABLE, time).await?;
             self.create_partition_on(ANALYSIS_TAGS_TABLE, time).await?;
@@ -490,7 +583,7 @@ impl Yugabyte {
             times.push(error.expiry_ts);
         }
         times.sort_unstable();
-        times.dedup_by(|a, b| date_label(a) == date_label(b));
+        times.dedup_by(|a, b| self.partition_scheme.date_label(a) == self.partition_scheme.date_label(b));
         for time in times {
             self.create_partition_on(ANALYSIS_ERRORS_TABLE, time).await?;
         }
@@ -504,7 +597,7 @@ impl Yugabyte {
             times.push(file.expiry_ts);
         }
         times.sort_unstable();
-        times.dedup_by(|a, b| date_label(a) == date_label(b));
+        times.dedup_by(|a, b| self.partition_scheme.date_label(a) == self.partition_scheme.date_label(b));
         for time in times {
             self.create_partition_on(ANALYSIS_FILES_TABLE, time).await?;
         }
@@ -526,16 +619,11 @@ impl Yugabyte {
         }
     }
 
-    async fn _create_partition_on(&self, table: &str, time: Option<DateTime<Utc>>) -> Result<(), yb_tokio_postgres::Error> {
+    async fn _create_partition_on(&self, table: &str, time: Option<DateTime<Utc>>) -> Result<()> {
         let lock = self.locks.lock(table).await;
         let _guard = lock.lock().await;
-        let label = date_label(&time);
-        let (start, end) = match time {
-            Some(date) => {
-                (date.format("'%Y_%m_%d'").to_string(), (date + TimeDelta::days(1)).format("'%Y_%m_%d'").to_string())
-            },
-            None => ("'9999_1_1'".to_string(), "'infinity'".to_string()),
-        };
+        let label = self.partition_scheme.date_label(&time);
+        let (start, end) = self.partition_scheme.window(&time).ok_or(anyhow::anyhow!("date error"))?;
         let command = format!("CREATE TABLE IF NOT EXISTS {table}_{label} PARTITION OF {table} FOR VALUES FROM ({start}) TO ({end})");
         info!("Creating partition on {table} for {label}: {command}");
         match self.client.execute(&command, &[]).await {
@@ -547,16 +635,65 @@ impl Yugabyte {
                         return Ok(())
                     }
                 }
-                Err(err)
+                Err(err.into())
             }
         }
     }
 }
 
-fn date_label(time: &Option<DateTime<Utc>>) -> String {
-    match time {
-        Some(date) => date.format("%Y_%m_%d").to_string(),
-        None => "null".to_string(),
+#[derive(Debug, Clone, Copy)]
+enum PartitionScheme {
+    Daily,
+    Weekly,
+    Monthly,
+    None,
+}
+
+impl PartitionScheme {
+    fn date_label(&self, time: &Option<DateTime<Utc>>) -> String {
+        match time {
+            None => "null".to_string(),
+            Some(date) => match self {
+                PartitionScheme::Daily => date.format("%Y_%m_%d").to_string(),
+                PartitionScheme::Weekly => date.format("%G_%V").to_string(),
+                PartitionScheme::Monthly => date.format("%Y_%m").to_string(),
+                PartitionScheme::None => "hot".to_string(),
+            }
+
+        }
+    }
+
+    fn window(&self, time: &Option<DateTime<Utc>>) -> Option<(String, String)> {
+        Some(match time {
+            Some(date) => match self {
+                PartitionScheme::Daily => {
+                    (date.format("'%Y-%m-%d'").to_string(), (*date + TimeDelta::days(1)).format("'%Y-%m-%d'").to_string())
+                },
+                PartitionScheme::Weekly => {
+                    let first = date.iso_week();
+                    let mut later = *date;
+                    let second = loop {
+                        later += TimeDelta::days(1);
+                        let second = later.iso_week();
+                        if second != first {
+                            break second
+                        }
+                        // println!("{date} -> {first}; {later} -> {second}");
+                    };
+                    let first = NaiveDate::from_isoywd_opt(first.year(), first.week(), chrono::Weekday::Mon)?;
+                    let second = NaiveDate::from_isoywd_opt(second.year(), second.week(), chrono::Weekday::Mon)?;
+                    (first.format("'%Y-%m-%d'").to_string(), second.format("'%Y-%m-%d'").to_string())
+                },
+                PartitionScheme::Monthly => {
+                    let after = date.checked_add_months(chrono::Months::new(1))?;
+                    (date.format("'%Y-%m-%d'").to_string(), after.format("'%Y-%m-%d'").to_string())
+                },
+                PartitionScheme::None => {
+                    ("'1000-01-01'".to_string(), "'3000-01-01'".to_string())
+                },
+            },
+            None => ("'9999-01-01'".to_string(), "'infinity'".to_string()),
+        })
     }
 }
 
@@ -592,6 +729,7 @@ pub enum ParameterValue {
     I64(i64),
     F32(f32),
     F64(f64),
+    Uuid(uuid::Uuid),
     String(String),
     StringOptional(Option<String>),
     StringList(Vec<String>),
@@ -610,6 +748,7 @@ impl ParameterValue {
             ParameterValue::I64(value) => value,
             ParameterValue::F32(value) => value,
             ParameterValue::F64(value) => value,
+            ParameterValue::Uuid(value) => value,
             ParameterValue::String(value) => value,
             ParameterValue::StringOptional(value) => value,
             ParameterValue::StringList(value) => value,
@@ -643,6 +782,10 @@ impl From<f32> for ParameterValue {
 
 impl From<f64> for ParameterValue {
     fn from(value: f64) -> Self { Self::F64(value) }
+}
+
+impl From<uuid::Uuid> for ParameterValue {
+    fn from(value: uuid::Uuid) -> Self { Self::Uuid(value) }
 }
 
 impl From<String> for ParameterValue {
@@ -707,19 +850,20 @@ impl InsertParameters {
     }
 
     pub fn validate(&self, table: &Table) -> Result<()> {
-        for field in &table.fields {
-            if self.header.contains(&field.name) || field.kind.generated() {
-                continue
-            }
-            bail!("Missing expected field: {} -> {}", table.name, field.name);
-        }
-        for name in &self.header {
-            if table.fields.iter().any(|f| f.name == *name) {
-                continue
-            }
-            bail!("Insert contains unexpected field: {name}");
-        }
-        Ok(())
+        todo!()
+        // for field in &table.fields {
+        //     if self.header.contains(&field.name) || field.kind.generated() {
+        //         continue
+        //     }
+        //     bail!("Missing expected field: {} -> {}", table.name, field.name);
+        // }
+        // for name in &self.header {
+        //     if table.fields.iter().any(|f| f.name == *name) {
+        //         continue
+        //     }
+        //     bail!("Insert contains unexpected field: {name}");
+        // }
+        // Ok(())
     }
 }
 
@@ -803,9 +947,9 @@ impl<'a> InsertBuilder<'a> {
         for field in &self.table.fields {
 
             // auto generated ids should be left empty on inserts
-            if matches!(field.kind, PostgresTypes::RandomUuid) {
-                continue
-            }
+            // if matches!(field.kind, TableTypes::RandomId) {
+            //     continue
+            // }
 
             // The raw field in every row is a dump of the full text of the underlying record
             // and they are all indexed as a tsvector
@@ -854,39 +998,39 @@ impl<'a> InsertBuilder<'a> {
             }
 
             match field.kind {
-                PostgresTypes::SmallInt => {
+                TableTypes::SmallInt => {
                     match value.as_i64() {
                         Some(num) => params.push(&field.name, (num as i16).into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
-                PostgresTypes::Int => {
+                TableTypes::Int => {
                     match value.as_i64() {
                         Some(num) => params.push(&field.name, (num as i32).into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
-                PostgresTypes::BigInt => {
+                TableTypes::BigInt => {
                     match value.as_i64() {
                         Some(num) => params.push(&field.name, num.into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
 
-                PostgresTypes::Float => {
+                TableTypes::Float => {
                     match value.as_f64() {
                         Some(num) => params.push(&field.name, (num as f32).into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
 
-                PostgresTypes::Double => {
+                TableTypes::Double => {
                     match value.as_f64() {
                         Some(num) => params.push(&field.name, num.into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
-                PostgresTypes::Boolean => {
+                TableTypes::Boolean => {
                     match value.as_bool() {
                         Some(num) => params.push(&field.name, num.into()),
                         None => bail!("Unreadable field: {}", field.name),
@@ -895,46 +1039,46 @@ impl<'a> InsertBuilder<'a> {
                 // PostgresTypes::Uuid => {
 
                 // },
-                PostgresTypes::Timestamp => {
+                TableTypes::Timestamp => {
                     match value.as_str() {
                         Some(num) => params.push(&field.name, DateTime::parse_from_rfc3339(num)?.to_utc().into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 }
-                PostgresTypes::Enum(label) => {
+                TableTypes::Enum(label) => {
                     match label {
                         _ => bail!("Unhandled enumeration {label} | {}", field.name),
                     }
                 },
-                PostgresTypes::Char(_)
-                | PostgresTypes::TextTrigram
-                | PostgresTypes::Text => {
+                TableTypes::Char(_)
+                | TableTypes::TextTrigram
+                | TableTypes::Text => {
                     match value.as_str() {
                         Some(num) => params.push(&field.name, num.to_owned().into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 },
-                PostgresTypes::TextArrayInvert => {
+                TableTypes::TextArrayInvert => {
                     match as_string_array(value) {
                         Some(num) => params.push(&field.name, num.into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 },
-                PostgresTypes::TextInvert => {
+                TableTypes::TextInvert => {
                     match value.as_str() {
                         Some(num) => params.push_tsvector(&field.name, num.to_owned().into()),
                         None => bail!("Unreadable field: {}", field.name),
                     }
                 },
-                PostgresTypes::Uuid => {
-                    match value.as_str() {
-                        Some(num) => params.push(&field.name, num.to_owned().into()),
-                        None => bail!("Unreadable uuid field: {}", field.name),
+                TableTypes::Id => {
+                    match serde_json::from_value::<uuid::Uuid>(value.clone()) {
+                        Ok(num) => params.push(&field.name, num.into()),
+                        Err(err) => bail!("Unreadable uuid field: {} ({err})", field.name),
                     }
                 }
-                PostgresTypes::RandomUuid => {
-                    bail!("May not insert values for serial fields")
-                },
+                // TableTypes::RandomId => {
+                //     bail!("May not insert values for serial fields")
+                // },
             }
 
         }

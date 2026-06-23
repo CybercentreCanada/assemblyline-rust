@@ -369,49 +369,49 @@ impl Field {
     fn query(&self, query: FieldQuery) -> Result<Constraints, QueryError> {
         match query {
             FieldQuery::Regex(regex, location) => match self.kind {
-                crate::tables::PostgresTypes::Timestamp | crate::tables::PostgresTypes::Boolean |
-                crate::tables::PostgresTypes::SmallInt | crate::tables::PostgresTypes::Int |
-                crate::tables::PostgresTypes::BigInt | crate::tables::PostgresTypes::RandomUuid |
-                crate::tables::PostgresTypes::Uuid |
-                crate::tables::PostgresTypes::Float | crate::tables::PostgresTypes::Double |
-                crate::tables::PostgresTypes::Enum(_) =>
-                    Err(QueryError::incompatable_operation("regex", &self.kind.type_string(), location)),
-                crate::tables::PostgresTypes::Char(_) |
-                crate::tables::PostgresTypes::Text |
-                crate::tables::PostgresTypes::TextArrayInvert |
-                crate::tables::PostgresTypes::TextInvert |
-                crate::tables::PostgresTypes::TextTrigram => {
+                crate::tables::TableTypes::Timestamp | crate::tables::TableTypes::Boolean |
+                crate::tables::TableTypes::SmallInt | crate::tables::TableTypes::Int |
+                crate::tables::TableTypes::BigInt | // crate::tables::TableTypes::RandomId |
+                crate::tables::TableTypes::Id |
+                crate::tables::TableTypes::Float | crate::tables::TableTypes::Double |
+                crate::tables::TableTypes::Enum(_) =>
+                    Err(QueryError::incompatable_operation("regex", &self.kind.postgres_type_string(), location)),
+                crate::tables::TableTypes::Char(_) |
+                crate::tables::TableTypes::Text |
+                crate::tables::TableTypes::TextArrayInvert |
+                crate::tables::TableTypes::TextInvert |
+                crate::tables::TableTypes::TextTrigram => {
                     // let ast = regex_syntax::ast::parse::Parser::new().parse(regex.as_str())?;
                     warn!("Using regex expression directly: {}", regex);
                     Ok(Constraints::Field { name: self.name.clone(), operation: Op::SimilarTo, value: regex.as_str().to_owned().into() })
                 },
             },
             FieldQuery::Wildcard(query, location) => match self.kind {
-                crate::tables::PostgresTypes::Timestamp | crate::tables::PostgresTypes::Boolean |
-                crate::tables::PostgresTypes::SmallInt | crate::tables::PostgresTypes::Int |
-                crate::tables::PostgresTypes::BigInt | crate::tables::PostgresTypes::RandomUuid |
-                crate::tables::PostgresTypes::Uuid |
-                crate::tables::PostgresTypes::Float | crate::tables::PostgresTypes::Double |
-                crate::tables::PostgresTypes::Enum(_) =>
-                    Err(QueryError::incompatable_operation("wildcard", &self.kind.type_string(), location)),
-                crate::tables::PostgresTypes::Char(_) |
-                crate::tables::PostgresTypes::Text |
-                crate::tables::PostgresTypes::TextArrayInvert |
-                crate::tables::PostgresTypes::TextInvert |
-                crate::tables::PostgresTypes::TextTrigram => {
+                crate::tables::TableTypes::Timestamp | crate::tables::TableTypes::Boolean |
+                crate::tables::TableTypes::SmallInt | crate::tables::TableTypes::Int |
+                crate::tables::TableTypes::BigInt | // crate::tables::TableTypes::RandomId |
+                crate::tables::TableTypes::Id |
+                crate::tables::TableTypes::Float | crate::tables::TableTypes::Double |
+                crate::tables::TableTypes::Enum(_) =>
+                    Err(QueryError::incompatable_operation("wildcard", &self.kind.postgres_type_string(), location)),
+                crate::tables::TableTypes::Char(_) |
+                crate::tables::TableTypes::Text |
+                crate::tables::TableTypes::TextArrayInvert |
+                crate::tables::TableTypes::TextInvert |
+                crate::tables::TableTypes::TextTrigram => {
                     Ok(Constraints::Field { name: self.name.clone(), operation: Op::Like, value: query.to_sql().into() })
                 }
             },
             FieldQuery::Number(number_query, location) => match self.kind {
-                crate::tables::PostgresTypes::Char(_) |
-                crate::tables::PostgresTypes::Enum(_) |
-                crate::tables::PostgresTypes::Uuid |
-                crate::tables::PostgresTypes::Text |
-                crate::tables::PostgresTypes::TextArrayInvert |
-                crate::tables::PostgresTypes::TextInvert |
-                crate::tables::PostgresTypes::TextTrigram =>
-                    Err(QueryError::incompatable_operation("match_number", &self.kind.type_string(), location)),
-                crate::tables::PostgresTypes::Timestamp => {
+                crate::tables::TableTypes::Char(_) |
+                crate::tables::TableTypes::Enum(_) |
+                crate::tables::TableTypes::Id |
+                crate::tables::TableTypes::Text |
+                crate::tables::TableTypes::TextArrayInvert |
+                crate::tables::TableTypes::TextInvert |
+                crate::tables::TableTypes::TextTrigram =>
+                    Err(QueryError::incompatable_operation("match_number", &self.kind.postgres_type_string(), location)),
+                crate::tables::TableTypes::Timestamp => {
                     let (op, value) = numeric_operator(number_query);
                     let value = match chrono::DateTime::from_timestamp_millis((value * 1_000.0) as i64) {
                         Some(value) => value,
@@ -419,35 +419,35 @@ impl Field {
                     };
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: value.into() })
                 },
-                crate::tables::PostgresTypes::Boolean => {
+                crate::tables::TableTypes::Boolean => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: (value != 0.0).into() })
                 },
-                crate::tables::PostgresTypes::SmallInt => {
+                crate::tables::TableTypes::SmallInt => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: (value as i16).into() })
                 },
-                crate::tables::PostgresTypes::Int => {
+                crate::tables::TableTypes::Int => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: (value as i32).into() })
                 },
-                crate::tables::PostgresTypes::RandomUuid |
-                crate::tables::PostgresTypes::BigInt => {
+                // crate::tables::TableTypes::RandomId |
+                crate::tables::TableTypes::BigInt => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: (value as i64).into() })
                 }
-                crate::tables::PostgresTypes::Float => {
+                crate::tables::TableTypes::Float => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: (value as f32).into() })
                 },
-                crate::tables::PostgresTypes::Double => {
+                crate::tables::TableTypes::Double => {
                     let (op, value) = numeric_operator(number_query);
                     Ok(Constraints::Field { name: self.name.clone(), operation: op, value: value.into() })
                 },
             },
             FieldQuery::Match(string_query, location) => match self.kind {
-                crate::tables::PostgresTypes::Timestamp => todo!(),
-                crate::tables::PostgresTypes::Boolean => {
+                crate::tables::TableTypes::Timestamp => todo!(),
+                crate::tables::TableTypes::Boolean => {
                     if string_query.operator.is_some() {
                         Err(QueryError::incompatable_operation("string_match_with_prefix", "bool", location))
                     } else {
@@ -458,25 +458,25 @@ impl Field {
                         }
                     }
                 },
-                crate::tables::PostgresTypes::SmallInt => todo!(),
-                crate::tables::PostgresTypes::Int => todo!(),
-                crate::tables::PostgresTypes::Uuid |
-                crate::tables::PostgresTypes::BigInt => todo!(),
-                crate::tables::PostgresTypes::Char(_) => todo!(),
-                crate::tables::PostgresTypes::Enum(_) => todo!(),
-                crate::tables::PostgresTypes::Text => {
+                crate::tables::TableTypes::SmallInt => todo!(),
+                crate::tables::TableTypes::Int => todo!(),
+                crate::tables::TableTypes::Id |
+                crate::tables::TableTypes::BigInt => todo!(),
+                crate::tables::TableTypes::Char(_) => todo!(),
+                crate::tables::TableTypes::Enum(_) => todo!(),
+                crate::tables::TableTypes::Text => {
                     let operation = string_operator(string_query.operator);
                     Ok(Constraints::Field { name: self.name.clone(), operation, value: string_query.value.into() })
                 },
-                crate::tables::PostgresTypes::TextArrayInvert => todo!(),
-                crate::tables::PostgresTypes::TextInvert => todo!(),
-                crate::tables::PostgresTypes::TextTrigram => {
+                crate::tables::TableTypes::TextArrayInvert => todo!(),
+                crate::tables::TableTypes::TextInvert => todo!(),
+                crate::tables::TableTypes::TextTrigram => {
                     let operation = string_operator(string_query.operator);
                     Ok(Constraints::Field { name: self.name.clone(), operation, value: string_query.value.into() })
                 },
-                crate::tables::PostgresTypes::RandomUuid => todo!(),
-                crate::tables::PostgresTypes::Float => todo!(),
-                crate::tables::PostgresTypes::Double => todo!(),
+                // crate::tables::TableTypes::RandomId => todo!(),
+                crate::tables::TableTypes::Float => todo!(),
+                crate::tables::TableTypes::Double => todo!(),
             },
             FieldQuery::Range(range_query, location) => todo!(),
             FieldQuery::Or(items, _location) => {
@@ -488,7 +488,7 @@ impl Field {
             FieldQuery::Not(field_query, _location) => {
                 Ok(Constraints::Not(Box::new(self.query(*field_query)?)))
             },
-            FieldQuery::Nested(_query, location) => Err(QueryError::incompatable_operation("nested", &self.kind.type_string(), location)),
+            FieldQuery::Nested(_query, location) => Err(QueryError::incompatable_operation("nested", &self.kind.postgres_type_string(), location)),
         }
     }
 }

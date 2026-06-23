@@ -10,7 +10,7 @@ pub mod lucene;
 pub mod json;
 pub mod yugabyte;
 pub mod search;
-pub mod tidb;
+pub mod titanium;
 
 #[cfg(test)]
 mod tests;

@@ -2,6 +2,7 @@ use anyhow::Result;
 use assemblyline_models::{Readable, datastore};
 use assemblyline_models::types::Sid;
 use assemblyline_search::tables::init_database_tables;
+use assemblyline_search::titanium::Titanium;
 use assemblyline_search::yugabyte::{Yugabyte, YugabyteConnectionManager, YugabytePool, bb8};
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -18,14 +19,15 @@ use crate::elastic::{Elastic, create_empty_result_from_key};
 
 pub async fn main(core: Core, leader: bool) -> Result<()> {
     let core = Arc::new(core);
-    let manager = YugabyteConnectionManager::new(core.config.database.url.clone(), core.classification_parser.clone());
-    let pool = bb8::Builder::new()
-        .connection_timeout(Duration::from_mins(5))
-        .build(manager).await?;
+    let pool = Titanium::connect(&core.config.database.url).await?;
+    // let manager = YugabyteConnectionManager::new(core.config.database.url.clone(), core.classification_parser.clone());
+    // let pool = bb8::Builder::new()
+    //     .connection_timeout(Duration::from_mins(5))
+    //     .build(manager).await?;
     // let mut db = Yugabyte::connect(&core.config.database.url, core.classification_parser.clone()).await?;
     {
-        let db = pool.get().await?;
-        init_database_tables(&db, false).await?;
+        // let db = pool.get().await?;
+        init_database_tables(&pool, false).await?;
 
         // println!("{}", db.count_submissions().await?);
         // return Ok(());
@@ -53,7 +55,7 @@ pub async fn main(core: Core, leader: bool) -> Result<()> {
                 break
             };
             counter += 1;
-            if counter > 31_0 {
+            if counter > 100 {
                 break
             }
         }
@@ -71,7 +73,7 @@ pub async fn main(core: Core, leader: bool) -> Result<()> {
     // todo!();
 }
 
-async fn inserter(core: Arc<Core>, pool: YugabytePool, queue: flume::Receiver<Sid>) -> Result<()> {
+async fn inserter(core: Arc<Core>, pool: Titanium, queue: flume::Receiver<Sid>) -> Result<()> {
     while let Ok(sid) = queue.recv_async().await {
         println!("examining: {}", sid);
         println!("{:?}", insert_submission(pool.clone(), &core, sid).await?);
@@ -93,13 +95,13 @@ enum InsertResult {
     NotFound,
 }
 
-async fn insert_submission(db: YugabytePool, core: &Core, sid: Sid) -> Result<InsertResult> {
+async fn insert_submission(db: Titanium, core: &Core, sid: Sid) -> Result<InsertResult> {
     let ds = &core.datastore;
 
     // check if this sid is already present
     {
-        let con = db.get().await?;
-        if con.submission_exists(sid).await? {
+        // let con = db.get().await?;
+        if db.submission_exists(sid).await? {
             return Ok(InsertResult::AlreadyDone)
         }
     }

@@ -44,6 +44,19 @@ impl From<String> for TagValue {
     }
 }
 
+impl PartialOrd for TagValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+
+impl Ord for TagValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.to_string().cmp(&other.0.to_string())
+    }
+}
+
 // MARK: Tag Processors
 #[derive(Debug)]
 pub enum TagProcessor {

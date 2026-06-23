@@ -14,8 +14,9 @@ use serde_json::json;
 
 use crate::json::{AllFields, JsonFilter};
 use crate::lucene::Query;
-use crate::tables::{Database, RelationRow};
-use crate::tidb::TiDb;
+use crate::tables::RelationRow;
+use crate::titanium::Titanium;
+// use crate::titanium::Titanium;
 use crate::yugabyte::Yugabyte;
 
 fn init() {
@@ -415,13 +416,13 @@ async fn insert_submission() {
     let Sample{submission, results, error, errors, fileinfo, files, tags} = example_submission();
 
     // let mut db = Yugabyte::development(true).await.unwrap();
-    let db = TiDb::development(true).await.unwrap();
-    crate::tables::init_database_tables(&Database::Ti(db), true).await.unwrap();
+    let db = Titanium::development(true).await.unwrap();
+    crate::tables::init_database_tables(&db, true).await.unwrap();
+
+    db.insert_submission(&submission, &results, &errors, &fileinfo).await.unwrap();
+    assert!(db.submission_exists(submission.sid).await.unwrap());
 
     todo!();
-    // db.insert_submission(&submission, &results, &errors, &fileinfo).await.unwrap();
-    // assert!(db.submission_exists(submission.sid).await.unwrap());
-
     // {
     //     let loaded = db.fetch_submission(submission.sid).await.unwrap().unwrap();
     //     assert_eq!(submission, loaded);
