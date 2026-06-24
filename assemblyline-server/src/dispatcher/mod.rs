@@ -1486,6 +1486,7 @@ impl Dispatcher {
         if !self.active_submissions.exists(&sid).await? {
             info!("[{sid}] New submission received");
             task.trace_event("submission_start");
+            task.submission.classification = ExpandingClassification::new(task.submission.params.classification.clone().into(), &self.core.classification_parser)?;
             self.active_submissions.add(&sid, &SubmissionDispatchMessage::new(task.submission.clone(),  task.completed_queue.clone())).await?;
 
             // Write all new submissions to the traffic queue

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Sid, Wildcard, Sha256};
+use crate::types::{ClassificationString, Sha256, Sid, Wildcard};
 
 use crate::messages::dispatching::FileTreeData;
 
@@ -31,6 +31,8 @@ pub struct Notification {
 pub struct Submission {
     /// Submission ID to use
     pub sid: Sid,
+    /// Classification for this submission
+    pub classification: ClassificationString,
     /// Message time
     #[serde(default="chrono::Utc::now")]
     pub time: chrono::DateTime<chrono::Utc>,
@@ -57,7 +59,6 @@ pub struct Submission {
     /// File sha256 map to file info
     #[serde(default)]
     pub file_infos: HashMap<Sha256, super::task::FileInfo>,
-
 }
 
 impl Submission {
@@ -65,6 +66,7 @@ impl Submission {
     pub fn new(sid: Sid,time: chrono::DateTime<chrono::Utc>, params: SubmissionParams) -> Self {
         Self {
             sid,
+            classification: params.classification.clone(),
             time,
             params,
 
@@ -124,6 +126,7 @@ impl From<&crate::datastore::submission::Submission> for Submission {
     fn from(value: &crate::datastore::submission::Submission) -> Self {
         Self {
             sid: value.sid,
+            classification: value.classification.clone().into(),
             files: value.files.clone(),
             metadata: value.metadata.clone(),
             params: value.params.clone(),

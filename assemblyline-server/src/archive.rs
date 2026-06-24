@@ -61,6 +61,7 @@ impl ArchiveManager {
 
             let submission_obj = Submission{
                 files: submission.files.clone(),
+                classification: submission.classification.clone(),
                 metadata: submission.metadata.clone(),
                 params,
                 sid: rand::rng().random(),
