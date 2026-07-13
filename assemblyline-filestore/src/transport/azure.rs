@@ -31,12 +31,16 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use azure_core::auth::TokenCredential;
-use azure_identity::DefaultAzureCredentialBuilder;
-use azure_storage::StorageCredentials;
-use azure_storage_blobs::prelude::{BlobServiceClient, ClientBuilder, ContainerClient};
+use azure_core::credentials::{Secret, TokenCredential};
+use azure_storage_blob::models::BlobClientGetPropertiesResultHeaders;
+use azure_core::http::RequestContent;
+use azure_identity::{WorkloadIdentityCredential, WorkloadIdentityCredentialOptions, ClientAssertionCredentialOptions, ClientSecretCredential};
+
+//use azure_storage::StorageCredentials;
+use azure_storage_blob::{BlobServiceClient, BlobContainerClient};
 use bytes::Bytes;
 use log::info;
+use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 
 use super::Transport;
@@ -59,7 +63,7 @@ pub struct AzureParameters {
 
 pub struct TransportAzure {
     /// An azure blob storage client
-    container_client: ContainerClient,
+    container_client: BlobContainerClient,
 
     allow_directory_access: bool,
 
@@ -101,52 +105,56 @@ impl TransportAzure {
 
         let host = host.to_lowercase();
 
-        let account = match host.strip_suffix(".blob.core.windows.net") {
-            Some(account) => account,
-            None => &host,
-        };
+        // let account = match host.strip_suffix(".blob.core.windows.net") {
+        //     Some(account) => account,
+        //     None => &host,
+        // };
 
-        let container_client = if emulator {
-            ClientBuilder::emulator().container_client(account)
-        } else {
-            // Get credentials
-            let credentials: StorageCredentials = if use_default_credentials {
-                if (!tenant_id.is_empty() && !client_id.is_empty()) && (client_secret.is_empty()) {
-                    todo!()
-                    // Arc::new(WorkloadIdentityCredential::new(
-                    //     reqwest::Client::new(),
-                    //     tenant_id=tenant_id,
-                    //                                             client_id=client_id
-                    // ))
-                } else {
-                    // Service accounts will by default create the enviromental variables, and use them as params
-                    let credentials: Arc<dyn TokenCredential> = Arc::new(DefaultAzureCredentialBuilder::new().build()?);
-                    credentials.into()
-                }
-            } else if !access_key.is_empty() {
-                let account = if client_id.is_empty() { account } else { &client_id };
-                StorageCredentials::access_key(account, access_key)
-            } else if !tenant_id.is_empty() && !client_id.is_empty() && !client_secret.is_empty() {
+        let container_client = {            
+            // Get credentials            
+            let mut endpoint_url = url::Url::parse(format!("https://{host}").as_str())?;
+            let credentials: Option<Arc<dyn TokenCredential>> = if emulator {
+                //ClientBuilder::emulator().container_client(account)
                 todo!()
-                // self.credential = ClientSecretCredential(tenant_id=tenant_id,
-                //                                          client_id=client_id,
-                //                                          client_secret=client_secret)
+            } else if use_default_credentials {
+                // Workload Identity Credentials
+                let options: WorkloadIdentityCredentialOptions =  if (!tenant_id.is_empty() && !client_id.is_empty()) && (client_secret.is_empty()) {
+                    // Create a WorkloadIdentity based on provided tenant_id and client_id.
+                    WorkloadIdentityCredentialOptions {
+                        credential_options: ClientAssertionCredentialOptions::default(),
+                        tenant_id: Some(tenant_id.clone()),
+                        client_id: Some(client_id.clone()),
+                        token_file_path: None,
+                    }
+                } else {
+                    // Otherwise, use the default options for WorkloadIdentityCredential that'll be inferred by the environment
+                    WorkloadIdentityCredentialOptions::default()
+                };
+                Some(WorkloadIdentityCredential::new(Some(options))?)
+            } else if !access_key.is_empty() {
+                // Storage Shared Key Credentials
+                // let account = if client_id.is_empty() { account } else { &client_id };
+                // StorageCredentials::access_key(account, access_key)
+                todo!()
+            } else if !tenant_id.is_empty() && !client_id.is_empty() && !client_secret.is_empty() {
+                Some(ClientSecretCredential::new(tenant_id.as_str(), client_id, Secret::new(client_secret), None)?)
             } else {
-                StorageCredentials::anonymous()
+                // Anonymous access
+                None
             };
 
             // open clients
-            let service_client = BlobServiceClient::builder(account, credentials).blob_service_client();
-            service_client.container_client(blob_container)
+            let service_client = BlobServiceClient::new(endpoint_url, credentials, None)?;
+            service_client.blob_container_client(blob_container)
         };
 
         // Init
-        if let Err(err) = retry!(connection_attempts, container_client.get_properties().await) {
+        if let Err(err) = retry!(connection_attempts, container_client.get_properties(None).await) {
             if !any_is_not_found(&err) {
                 return Err(err)
             }
             if !read_only {
-                if let Err(err) = retry!(connection_attempts, container_client.create().await) {
+                if let Err(err) = retry!(connection_attempts, container_client.create(None).await) {
                     if !any_is_not_found(&err) {
                         return Err(err)
                     }
@@ -198,10 +206,10 @@ impl Transport for TransportAzure {
         }
 
         let key = self.normalize(name);
-        let client = self.container_client.blob_client(key);
+        let client = self.container_client.blob_client(&key);
 
         retry!(ignore_result, self.connection_attempts, {
-            client.put_block_blob(body.clone()).await
+            client.upload(RequestContent::from_slice(&body), None).await
         })
     }
 
@@ -211,12 +219,13 @@ impl Transport for TransportAzure {
         }
 
         let key = self.normalize(dest);
-        let client = self.container_client.blob_client(key);
+        let client = self.container_client.blob_client(&key);
 
         retry!(ignore_result, self.connection_attempts, {
-            let source = tokio::fs::File::open(source).await?;
-            let source = azure_core::tokio::fs::FileStreamBuilder::new(source).build().await?;
-            client.put_block_blob(source).await
+            let mut source = tokio::fs::File::open(source).await?;
+            let mut buf = Vec::new();
+            source.read_to_end(&mut buf).await?;            
+            client.upload(RequestContent::from(buf), None).await
         })
 
 //         # if file exists already, it will be overwritten
@@ -231,7 +240,7 @@ impl Transport for TransportAzure {
 
     async fn exists(&self, name: &str) -> Result<bool> {
         let key = self.normalize(name);
-        let client = self.container_client.blob_client(key);
+        let client = self.container_client.blob_client(&key);
         retry!(self.connection_attempts, {
             match client.exists().await {
                 Ok(exists) => Ok(exists),
@@ -294,16 +303,16 @@ impl Transport for TransportAzure {
 
     async fn stream(&self, name: &str) -> Result<(u64, tokio::sync::mpsc::Receiver<Result<Bytes, std::io::Error>>)> {
         let key = self.normalize(name);
-        let client = self.container_client.blob_client(key);
+        let client = self.container_client.blob_client(&key);
 
         // Verify the blob exists and get its size BEFORE starting the download stream.
         // This avoids spawning a background task for a blob that doesn't exist and
         // ensures callers receive a proper not-found error they can handle (e.g. by
         // trying the next transport in a multi-transport FileStore).
-        let properties = client.get_properties().await?;
-        let content_length = properties.blob.properties.content_length;
+        let properties = client.get_properties(None).await?;
+        let content_length = properties.content_length()?.unwrap();
 
-        let mut stream = client.get().into_stream();
+        let mut stream = client.download(None).await?.body;
         let (send, recv) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
             while let Some(chunk) = stream.next().await {
@@ -315,19 +324,9 @@ impl Transport for TransportAzure {
                     },
                 };
 
-                let mut body = chunk.data;
-                while let Some(data) = body.next().await {
-                    let data = match data {
-                        Ok(data) => data,
-                        Err(err) => {
-                            _ = send.send(Err(std::io::Error::other(err))).await;
-                            return;
-                        },
-                    };
-                    if send.send(Ok(data)).await.is_err() {
-                        return;
-                    }
-                };
+                if send.send(Ok(chunk)).await.is_err() {
+                    return;
+                }
             }
         });
 
@@ -340,9 +339,9 @@ impl Transport for TransportAzure {
         }
 
         let key = self.normalize(name);
-        let client = self.container_client.blob_client(key);
+        let client = self.container_client.blob_client(&key);
         retry!(self.connection_attempts, {
-            match client.delete().await {
+            match client.delete(None).await {
                 Ok(_) => Ok(()),
                 Err(err) if is_not_found(&err) => Ok(()),
                 Err(err) => Err(err),
@@ -402,8 +401,8 @@ impl std::fmt::Debug for TransportAzure {
 // pub (crate) use retry;
 
 fn is_not_found(err: &azure_core::Error) -> bool {
-    if let Some(err) = err.as_http_error() {
-        if err.status() == azure_core::StatusCode::NotFound {
+    if let Some(status_code) = err.http_status() {
+        if status_code == azure_core::http::StatusCode::NotFound {
             return true
         }
     }
