@@ -12,6 +12,7 @@ use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::tagging::{get_tag_information, load_tags_from_object, TagValue};
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
+use assemblyline_models::messages::service_api::{self, result::Result as ApiResult};
 use assemblyline_models::messages::service_heartbeat::Metrics;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::strings::Keyword;
@@ -25,7 +26,6 @@ use redis_objects::{increment, AutoExportingMetrics, Hashmap, RedisObjects};
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use crate::service_api::v1::task::models::{Result as ApiResult};
 use crate::common::heuristics::{HeuristicHandler, InvalidHeuristicException};
 use crate::common::odm::value_to_string;
 use crate::common::tagging::{tag_safelist_watcher, TagSafelister};
@@ -777,6 +777,8 @@ fn finish_parsing_task(mut data: JsonMap) -> Result<Task, MalformedResult> {
 impl TaskingClient {
 
     pub async fn task_finished(&self, service_task: FinishedBody, client_id: &str, service_name: ServiceName) -> Result<Value> {
+
+
         match service_task {
             FinishedBody::Success(mut success) => {
                 let task = finish_parsing_task(success.task)?;
@@ -841,7 +843,7 @@ impl TaskingClient {
             datastore: Arc<Elastic>,
             cl_engine: Arc<ClassificationParser>,
             mut file_info: assemblyline_models::datastore::file::File,
-            item: assemblyline_models::datastore::result::File,
+            item: assemblyline_models::messages::service_api::result::File,
             is_supplementary: bool,
         ) -> Result<()> {
             file_info.classification = ExpandingClassification::new(item.classification.into(), &cl_engine)?;
@@ -951,7 +953,7 @@ impl TaskingClient {
             // if any heristics automatically create tags generate those tags now
             if let Some(mut heuristic) = section.heuristic.take() {
                 let heur_id = format!("{}.{}", service_name.to_uppercase(), heuristic.heur_id);
-                heuristic.heur_id = crate::service_api::v1::task::models::HeuristicId::Name(heur_id.clone());
+                heuristic.heur_id = service_api::result::HeuristicId::Name(heur_id.clone());
 
                 match self.heuristic_handler.service_heuristic_to_result_heuristic(heuristic, self.heuristics.clone()) {
                      Ok((heuristic, new_tags)) => {
@@ -1068,12 +1070,27 @@ impl TaskingClient {
             })
         }
 
+        // convert service_api::task::ResponseBody to datastore::result::ResponseBody
+        let supplementary_files: Vec<assemblyline_models::datastore::result::File> = result.response.supplementary.into_iter().map(|f| f.into()).collect_vec();
+        let extracted_files: Vec<assemblyline_models::datastore::result::File> = result.response.extracted.into_iter().map(|f| f.into()).collect_vec();
+
+        let response = assemblyline_models::datastore::result::ResponseBody {
+            milestones: result.response.milestones,
+            service_version: result.response.service_version,
+            service_name: result.response.service_name,
+            service_tool_version: result.response.service_tool_version,
+            supplementary: supplementary_files,
+            extracted: extracted_files,
+            service_context: result.response.service_context,
+            service_debug_info: result.response.service_debug_info,
+        };
+
         let result = assemblyline_models::datastore::result::Result{
             archive_ts: None,
             classification: ExpandingClassification::new(result.classification.as_str().to_string(), &self.classification_engine)?,
             created: result.created,
             expiry_ts: result.expiry_ts,
-            response: result.response,
+            response: response,
             result: assemblyline_models::datastore::result::ResultBody {
                 score: result.result.score,
                 sections,
