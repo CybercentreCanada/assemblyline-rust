@@ -33,11 +33,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use azure_core::credentials::{Secret, TokenCredential};
 use azure_storage_blob::models::BlobClientGetPropertiesResultHeaders;
-use azure_core::http::RequestContent;
+use azure_core::http::{ClientOptions, RequestContent};
+use azure_core::http::policies::Policy;
 use azure_identity::{WorkloadIdentityCredential, WorkloadIdentityCredentialOptions, ClientAssertionCredentialOptions, ClientSecretCredential};
 
-//use azure_storage::StorageCredentials;
-use azure_storage_blob::{BlobServiceClient, BlobContainerClient};
+use azure_storage_blob::{BlobServiceClient, BlobServiceClientOptions, BlobContainerClient};
 use bytes::Bytes;
 use log::info;
 use tokio::io::AsyncReadExt;
@@ -45,6 +45,7 @@ use tokio_stream::StreamExt;
 
 use super::Transport;
 use crate::errors::ReadOnlyError;
+use crate::transport::utils::azure::{SharedKeyAuthorizationPolicy, EMULATOR_ACCOUNT_NAME};
 
 const MIN_BACKOFF: Duration = Duration::ZERO;
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
@@ -99,7 +100,9 @@ impl TransportAzure {
 
         // Get container and base_path
         let (blob_container, base_path) = match base.trim_matches('/').split_once("/") {
-            Some((a, b)) => (a, Some(PathBuf::from(b))),
+            // Ensure the base_path is not empty, if it is, set it to None
+            Some((a, b)) => (a, if !b.is_empty() { Some(PathBuf::from(b)) } else { None }),
+            // If there is no '/', then the entire base is the container, and there is no base_path
             None => (base.trim_matches('/'), None)
         };
 
@@ -111,11 +114,16 @@ impl TransportAzure {
         // };
 
         let container_client = {            
-            // Get credentials            
+            // Get credentials (by default, assume anonymous access)
             let mut endpoint_url = url::Url::parse(format!("https://{host}").as_str())?;
-            let credentials: Option<Arc<dyn TokenCredential>> = if emulator {
-                //ClientBuilder::emulator().container_client(account)
-                todo!()
+            let mut credentials: Option<Arc<dyn TokenCredential>> = None;
+            let mut per_try_policies: Vec<Arc<dyn Policy>> = vec![];
+
+            if emulator {
+                // Use shared key credentials for Azurite emulator w/ --disableProductStyleUrl enabled
+                // reference: https://learn.microsoft.com/en-us/azure/storage/common/storage-use-emulator#authenticating-requests-against-the-storage-emulator
+                endpoint_url = url::Url::parse(&format!("http://127.0.0.1:10000/{}", EMULATOR_ACCOUNT_NAME))?;
+                per_try_policies.push(SharedKeyAuthorizationPolicy::emulator());
             } else if use_default_credentials {
                 // Workload Identity Credentials
                 let options: WorkloadIdentityCredentialOptions =  if (!tenant_id.is_empty() && !client_id.is_empty()) && (client_secret.is_empty()) {
@@ -130,21 +138,31 @@ impl TransportAzure {
                     // Otherwise, use the default options for WorkloadIdentityCredential that'll be inferred by the environment
                     WorkloadIdentityCredentialOptions::default()
                 };
-                Some(WorkloadIdentityCredential::new(Some(options))?)
+                credentials = Some(WorkloadIdentityCredential::new(Some(options))?);
             } else if !access_key.is_empty() {
-                // Storage Shared Key Credentials
-                // let account = if client_id.is_empty() { account } else { &client_id };
-                // StorageCredentials::access_key(account, access_key)
-                todo!()
+                // Storage Shared Key Credentials via per-try signing policy
+                let account = host.strip_suffix(".blob.core.windows.net").expect("Host must be in the format <account>.blob.core.windows.net");
+                per_try_policies.push(SharedKeyAuthorizationPolicy::new(account.to_string(), access_key));
             } else if !tenant_id.is_empty() && !client_id.is_empty() && !client_secret.is_empty() {
-                Some(ClientSecretCredential::new(tenant_id.as_str(), client_id, Secret::new(client_secret), None)?)
-            } else {
-                // Anonymous access
+                credentials = Some(ClientSecretCredential::new(tenant_id.as_str(), client_id, Secret::new(client_secret), None)?);
+            }
+
+            let options = if per_try_policies.is_empty() {
+                // Don't need to configure custom client options
                 None
+            } else {
+                // Configure client options with per-try policies for Shared Key Authorization
+                Some(BlobServiceClientOptions {
+                    client_options: ClientOptions {
+                        per_try_policies,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
             };
 
             // open clients
-            let service_client = BlobServiceClient::new(endpoint_url, credentials, None)?;
+            let service_client = BlobServiceClient::new(endpoint_url, credentials, options)?;
             service_client.blob_container_client(blob_container)
         };
 
@@ -176,8 +194,8 @@ impl TransportAzure {
     }
 
     fn normalize<'a>(&'a self, path: &'a str) -> Cow<'a, str> {
-        // flatten path to just the basename
-        let path = if !self.allow_directory_access {
+        // flatten path to just the basename depending on the allow_directory_access and base_path settings
+        let path = if !self.allow_directory_access || (self.allow_directory_access && !self.base_path.is_some()) {
             match std::path::Path::new(path).file_name() {
                 Some(name) => match name.to_str() {
                     Some(name) => name,
