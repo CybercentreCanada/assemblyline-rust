@@ -8,8 +8,9 @@ use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
+use aws_credential_types::provider::ProvideCredentials;
 use bytes::Bytes;
-use log::warn;
+use log::{warn, debug};
 
 use super::Transport;
 
@@ -56,6 +57,7 @@ pub struct S3Parameters {
     pub verify: bool,
     pub boto_defaults: bool,
     pub compatability: bool,
+    pub debug: bool,
 }
 
 impl Default for S3Parameters {
@@ -67,6 +69,7 @@ impl Default for S3Parameters {
             verify: true,
             boto_defaults: false,
             compatability: true,
+            debug: false,
         }
     }
 }
@@ -108,9 +111,6 @@ impl TransportS3 {
         } else {
             loader = loader.region(aws_types::region::Region::from_static("ca-central-1"))
         }
-
-        // configure endpoint
-        loader = loader.endpoint_url(endpoint_url);
 
         // Configure keys
         if let Some(key) = &accesskey {
@@ -184,21 +184,30 @@ impl TransportS3 {
 
         // Build the client
         let sdk_config = loader.load().await;
-        let s3_config = if parameters.compatability {
+
+        // Log the credential provider being when debugging is enabled for the transport
+        if parameters.debug{
+            debug!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
+        }
+        
+        let s3_builder = if parameters.compatability {
             aws_sdk_s3::config::Builder::from(&sdk_config)
                 .force_path_style(true)
                 .request_checksum_calculation(aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired)
                 .response_checksum_validation(aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired)
-                .build()
         } else {
-            aws_sdk_s3::config::Builder::from(&sdk_config).build()
+            aws_sdk_s3::config::Builder::from(&sdk_config)
         };
+        
+        // Set the endpoint URL and build the S3 configuration for the client
+        let s3_config = s3_builder.endpoint_url(endpoint_url).build();
+
         let client = aws_sdk_s3::Client::from_conf(s3_config);
 
         // make sure the bucket exists
         let head_result = retry!(connection_attempts, {
             client.head_bucket().bucket(&parameters.s3_bucket).send().await
-        });
+        }, "init: head bucket");
 
         if let Err(err) = head_result {
             let err = err.downcast::<SdkError<aws_sdk_s3::operation::head_bucket::HeadBucketError>>()?;
@@ -208,7 +217,7 @@ impl TransportS3 {
                 if !read_only{
                     let create_result = retry!(connection_attempts, {
                         client.create_bucket().bucket(&parameters.s3_bucket).send().await
-                    });
+                    }, "init: create bucket");
                     if let Err(err) = create_result {
                         let err = err.downcast::<SdkError<aws_sdk_s3::operation::create_bucket::CreateBucketError>>()?;
                         let x = err.into_service_error();
@@ -275,7 +284,7 @@ impl Transport for TransportS3 {
                 .key(label.clone())
                 .body(body.clone().into())
                 .send().await
-        })
+        }, "put object")
     }
 
     async fn upload(&self, path: &Path, name: &str) -> Result<()> {
@@ -288,7 +297,7 @@ impl Transport for TransportS3 {
                 .key(label.clone())
                 .body(ByteStream::from_path(path).await?)
                 .send().await
-        })
+        }, "upload: put object")
     }
 
     async fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
@@ -317,7 +326,7 @@ impl Transport for TransportS3 {
                 Err(err) if is_not_found(&err) => Ok(None),
                 Err(err) => Err(err)
             }
-        })
+        }, "get object")
     }
     async fn exists(&self, name: &str) -> Result<bool> {
         let label = self.normalize(name)?;
@@ -342,7 +351,7 @@ impl Transport for TransportS3 {
                 Err(err) if is_not_found(&err) => Ok(false),
                 Err(err) => Err(err)
             }
-        })
+        }, "head object")
     }
 
     /// read blob into stream
@@ -383,7 +392,8 @@ impl Transport for TransportS3 {
                 .bucket(&self.parameters.s3_bucket)
                 .key(label.clone())
                 .send().await
-        })
+        }, "delete object")
+
     }
 
     fn read_only(&self) -> bool {
@@ -405,7 +415,7 @@ impl Transport for TransportS3 {
 //                 yield chunk['Key']
 
 
-mod verifier {
+pub mod verifier {
     use legacy_rustls::client::{ServerCertVerified, ServerCertVerifier};
 
     /// A dummy certificate verifier that just accepts anything
@@ -574,16 +584,16 @@ mod verifier {
 
 
 macro_rules! retry {
-    (ignore_result, $connection_attempts: expr, $body: expr) => {
+    (ignore_result, $connection_attempts: expr, $body: expr, $context: expr) => {
         {
-            match retry!($connection_attempts, $body) {
+            match retry!($connection_attempts, $body, $context) {
                 Ok(_) => Ok(()),
                 Err(err) => Err(err)
             }
         }
     };
 
-    ($connection_attempts: expr, $body: expr) => {
+    ($connection_attempts: expr, $body: expr, $context: expr) => {
         {
             let mut backoff = MIN_BACKOFF;
             let mut retries = 0;
@@ -611,13 +621,13 @@ macro_rules! retry {
                     },
                     // always retry on these error types, they are usually networking or IO errors
                     Err(SdkError::TimeoutError(timeout)) => {
-                        warn!("Connection timeout ({timeout:?}) for S3 transport, retrying...");
+                        warn!("Connection timeout ({:?}) for S3 transport during ({:?}), retrying...", timeout, $context);
                     }
                     Err(SdkError::DispatchFailure(failure)) => {
-                        warn!("Dispach failure ({failure:?}) for S3 transport, retrying...");
+                        warn!("Dispach failure ({:?}) for S3 transport during ({:?}), retrying...", failure, $context);
                     }
                     Err(SdkError::ResponseError(_)) => {
-                        warn!("Corrupted response from S3 transport, retrying...");
+                        warn!("Corrupted response from S3 transport during ({:?}), retrying...", $context);
                     }
                     // Server side error, genuinely unclear when we should retry on this one, could be lots of things
                     // Err(SdkError::ServiceError(error)) =>

@@ -16,3 +16,10 @@ services:
       - "10001:10001"
       - "10002:10002"
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --disableProductStyleUrl
+
+  floci:
+    image: floci/floci
+    environment:
+      - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
+    ports:
+      - "4566:4566"

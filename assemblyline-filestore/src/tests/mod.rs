@@ -130,6 +130,105 @@ async fn test_s3() {
     read_only(url.to_string()).await;
 }
 
+/// Test S3 FileStore using emulated AWS S3 by pushing and fetching back content from it.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_s3_aws() {
+    use aws_credential_types::Credentials;
+    use aws_config::BehaviorVersion;
+    use legacy_hyper_rustls as hyper_rustls;
+    use legacy_rustls as rustls;
+    use crate::transport::s3::verifier;
+    use base64::{engine::general_purpose::STANDARD as base64, Engine};
+
+    let content = Bytes::copy_from_slice(b"THIS IS AN AWS S3 TEST");
+
+    // Setup the IAM role policy for the S3 bucket in emulated AWS environment (e.g., floci)
+    std::env::set_var("AWS_ENDPOINT_URL", "http://localhost:4566");
+    std::env::set_var("AWS_DEFAULT_REGION", "us-east-1");
+
+    let mut loader: aws_config::ConfigLoader = aws_config::defaults(BehaviorVersion::v2026_01_12());
+    loader = loader.credentials_provider(Credentials::new("test", "test", None, None, "test"));
+
+    let root_store = rustls::RootCertStore::empty();
+    let mut tls_config = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store.clone())
+        .with_no_client_auth();
+
+    tls_config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(verifier::NoCertificateVerification::new()));
+
+    let http_connector = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(tls_config)
+        .https_or_http()
+        .enable_http1()
+        .enable_http2()
+        .build();
+
+    loader = loader.http_client(aws_smithy_http_client::hyper_014::HyperClientBuilder::new()
+                .build(http_connector));
+
+    let sdk_config = loader.load().await;
+
+    let iam_config = aws_sdk_iam::config::Builder::from(&sdk_config).build();
+    let client = aws_sdk_iam::Client::from_conf(iam_config);
+
+    // Create the IAM role and policy for IRSA authentication flow (if it doesn't already exist)
+    if client.get_role().role_name("MockedIRSARole").send().await.is_err() {
+        client.create_role()
+                .role_name("MockedIRSARole")
+                .assume_role_policy_document(r#"{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Federated": "arn:aws:iam::000000000000:oidc-provider/localhost:4566"}, "Action": "sts:AssumeRoleWithWebIdentity"}]}"#)
+                .send()
+                .await.unwrap();
+    }
+
+    client.put_role_policy()
+        .role_name("MockedIRSARole")
+        .policy_name("S3Access")
+        .policy_document(r#"{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": ["s3:CreateBucket", "s3:DeleteObject", "s3:GetObject", "s3:PutObject", "s3:ListBucket"], "Resource": ["arn:aws:s3:::al-storage", "arn:aws:s3:::al-storage/*"]}]}"#)
+        .send()
+        .await.unwrap();
+
+    // Create a web identity token to cover IRSA authentication flow and store it in a temporary file
+    let header = r#"{"alg": "HS256", "typ": "JWT"}"#;
+    let payload = r#"{"iss":"http://localhost:4566","sub":"system:serviceaccount:default:assemblyline","aud":["://amazonaws.com"],"exp":2082758400}"#;
+    let token = format!("{}.{}.test_signature", base64.encode(header), base64.encode(payload));
+
+    // Write token to temp file
+    let token_file = tokio::task::spawn_blocking(move || {
+        let token_file = tempfile::NamedTempFile::new().unwrap();
+        let mut writer = BufWriter::new(token_file);
+        writer.write_all(token.as_bytes()).unwrap();
+        writer.into_inner().unwrap()
+    }).await.unwrap();
+    
+
+    // Set environment variables to simulate IRSA authentication for the AWS S3 FileStore
+    std::env::set_var("AWS_ROLE_ARN", "arn:aws:iam::000000000000:role/MockedIRSARole");
+    std::env::set_var("AWS_WEB_IDENTITY_TOKEN_FILE", token_file.path().to_str().unwrap());
+
+    // Based on the policy, our client should have the necessary permissions to perform the following operations similar to the Minio test, but now against the AWS S3 emulation:
+    let url = "s3://localhost:4566/?use_ssl=False";
+    let fs = FileStore::with_limit_retries(url).await.unwrap();
+    assert!(fs.delete("al4_aws_s3_pytest.txt").await.is_ok());
+    assert!(fs.put("al4_aws_s3_pytest.txt", &content).await.is_ok());
+    assert!(fs.exists("al4_aws_s3_pytest.txt").await.unwrap());
+    assert_eq!(fs.get("al4_aws_s3_pytest.txt").await.unwrap().unwrap(), content);
+    assert!(fs.delete("al4_aws_s3_pytest.txt").await.is_ok());
+    common_actions(fs.clone()).await;
+    big_file(fs).await;
+    read_only(url.to_string()).await;
+
+    // Cleanup the environment variables and temporary token file to ensure they don't interfere with other tests
+    std::env::remove_var("AWS_ROLE_ARN");
+    std::env::remove_var("AWS_WEB_IDENTITY_TOKEN_FILE");
+    std::env::remove_var("AWS_ENDPOINT_URL");
+    std::env::remove_var("AWS_DEFAULT_REGION");
+    tokio::fs::remove_file(token_file.path()).await.unwrap();
+}
+
+
 /// Test S3 FileStore using Minio by pushing and fetching back content from it.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_s3_retry() {
