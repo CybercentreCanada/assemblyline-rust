@@ -40,7 +40,7 @@ async fn test_azure() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_azure_emulator() {
     init();
-    let url = "azure://localhost/?emulator=true&allow_directory_access=true";
+    let url = "azure://localhost/test-container?emulator=true&allow_directory_access=true";
     let fs = FileStore::with_limit_retries(url).await.unwrap();
     println!("{fs:?}");
 
