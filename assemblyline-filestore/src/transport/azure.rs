@@ -40,6 +40,7 @@ use azure_identity::{WorkloadIdentityCredential, WorkloadIdentityCredentialOptio
 use azure_storage_blob::{BlobServiceClient, BlobServiceClientOptions, BlobContainerClient};
 use bytes::Bytes;
 use log::info;
+use safe_path::scoped_join;
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 
@@ -195,7 +196,7 @@ impl TransportAzure {
 
     fn normalize<'a>(&'a self, path: &'a str) -> Cow<'a, str> {
         // flatten path to just the basename depending on the allow_directory_access and base_path settings
-        let path = if !self.allow_directory_access || (self.allow_directory_access && !self.base_path.is_some()) {
+        let path = if !self.allow_directory_access || (self.allow_directory_access && self.base_path.is_none()) {
             match std::path::Path::new(path).file_name() {
                 Some(name) => match name.to_str() {
                     Some(name) => name,
@@ -208,7 +209,7 @@ impl TransportAzure {
         };
 
         if let Some(base) = &self.base_path {
-            Cow::Owned(base.join(path).to_string_lossy().to_string())
+            Cow::Owned(scoped_join(&base, path).expect("Path should be within the base path").to_string_lossy().to_string())
         } else {
             Cow::Borrowed(path)
         }
