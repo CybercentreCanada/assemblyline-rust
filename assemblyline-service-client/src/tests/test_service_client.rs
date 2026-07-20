@@ -15,7 +15,7 @@ use poem::{
     web::{Data, Json},
     Endpoint, EndpointExt, IntoResponse, Route,
 };
-use rand::Rng;
+use rand::RngExt;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};

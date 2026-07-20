@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 #[cfg(feature = "rand")]
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;

@@ -2,7 +2,7 @@
 use std::u32;
 
 #[cfg(feature = "rand")]
-use rand::Rng;
+use rand::{Rng, RngExt as _};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "rand")]
