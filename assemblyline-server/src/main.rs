@@ -296,7 +296,14 @@ impl Core {
         let datastore_ca = get_datastore_ca().await?;
         let datastore_ca = datastore_ca.as_ref().map(|val|&val[..]);
         let datastore_verify = get_datastore_verify()?;
-        let datastore = Elastic::connect(&config.datastore.hosts[0], false, datastore_ca, !datastore_verify, elastic_prefix).await?;
+        let datastore = Elastic::connect_with_backend(
+            &config.datastore.hosts[0],
+            false,
+            datastore_ca,
+            !datastore_verify,
+            elastic_prefix,
+            config.datastore.dtype,
+        ).await?;
 
         // connect to filestore
         let filestore = FileStore::open(&config.filestore.storage).await.context("initializing filestore")?;
