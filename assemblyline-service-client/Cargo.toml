@@ -54,7 +54,7 @@ futures = "0.3"
 
 
 # Network libraries
-reqwest = { version = "0.12", features = ["json", "native-tls", "rustls-tls-native-roots"] }
+reqwest = { version = "0.12", features = ["json", "native-tls", "rustls-tls-native-roots", "stream"] }
 poem = { version = "3.1", features = ["websocket", "openssl-tls", "anyhow", "multipart"] }
 url = "2.5"
 rustls = { version = "0.21.7", features = ["dangerous_configuration"] }
