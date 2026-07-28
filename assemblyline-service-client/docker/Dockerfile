@@ -1,7 +1,6 @@
 ARG rust_build_image=rust:1.90.0-bookworm
 ARG branch=latest
 ARG base=cccs/assemblyline
-ARG version
 
 FROM ${rust_build_image} AS builder-rust
 
@@ -26,6 +25,7 @@ RUN ls -lah /out
 
 # Download python packages we need for assemblyline-service-base
 FROM ${base}:${branch} AS builder-python
+ARG version
 
 USER root
 RUN apt-get update \
