@@ -23,6 +23,6 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker build . -f assemblyline-server/test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker build . -f test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker push cccstemp.azurecr.io/assemblyline-rust-builder:latest
         displayName: Build and push container

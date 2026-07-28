@@ -24,8 +24,7 @@ RUN test -f "/out/release/assemblyline-service-client"
 RUN ls -lah /out
 
 
-# # Download python packages we need for assemblyline-service-base
-
+# Download python packages we need for assemblyline-service-base
 FROM ${base}:${branch} AS builder-python
 
 USER root
