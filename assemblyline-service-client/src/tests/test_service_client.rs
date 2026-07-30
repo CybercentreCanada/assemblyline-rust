@@ -242,6 +242,7 @@ async fn make_test_service_client(
     running: Arc<Mutex<bool>>,
     service_api_host: String,
     base_folder: String,
+    task_complete_limit: Option<i32>,
 ) -> ServiceClient {
     let sc = ServiceClient::new(
         false,
@@ -255,6 +256,7 @@ async fn make_test_service_client(
         service_api_host,
         TEST_AUTH_KEY.to_string(),
         "".to_string(),
+        task_complete_limit,
     )
     .await
     .expect("Failed to make create service client.");
@@ -312,6 +314,7 @@ async fn test_service_client_connection() {
         service_api_address.clone(),
         TEST_AUTH_KEY.to_string(),
         "".to_string(),
+        None,
     )
     .await
     .unwrap();
@@ -392,8 +395,13 @@ async fn test_register_service() {
 
     let sc_running = Arc::new(Mutex::new(true));
 
-    let mut sc =
-        make_test_service_client(sc_running.clone(), service_api_address, base_dir_string).await;
+    let mut sc = make_test_service_client(
+        sc_running.clone(),
+        service_api_address,
+        base_dir_string,
+        None,
+    )
+    .await;
 
     let _ = sc
         .register_service()
@@ -401,7 +409,9 @@ async fn test_register_service() {
         .expect("Register service should pass.");
 
     // the updated manifest should be written to file
-    let file = tokio::fs::File::open(&sc.get_runtime_manifest_path()).await.unwrap();
+    let file = tokio::fs::File::open(&sc.get_runtime_manifest_path())
+        .await
+        .unwrap();
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
     buf_reader.read_to_string(&mut contents).await.unwrap();
@@ -443,6 +453,7 @@ async fn test_run_service_write_task_pipe() {
         sc_running.clone(),
         service_api_address,
         tasking_dir_string.clone(),
+        None,
     )
     .await;
 
@@ -536,11 +547,12 @@ async fn test_run_service_write_task_pipe() {
                 );
 
                 assert_eq!(
-                    task_download_file_path.parent().expect("Downloaded file should have a parent."),
+                    task_download_file_path
+                        .parent()
+                        .expect("Downloaded file should have a parent."),
                     task_dir,
                     "The parent directory of the downloaded file should be tasking_dir"
                 );
-
 
                 let file =
                     std::fs::File::open(&task_file_path).expect("Task file should be openable.");
@@ -624,6 +636,7 @@ async fn test_run_service_task_done_with_result() {
         sc_running.clone(),
         service_api_address,
         base_dir_string.clone(),
+        None,
     )
     .await;
 
@@ -665,6 +678,92 @@ async fn test_run_service_task_done_with_result() {
 }
 
 #[tokio::test]
+async fn test_run_service_task_process_with_limit() {
+    init();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    base_dir_string.push('/');
+
+    let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
+
+    let num_get_task_called = Arc::new(Mutex::new(0));
+    let num_upload_called = Arc::new(Mutex::new(0));
+    let task_done_success = true;
+    let result_value: messages::service_api::result::Result = create_random_service_result(
+        task.fileinfo.sha256.clone(),
+        base_service.name.clone(),
+        base_service.version.clone(),
+        None,
+    );
+
+    let task_complete_limit = 3;
+
+    let (port, _) =
+        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+            service: base_service.clone(),
+            task: Some(task.clone()),
+            num_get_task_called: num_get_task_called.clone(),
+            num_upload_called: num_upload_called.clone(),
+            upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
+            task_done_success: task_done_success,
+        }))
+        .await
+        .unwrap();
+    let service_api_address: String = format!("http://localhost:{}", port).to_string();
+
+    //  build a test core
+    let sc_running = Arc::new(Mutex::new(true));
+    let service_running = Arc::new(Mutex::new(true));
+
+    let mut sc = make_test_service_client(
+        sc_running.clone(),
+        service_api_address,
+        base_dir_string.clone(),
+        Some(task_complete_limit),
+    )
+    .await;
+
+    // different possible service client modes.
+    let mut task_fetcher = SingleThreadTaskFetcher {};
+    let task_uploader = TaskUploader {};
+    let service_launcher = MockServiceLauncher {
+        service: base_service.clone(),
+        runtime_prefix: TESTING_PREFIX.to_string(),
+        tasking_dir: base_dir_string.clone(),
+        running: service_running.clone(),
+        task_done_success: task_done_success,
+        wait_forever: false,
+        service_result: Some(
+            serde_json::to_value(&result_value).expect("Result should serialize."),
+        ),
+    };
+
+    let handler = tokio::spawn(async move {
+        return sc
+            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
+            .await;
+    });
+
+    // task handler should terminate after processing 3 tasks
+    let res = handler.await;
+    assert!(res.is_ok(), "Service handler should return with no error.");
+
+    assert!(
+        !*sc_running.lock(),
+        "Service client running mutex should be set to false."
+    );
+
+    assert!(
+        *num_get_task_called.lock() == (task_complete_limit as usize),
+        "Service client should call get task exactly {task_complete_limit} times."
+    );
+    assert!(
+        *num_upload_called.lock() == (task_complete_limit as usize),
+        "Service client should call upload task exactly {task_complete_limit} times."
+    );
+}
+
+#[tokio::test]
 async fn test_run_service_task_done_with_error() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
@@ -699,6 +798,7 @@ async fn test_run_service_task_done_with_error() {
         sc_running.clone(),
         service_api_address,
         base_dir_string.clone(),
+        None,
     )
     .await;
 
@@ -771,6 +871,7 @@ async fn test_run_service_task_get_no_task() {
         sc_running.clone(),
         service_api_address,
         base_dir_string.clone(),
+        None,
     )
     .await;
 
@@ -856,6 +957,7 @@ async fn test_run_service_task_service_terminated() {
         sc_running.clone(),
         service_api_address,
         base_dir_string.clone(),
+        None,
     )
     .await;
 

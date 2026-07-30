@@ -62,6 +62,9 @@ async fn main() {
 
     let service_dir = std::env::var("SERVICE_DIR").map_or(None, |dir| Some(dir));
 
+    let task_complete_limit = std::env::var("AL_SERVICE_TASK_LIMIT")
+        .map_or(None, |val| val.parse::<i32>().map_or(None, |v| Some(v)));
+
     let sc_running = Arc::new(Mutex::new(true));
 
     let mut sc = ServiceClient::new(
@@ -76,6 +79,7 @@ async fn main() {
         server_host_string,
         service_api_key,
         root_ca_path,
+        task_complete_limit,
     )
     .await
     .unwrap();

@@ -64,6 +64,8 @@ pub struct ServiceClient {
     done_fifo_path: String,
     service_ready_path: String,
     running: Arc<Mutex<bool>>,
+    task_complete_limit: Option<i32>,
+    tasks_processed: i32,
     pub connection: Connection,
 }
 
@@ -85,8 +87,8 @@ impl ServiceClient {
         server_host_string: String,
         service_api_key: String,
         root_ca_path: String,
+        task_complete_limit: Option<i32>,
     ) -> Result<Self> {
-
         let task_fifo_path = format!("{}{}_task.fifo", tmp_folder, runtime_prefix);
         let done_fifo_path = format!("{}{}_done.fifo", tmp_folder, runtime_prefix);
         let service_ready = format!("{}{}_ready", tmp_folder, runtime_prefix);
@@ -99,7 +101,6 @@ impl ServiceClient {
             // read the service manifest provided with the given service and write it to the runtime_manifest_path
             // which will be the loaded manifest for this run.
             fs::copy(Path::new(&manifest_path), Path::new(&runtime_manifest_path))?;
-
         }
 
         let runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
@@ -181,6 +182,8 @@ impl ServiceClient {
             service_ready_path: service_ready,
             running,
             connection: con,
+            task_complete_limit,
+            tasks_processed: 0,
         })
     }
 
@@ -415,7 +418,6 @@ impl ServiceClient {
 
         Ok(task_file_path)
     }
-
 
     async fn write_task_to_fifo(
         &self,
@@ -691,6 +693,8 @@ impl ServiceClient {
                                 .await;
                         }
                     }
+
+                    self.tasks_processed += 1;
                 }
             }
 
@@ -734,7 +738,6 @@ impl ServiceClient {
             let _ = fs::remove_file(tf);
         }
 
-
         let mf = Path::new(&self.manifest_file_path);
 
         if mf.exists() {
@@ -752,6 +755,14 @@ impl ServiceClient {
     }
 
     pub fn is_running(&self) -> bool {
+        // service should stop running once the task limit is reached.
+        if self
+            .task_complete_limit
+            .is_some_and(|v| v == self.tasks_processed)
+        {
+            *self.running.lock() = false;
+        }
+
         *self.running.lock()
     }
 }
