@@ -123,6 +123,7 @@ async fn main() {
 
     // run service in a loop
     while *sc_running.lock() {
+        info!("Start running service server...");
         let res = sc
             .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
             .await;

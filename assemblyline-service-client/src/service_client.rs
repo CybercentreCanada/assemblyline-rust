@@ -109,6 +109,7 @@ impl ServiceClient {
         // update service manifest version tag if it is the placeholder value
         if service_manifest.service.version == PLACEHOLDER_VERSION_TAG {
             service_manifest.service.version = get_version().clone();
+            warn!("Replacing placeholder version tag {PLACEHOLDER_VERSION_TAG} with {}", &service_manifest.service.version);
         }
 
         let server_host_url = url::Url::parse(server_host_string.as_str())?;
@@ -261,6 +262,8 @@ impl ServiceClient {
             file_required: self.file_required,
             heuristics: self.service_heuristics.clone(),
         };
+
+        info!("Send request to service server to register service.");
 
         let response = self
             .connection
@@ -542,6 +545,8 @@ impl ServiceClient {
                     *running = false;
                     info!("Keep alive is false. Shut down now.");
                     return Ok(());
+                } else {
+                    info!("Finished registering service.");
                 }
             }
             Err(e) => {
