@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use base64::Engine;
-use log::{debug, warn};
+use log::{debug, info, warn};
 
 use anyhow::Result;
 use poem::http::{HeaderMap, HeaderValue};
@@ -195,14 +195,20 @@ impl Connection {
             if retries > 0 {
                 let seconds = 2.0_f64.min(2.0_f64.powf(retries as f64 - 7.0));
                 tokio::time::sleep(tokio::time::Duration::from_secs_f64(seconds)).await;
+                info!(
+                    "Failed to connect to URL:[{}] {}, retry # {}",
+                    &method,
+                    url.to_string(),
+                    retries
+                );
+            } else {
+                info!(
+                    "Sending request to URL: {} with header: {:?}",
+                    url.to_string(),
+                    method.clone()
+                );
             }
 
-            // let url = format!("{}/{}", self.server, path);
-            debug!(
-                "Sending request to URL: {} with header: {:?}",
-                url.to_string(),
-                method.clone()
-            );
             let mut request = self.client.request(method.clone(), url.clone());
 
             match body {

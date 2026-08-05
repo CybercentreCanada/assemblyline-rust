@@ -103,7 +103,6 @@ impl TaskFetcher for SingleThreadTaskFetcher {
             .await?;
 
         let mut data_stream = response.bytes_stream();
-        // os.path.join(self.tasking_dir, sha256)
 
         let file_path = task_dir.join(Path::new(&sha256.to_string()));
 
