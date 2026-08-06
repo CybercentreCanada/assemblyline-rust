@@ -31,8 +31,6 @@ async fn main() {
     // TODO: Revisit this block. Do we need to have a more dynamic logger?
     let _ = env_logger::builder()
         .target(env_logger::Target::Stdout)
-        .filter_level(log::LevelFilter::Info)
-        .is_test(true)
         .try_init();
 
     // Service handler is a messenger between the service process and the service API, it doesn't need to validate classification
