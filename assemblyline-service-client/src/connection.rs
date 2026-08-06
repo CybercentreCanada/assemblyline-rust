@@ -153,7 +153,7 @@ impl Connection {
         }
 
         // finalize client
-        let client = builder.default_headers(headers).build()?;
+        let client = builder.default_headers(headers).connection_verbose(true).build()?;
 
         Ok(client)
     }

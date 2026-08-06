@@ -271,7 +271,7 @@ impl ServiceClient {
                 reqwest::Method::POST,
                 register_url,
                 crate::connection::Body::Json(serde_json::to_value(&temp_service_manifest)?),
-                None,
+                Some(1000.0),
                 None,
                 None,
             )
