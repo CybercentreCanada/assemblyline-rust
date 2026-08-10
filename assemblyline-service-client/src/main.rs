@@ -92,7 +92,7 @@ async fn main() {
     // handler for termination signals
     let signals = Signals::new(&[signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]);
 
-    debug!("Set up signal handlers.");
+    info!("Set up signal handlers.");
     let signal_handler = match signals {
         Ok(mut sig) => {
             let run = sc_running.clone();
@@ -114,8 +114,9 @@ async fn main() {
                         }
                         None => {}
                     }
+                    tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
                 }
-                tokio::time::sleep(tokio::time::Duration::from_secs_f64(1.0)).await;
+
             });
 
             Some(handler)
