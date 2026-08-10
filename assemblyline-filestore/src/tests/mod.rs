@@ -196,13 +196,12 @@ async fn test_s3_aws() {
     let token = format!("{}.{}.test_signature", base64.encode(header), base64.encode(payload));
 
     // Write token to temp file
-    let token_file = tokio::task::spawn_blocking(move || {
+    let token_file = {
         let token_file = tempfile::NamedTempFile::new().unwrap();
         let mut writer = BufWriter::new(token_file);
         writer.write_all(token.as_bytes()).unwrap();
         writer.into_inner().unwrap()
-    }).await.unwrap();
-    
+    };
 
     // Set environment variables to simulate IRSA authentication for the AWS S3 FileStore
     std::env::set_var("AWS_ROLE_ARN", "arn:aws:iam::000000000000:role/MockedIRSARole");
@@ -216,6 +215,7 @@ async fn test_s3_aws() {
     assert!(fs.exists("al4_aws_s3_pytest.txt").await.unwrap());
     assert_eq!(fs.get("al4_aws_s3_pytest.txt").await.unwrap().unwrap(), content);
     assert!(fs.delete("al4_aws_s3_pytest.txt").await.is_ok());
+    assert_eq!(fs.exists("al4_aws_s3_pytest.txt").await.unwrap(), false);
     common_actions(fs.clone()).await;
     big_file(fs).await;
     read_only(url.to_string()).await;
