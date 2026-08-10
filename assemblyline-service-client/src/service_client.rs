@@ -243,7 +243,7 @@ impl ServiceClient {
 
         while open_sender.is_err() {
             debug!("Cannot find task sender pipe... waiting for reader");
-            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+            tokio::time::sleep(tokio::time::Duration::from_secs_f64(4.0)).await;
             open_sender = pipe::OpenOptions::new().open_sender(self.task_fifo_path.clone());
         }
 
