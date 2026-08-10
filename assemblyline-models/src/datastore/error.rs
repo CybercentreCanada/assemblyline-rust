@@ -99,7 +99,7 @@ impl rand::distr::Distribution<ErrorTypes> for rand::distr::StandardUniform {
 }
 
 /// Error Response from a Service
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Response {
@@ -137,7 +137,7 @@ impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
 
 
 /// Error Model used by Error Viewer
-#[derive(Serialize, Deserialize, Described)]
+#[derive(Serialize, Deserialize, Described, Clone)]
 #[metadata_type(ElasticMeta)]
 #[metadata(index=true, store=true)]
 pub struct Error {

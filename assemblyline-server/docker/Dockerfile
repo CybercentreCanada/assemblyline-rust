@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev libpython3-d
 
 # Copy in the source to build
 WORKDIR /usr/src/
-COPY ./Cargo.toml ./Cargo.lock ./
+COPY ./assemblyline-server/docker/Cargo.toml ./Cargo.lock ./
 
 COPY ./assemblyline-client ./assemblyline-client
 COPY ./assemblyline-filestore ./assemblyline-filestore
