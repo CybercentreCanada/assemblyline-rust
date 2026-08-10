@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use signal_hook::iterator::Signals;
 
@@ -82,8 +82,6 @@ async fn main() {
     .await
     .unwrap();
 
-    let mut pool = tokio::task::JoinSet::new();
-
     // setup different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
     let task_uploader = TaskUploader {};
@@ -93,22 +91,31 @@ async fn main() {
 
     // handler for termination signals
     let signals = Signals::new(&[signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]);
+
+    debug!("Set up signal handlers.");
     let signal_handler = match signals {
         Ok(mut sig) => {
             let run = sc_running.clone();
-            let handler = sig.handle();
-            pool.spawn(async move {
-                for signal in sig.forever() {
-                    match signal {
-                        signal_hook::consts::SIGTERM | signal_hook::consts::SIGINT => {
-                            // set run_service to false
-                            let mut running = run.lock();
-                            *running = false;
-                            break;
+            let handler = Arc::new(sig.handle());
+
+            let signal_thread_handler = handler.clone();
+            tokio::spawn(async move {
+                while !signal_thread_handler.is_closed() {
+                    match sig.pending().next() {
+                        Some(e) => {
+                            if (e == signal_hook::consts::SIGTERM)
+                                || (e == signal_hook::consts::SIGINT)
+                            {
+                                *run.lock() = false;
+                                break;
+                            } else {
+                                warn!("Unknown signal caught. Code ({})", e);
+                            }
                         }
-                        e => error!("Unknown signal caught. Code ({})", e),
+                        None => {}
                     }
                 }
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(1.0)).await;
             });
 
             Some(handler)
@@ -121,7 +128,7 @@ async fn main() {
 
     // run service in a loop
     while *sc_running.lock() {
-        info!("Start running service server...");
+        info!("Start running service client...");
         let res = sc
             .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
             .await;
@@ -145,7 +152,6 @@ async fn main() {
         debug!("Terminate signal handler loop.");
         handle.close();
     }
-    pool.join_all().await;
 
     info!("Service client ended.");
 }

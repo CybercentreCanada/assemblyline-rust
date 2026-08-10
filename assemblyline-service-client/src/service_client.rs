@@ -109,7 +109,10 @@ impl ServiceClient {
         // update service manifest version tag if it is the placeholder value
         if service_manifest.service.version == PLACEHOLDER_VERSION_TAG {
             service_manifest.service.version = get_version().clone();
-            warn!("Replacing placeholder version tag {PLACEHOLDER_VERSION_TAG} with {}", &service_manifest.service.version);
+            warn!(
+                "Replacing placeholder version tag {PLACEHOLDER_VERSION_TAG} with {}",
+                &service_manifest.service.version
+            );
         }
 
         let server_host_url = url::Url::parse(server_host_string.as_str())?;
@@ -205,6 +208,7 @@ impl ServiceClient {
     }
 
     async fn _setup_fifo_pipes(&self) -> Result<TaskFifoPipes> {
+        info!("Setting up task and result fifo pipe to communicate with service process.");
         // create named pipe to communicate with service
         let task_path_ptr: CString = CString::new(self.task_fifo_path.clone())?;
         let done_path_ptr: CString = CString::new(self.done_fifo_path.clone())?;
@@ -299,7 +303,7 @@ impl ServiceClient {
         // update connection client header to have the update to date service information
         self.update_client_header().await?;
 
-        Ok(data.api_response.keep_alive && !self.register_only)
+        Ok(data.api_response.keep_alive)
     }
 
     async fn process_task_done_message(
@@ -540,7 +544,7 @@ impl ServiceClient {
 
         match register_service_result {
             Ok(keep_alive) => {
-                if !keep_alive {
+                if !keep_alive || self.register_only {
                     let mut running = self.running.lock();
                     *running = false;
                     info!("Keep alive is false. Shut down now.");
