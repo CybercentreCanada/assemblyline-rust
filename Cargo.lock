@@ -241,7 +241,7 @@ dependencies = [
 name = "assemblyline-client"
 version = "0.2.1"
 dependencies = [
- "assemblyline-markings 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assemblyline-markings 0.2.0",
  "assemblyline-models",
  "async-recursion",
  "base64 0.22.1",
@@ -313,17 +313,6 @@ dependencies = [
 [[package]]
 name = "assemblyline-markings"
 version = "0.2.0"
-dependencies = [
- "itertools 0.14.0",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
-]
-
-[[package]]
-name = "assemblyline-markings"
-version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c82b424207b8b5018e07fd71b3ae2934f8e0752accb03438c0d508ed0c7dc9d"
 dependencies = [
@@ -334,10 +323,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "assemblyline-markings"
+version = "0.2.1"
+dependencies = [
+ "itertools 0.14.0",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "assemblyline-models"
 version = "0.8.1"
 dependencies = [
- "assemblyline-markings 0.2.0",
+ "assemblyline-markings 0.2.1",
  "base62",
  "chrono",
  "constcat",
@@ -367,7 +367,7 @@ version = "0.2.34"
 dependencies = [
  "anyhow",
  "assemblyline-filestore",
- "assemblyline-markings 0.2.0",
+ "assemblyline-markings 0.2.1",
  "assemblyline-models",
  "bytes",
  "cart_container",
