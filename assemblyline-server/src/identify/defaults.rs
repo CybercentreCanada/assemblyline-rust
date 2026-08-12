@@ -422,6 +422,7 @@ pub fn ole_clsid_guids() -> &'static HashMap<Uuid, String> {
 //     "code/java": ".java",
 //     "code/javascript": ".js",
 //     "code/jscript": ".js",
+//     "code/lua": ".lua",
 //     "code/pdfjs": ".js",
 //     "code/perl": ".pl",
 //     "code/php": ".php",

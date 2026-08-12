@@ -23,3 +23,4 @@ services:
       - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
     ports:
       - "4566:4566"
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --disableProductStyleUrl
