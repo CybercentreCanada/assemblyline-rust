@@ -604,6 +604,9 @@ impl ClassificationParser {
                         out += group_delim;
                         out += grp;
                     }
+                } else {
+                    out += group_delim;
+                    out += grp;
                 }
             } else {
                 if !long_format {
@@ -1092,13 +1095,8 @@ impl ClassificationParser {
         //     return c12n
 
         let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups, !skip_auto_select)?;
-        // println!("{:?}", parts);
+        println!("{:?}", parts);
         let new_c12n = self.get_normalized_classification_text(parts, long_format, skip_auto_select)?;
-        // if long_format {
-        //     self._classification_cache.add(new_c12n)
-        // } else {
-        //     self._classification_cache_short.add(new_c12n)
-        // }
 
         return Ok(new_c12n)
     }
@@ -1765,6 +1763,25 @@ mod test {
 
         let class = ce.build_user_classification(&class, "L0//R2", false)?;
         assert_eq!(class, "L2//AC/LE//REL A, X/R1/R2");
+
+        Ok(())
+    }
+
+    // A lone dynamic group must survive normalization; the single-group render
+    // branch used to drop groups not present in the static group table.
+    #[test]
+    fn dynamic_group_single_preserved() -> Result<()> {
+        let mut config = setup_config();
+        config.dynamic_groups = true;
+        let ce = ClassificationParser::new(config)?;
+
+        // Normalizing a classification whose only group is dynamic must keep it
+        assert_eq!(ce.normalize_classification_options("L1//REL GARBO", NormalizeOptions::short())?, "L1//REL GARBO");
+        assert_eq!(ce.normalize_classification("L1//REL GARBO")?, "LEVEL 1//REL TO GARBO");
+
+        // min_classification across two copies of the same dynamic group must not broaden
+        assert_eq!(ce.min_classification("L1//REL GARBO", "L1//REL GARBO", false)?, "L1//REL GARBO");
+        assert_eq!(ce.min_classification("L2//REL GARBO", "L1//REL GARBO", false)?, "L1//REL GARBO");
 
         Ok(())
     }
