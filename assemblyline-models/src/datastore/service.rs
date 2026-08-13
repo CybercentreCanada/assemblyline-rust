@@ -331,6 +331,9 @@ pub struct Service {
     #[metadata(store=true)]
     #[serde(default)]
     pub enabled: bool,
+    /// Queue length per service instance
+    #[serde(default)]
+    pub expected_queue_length: Option<i32>,
     /// Does this service perform analysis outside of Assemblyline?
     #[serde(default)]
     pub is_external: bool,
