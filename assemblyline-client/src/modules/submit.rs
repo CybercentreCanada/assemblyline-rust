@@ -8,15 +8,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use assemblyline_models::datastore::submission::{Submission, SubmissionParams};
 use assemblyline_models::types::Sha256;
+use assemblyline_utilities::connection::{convert_api_output_obj, Body, Connection};
 use reqwest::multipart::{Form, Part};
 use tokio::io::AsyncSeekExt;
-use tokio_util::codec::{FramedRead, BytesCodec};
+use tokio_util::codec::{BytesCodec, FramedRead};
 use url::Url;
-use assemblyline_models::datastore::submission::{SubmissionParams, Submission};
 
-use crate::{JsonMap, types::Error};
-use crate::connection::{Connection, Body, convert_api_output_obj};
+use crate::types::Error;
+use crate::JsonMap;
 
 use super::api_path;
 
@@ -27,7 +28,7 @@ pub struct Submit {
 }
 
 impl Submit {
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
         Self { connection }
     }
 
@@ -35,7 +36,6 @@ impl Submit {
     pub fn single(&self) -> SubmitBuilder {
         SubmitBuilder::new(self.connection.clone())
     }
-
 
     /// Resubmit a file for dynamic analysis
     pub async fn dynamic(&self, sha256: Sha256, copy_sid: Option<String>, name: Option<String>) -> Result<Submission, Error> {
@@ -46,13 +46,16 @@ impl Submit {
         if let Some(name) = name {
             params.push(("name".to_owned(), name));
         }
-        let path = api_path!(SUBMIT_PATH, "dynamic", sha256);
-        return self.connection.get_params(&path, params, convert_api_output_obj).await
+
+        let url = self.connection.get_server_path(&api_path!(SUBMIT_PATH, "dynamic", sha256))?;
+
+        return Ok(self.connection.get_params(url, params, None, convert_api_output_obj).await?);
     }
 
     /// Resubmit a file for analysis with the exact same parameters.
     pub async fn resubmit(&self, sid: String) -> Result<Submission, Error> {
-        return self.connection.get(&api_path!(SUBMIT_PATH, "resubmit", sid), convert_api_output_obj).await
+        let url = self.connection.get_server_path(&api_path!(SUBMIT_PATH, "resubmit", sid))?;
+        return Ok(self.connection.get(url, None, convert_api_output_obj).await?);
     }
 }
 
@@ -64,13 +67,12 @@ pub struct SubmitBuilder {
 }
 
 impl SubmitBuilder {
-
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
         Self {
             connection,
             metadata: Default::default(),
             params: Default::default(),
-            extra_params: Default::default()
+            extra_params: Default::default(),
         }
     }
 
@@ -81,28 +83,32 @@ impl SubmitBuilder {
 
     // metadata   : Metadata to include with submission. (dict)
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
-        self.metadata.extend(metadata); self
+        self.metadata.extend(metadata);
+        self
     }
     pub fn metadata_item(mut self, key: String, value: String) -> Self {
-        self.metadata.insert(key, value); self
+        self.metadata.insert(key, value);
+        self
     }
 
     // params  : Additional submission parameters. (dict)
     pub fn params(mut self, params: SubmissionParams) -> Self {
-        self.params = Some(params); self
+        self.params = Some(params);
+        self
     }
     pub fn parameter(mut self, name: String, value: serde_json::Value) -> Self {
-        self.extra_params.insert(name, value); self
+        self.extra_params.insert(name, value);
+        self
     }
 
     // path    : Path/name of file. (string)
     pub async fn path(self, path: &std::path::Path) -> Result<Submission, Error> {
         if let Some(name) = path.file_name() {
             if let Some(name) = name.to_str() {
-                return self.fname(name.to_string()).path(path).await
+                return self.fname(name.to_string()).path(path).await;
             }
         }
-        return Err(Error::InvalidSubmitFilePath)
+        return Err(Error::InvalidSubmitFilePath);
     }
 
     // sha256  : Sha256 of the file to scan (string)
@@ -117,11 +123,11 @@ impl SubmitBuilder {
         if let Some(mut path_parts) = parsed.path_segments() {
             if let Some(name) = path_parts.next_back() {
                 if !name.is_empty() {
-                    return self.fname(name.to_owned()).url(url).await
+                    return self.fname(name.to_owned()).url(url).await;
                 }
             }
         }
-        return Err(Error::InvalidSubmitUrl)
+        return Err(Error::InvalidSubmitUrl);
     }
 }
 
@@ -131,7 +137,6 @@ pub struct NamedSubmitBuilder {
 }
 
 impl NamedSubmitBuilder {
-
     // // metadata   : Metadata to include with submission. (dict)
     // pub fn metadata(self, metadata: HashMap<String, String>) -> Self {
     //     Self { parent: self.parent.metadata(metadata), fname: self.fname }
@@ -149,10 +154,7 @@ impl NamedSubmitBuilder {
     // }
 
     fn prepare_request(&self) -> Result<JsonMap, Error> {
-        let mut request: JsonMap = [
-            ("name".to_owned(), self.fname.clone().into())
-        ].into_iter().collect();
-
+        let mut request: JsonMap = [("name".to_owned(), self.fname.clone().into())].into_iter().collect();
 
         if self.parent.params.is_some() || !self.parent.extra_params.is_empty() {
             let params = if let Some(params) = &self.parent.params {
@@ -160,7 +162,7 @@ impl NamedSubmitBuilder {
                     obj.extend(self.parent.extra_params.clone());
                     obj
                 } else {
-                    return Err(Error::ParameterSerialization)
+                    return Err(Error::ParameterSerialization);
                 }
             } else {
                 self.parent.extra_params.clone()
@@ -186,8 +188,13 @@ impl NamedSubmitBuilder {
 
         // println!("{multipart:?}");
 
-        let url: String = api_path!(SUBMIT_PATH);
-        return self.parent.connection.post(&url, Body::<()>::Multipart(multipart), convert_api_output_obj).await
+        let url = self.parent.connection.get_server_path(&api_path!(SUBMIT_PATH))?;
+
+        return Ok(self
+            .parent
+            .connection
+            .post(url, Body::<()>::Multipart(multipart), None, convert_api_output_obj)
+            .await?);
     }
 
     // fh      : Opened file handle to a file to scan
@@ -199,13 +206,13 @@ impl NamedSubmitBuilder {
         let stream = FramedRead::new(file, BytesCodec::new());
         let stream_body = reqwest::Body::wrap_stream(stream);
 
-        return self.submit_file(stream_body).await
+        return self.submit_file(stream_body).await;
     }
 
     // content : Content of the file to scan (byte array)
     pub async fn content(self, data: Vec<u8>) -> Result<Submission, Error> {
         let body = reqwest::Body::from(data);
-        return self.submit_file(body).await
+        return self.submit_file(body).await;
     }
 
     // path    : Path/name of file. (string)
@@ -217,7 +224,7 @@ impl NamedSubmitBuilder {
         let stream = FramedRead::new(file, BytesCodec::new());
         let stream_body = reqwest::Body::wrap_stream(stream);
 
-        return self.submit_file(stream_body).await
+        return self.submit_file(stream_body).await;
     }
 
     // sha256  : Sha256 of the file to scan (string)
@@ -225,8 +232,12 @@ impl NamedSubmitBuilder {
         let mut request = self.prepare_request()?;
         request.insert("sha256".to_owned(), hash.to_string().into());
 
-        let path = api_path!(SUBMIT_PATH);
-        return self.parent.connection.post(&path, Body::Json(request), convert_api_output_obj).await
+        let url = self.parent.connection.get_server_path(&api_path!(SUBMIT_PATH))?;
+        return Ok(self
+            .parent
+            .connection
+            .post(url, Body::Json(request), None, convert_api_output_obj)
+            .await?);
     }
 
     // url     : Url to scan (string)
@@ -234,10 +245,11 @@ impl NamedSubmitBuilder {
         let mut request = self.prepare_request()?;
         request.insert("url".to_owned(), url.into());
 
-        let path = api_path!(SUBMIT_PATH);
-        return self.parent.connection.post(&path, Body::Json(request), convert_api_output_obj).await
+        let url = self.parent.connection.get_server_path(&api_path!(SUBMIT_PATH))?;
+        return Ok(self
+            .parent
+            .connection
+            .post(url, Body::Json(request), None, convert_api_output_obj)
+            .await?);
     }
-
 }
-
-

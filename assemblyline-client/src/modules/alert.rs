@@ -3,16 +3,16 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use assemblyline_models::datastore::workflow::{Priorities, Statuses};
 use assemblyline_models::datastore::alert::Alert as AlertModel;
+use assemblyline_models::datastore::workflow::{Priorities, Statuses};
+use assemblyline_utilities::connection::{convert_api_output_map, convert_api_output_obj, Body, Connection};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use serde_with::{SerializeDisplay, DeserializeFromStr};
+use serde::{Deserialize, Serialize};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 
-use crate::JsonMap;
-use crate::connection::{Connection, convert_api_output_obj, convert_api_output_map, Body};
 use crate::types::Result;
+use crate::JsonMap;
 
 use super::api_path;
 use super::search::SearchResult;
@@ -28,17 +28,17 @@ pub struct Alert {
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString)]
 #[strum(serialize_all = "snake_case")]
 pub enum Verdict {
-    Malicious, NonMalicious
+    Malicious,
+    NonMalicious,
 }
 
 impl Alert {
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
         Self {
             batch: Batch::new(connection.clone()),
             connection,
         }
     }
-
 
     /// Return the full alert for a given alert_id.
     ///
@@ -47,7 +47,8 @@ impl Alert {
     ///
     /// Throws a Client exception if the alert does not exist.
     pub async fn get(&self, alert_id: &str) -> Result<AlertModel> {
-        return self.connection.get(&api_path!(ALERT_INDEX, alert_id), convert_api_output_obj).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, alert_id))?;
+        return Ok(self.connection.get(url, None, convert_api_output_obj).await?);
     }
 
     /// List all alert grouped by a given field
@@ -79,7 +80,8 @@ impl Alert {
     ///
     /// Throws a Client exception if the alert does not exist.
     pub async fn label(&self, alert_id: &str, labels: Vec<String>) -> Result<JsonMap> {
-        return self.connection.post(&api_path!(ALERT_INDEX, "label", alert_id), Body::Json(labels), convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, "label", alert_id))?;
+        return Ok(self.connection.post(url, Body::Json(labels), None, convert_api_output_map).await?);
     }
 
     /// Find the different labels matching the query.
@@ -101,7 +103,7 @@ impl Alert {
             tc_start: None,
             tc: None,
             use_archive: false,
-            track_total_hits: None
+            track_total_hits: None,
         }
     }
 
@@ -110,7 +112,8 @@ impl Alert {
     // alert_id: Alert key (string)
     // Throws a Client exception if the alert does not exist.
     pub async fn ownership(&self, alert_id: String) -> Result<JsonMap> {
-        return self.connection.get(&api_path!(ALERT_INDEX, "ownership", alert_id), convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, "ownership", alert_id))?;
+        return Ok(self.connection.get(url, None, convert_api_output_map).await?);
     }
 
     // Set the priority of the alert with the given alert_id.
@@ -119,7 +122,8 @@ impl Alert {
     // priority: Priority (enum: LOW, MEDIUM, HIGH, CRITICAL)
     // Throws a Client exception if the alert does not exist.
     pub async fn priority(&self, alert_id: String, priority: Priorities) -> Result<JsonMap> {
-        return self.connection.post(&api_path!(ALERT_INDEX, "priority", alert_id), Body::Json(priority), convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, "priority", alert_id))?;
+        return Ok(self.connection.post(url, Body::Json(priority), None, convert_api_output_map).await?);
     }
 
     /// Find the different priorities matching the query.
@@ -143,7 +147,8 @@ impl Alert {
     // status  : Status (enum: MALICIOUS, NON-MALICIOUS, ASSESS)
     // Throws a Client exception if the alert does not exist.
     pub async fn status(&self, alert_id: String, status: Statuses) -> Result<JsonMap> {
-        return self.connection.post(&api_path!(ALERT_INDEX, "status", alert_id), Body::Json(status), convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, "status", alert_id))?;
+        return Ok(self.connection.post(url, Body::Json(status), None, convert_api_output_map).await?);
     }
 
     /// Find the different statuses matching the query.
@@ -153,7 +158,8 @@ impl Alert {
 
     /// Set the verdict of the alert with the given alert_id.
     pub async fn verdict(&self, alert_id: String, verdict: Verdict) -> Result<JsonMap> {
-        return self.connection.post(&api_path!(ALERT_INDEX, "verdict", alert_id, verdict.to_string()), Body::<()>::None, convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(ALERT_INDEX, "verdict", alert_id, verdict.to_string()))?;
+        return Ok(self.connection.post(url, Body::<()>::None, None, convert_api_output_map).await?);
     }
 }
 
@@ -162,10 +168,8 @@ pub struct Batch {
 }
 
 impl Batch {
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
-        Self {
-            connection,
-        }
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
+        Self { connection }
     }
 
     // Add labels to alerts matching the search criteria.
@@ -202,7 +206,6 @@ impl Batch {
 
 #[derive(Deserialize)]
 pub struct GroupSearchResult<Type> {
-
     pub counted_total: u64,
 
     pub tc_start: DateTime<Utc>,
@@ -244,50 +247,55 @@ pub struct DetailedAlertQuery<Type> {
     track_total_hits: Option<u64>,
 }
 
-impl<Type: DeserializeOwned> DetailedAlertQuery<Type> {
+impl<Type: DeserializeOwned + Send> DetailedAlertQuery<Type> {
     /// Post filter queries (you can have multiple of these)
     pub fn filters(mut self, value: Vec<String>) -> Self {
-        self.filters.extend(value); self
+        self.filters.extend(value);
+        self
     }
     /// Query to apply to the alert list
     pub fn query(mut self, value: String) -> Self {
-        self.query = Some(value); self
+        self.query = Some(value);
+        self
     }
     /// Do not delay alerts
     pub fn no_delay(mut self, value: bool) -> Self {
-        self.no_delay = value; self
+        self.no_delay = value;
+        self
     }
     /// Offset at which we start giving alerts
     pub fn offset(mut self, value: u64) -> Self {
-        self.offset = value; self
+        self.offset = value;
+        self
     }
     /// Number of alerts to return
     pub fn rows(mut self, value: u64) -> Self {
-        self.rows = value; self
+        self.rows = value;
+        self
     }
     /// Time offset at which we start the time constraint
     pub fn tc_start(mut self, value: DateTime<Utc>) -> Self {
-        self.tc_start = Some(value); self
+        self.tc_start = Some(value);
+        self
     }
     /// Time constraint applied to the API
     pub fn tc(mut self, value: DateTime<Utc>) -> Self {
-        self.tc = Some(value); self
+        self.tc = Some(value);
+        self
     }
     /// Also query the archive
     pub fn use_archive(mut self, value: bool) -> Self {
-        self.use_archive = value; self
+        self.use_archive = value;
+        self
     }
     /// Number of hits to track (default: 10k)
     pub fn track_total_hits(mut self, value: u64) -> Self {
-        self.track_total_hits = Some(value); self
+        self.track_total_hits = Some(value);
+        self
     }
 
     pub async fn send(self) -> Result<Type> {
-
-        let mut params: Vec<(String, String)> = vec![
-            ("offset".to_owned(), self.offset.to_string()),
-            ("rows".to_owned(), self.rows.to_string()),
-        ];
+        let mut params: Vec<(String, String)> = vec![("offset".to_owned(), self.offset.to_string()), ("rows".to_owned(), self.rows.to_string())];
 
         for x in self.filters {
             params.push(("fq".to_owned(), x));
@@ -312,11 +320,12 @@ impl<Type: DeserializeOwned> DetailedAlertQuery<Type> {
             params.push(("track_total_hits".to_owned(), track_total_hits.to_string()));
         }
 
-        return self.connection.get_params(&self.path, params, convert_api_output_obj).await
+        let url = self.connection.get_server_path(&self.path)?;
+        return Ok(self.connection.get_params(url, params, None, convert_api_output_obj).await?);
     }
 }
 
-pub struct AlertQuery<Type, Post=()> {
+pub struct AlertQuery<Type, Post = ()> {
     connection: Arc<Connection>,
     post: Option<Post>,
     path: String,
@@ -334,7 +343,7 @@ pub struct AlertQuery<Type, Post=()> {
     no_delay: bool,
 }
 
-impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
+impl<Type: DeserializeOwned + Send, Post: Serialize> AlertQuery<Type, Post> {
     fn get(connection: Arc<Connection>, path: String) -> Self {
         AlertQuery {
             connection,
@@ -365,28 +374,31 @@ impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
 
     /// Post filter queries (you can have multiple of these)
     pub fn filters(mut self, value: Vec<String>) -> Self {
-        self.filters.extend(value); self
+        self.filters.extend(value);
+        self
     }
     /// Query to apply to the alert list
     pub fn query(mut self, value: String) -> Self {
-        self.query = Some(value); self
+        self.query = Some(value);
+        self
     }
     /// Do not delay alerts
     pub fn no_delay(mut self, value: bool) -> Self {
-        self.no_delay = value; self
+        self.no_delay = value;
+        self
     }
     /// Time offset at which we start the time constraint
     pub fn tc_start(mut self, value: DateTime<Utc>) -> Self {
-        self.tc_start = Some(value); self
+        self.tc_start = Some(value);
+        self
     }
     /// Time constraint applied to the API
     pub fn tc(mut self, value: DateTime<Utc>) -> Self {
-        self.tc = Some(value); self
+        self.tc = Some(value);
+        self
     }
 
-
     pub async fn send(self) -> Result<Type> {
-
         let mut params = vec![];
 
         for x in self.filters {
@@ -407,12 +419,15 @@ impl<Type: DeserializeOwned, Post: Serialize> AlertQuery<Type, Post> {
             params.push(("no_delay".to_owned(), "true".to_owned()))
         }
 
+        let url = self.connection.get_server_path(&self.path)?;
+
         if let Some(body) = self.post {
-            return self.connection.post_params(&self.path, Body::Json(body), params, convert_api_output_obj).await
+            return Ok(self
+                .connection
+                .post_params(url, Body::Json(body), params, None, convert_api_output_obj)
+                .await?);
         } else {
-            return self.connection.get_params(&self.path, params, convert_api_output_obj).await
+            return Ok(self.connection.get_params(url, params, None, convert_api_output_obj).await?);
         }
     }
-
 }
-
