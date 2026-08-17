@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
 use assemblyline_models::{messages::task::Task, types::Sha256};
+use assemblyline_utilities::{
+    connection::{Connection, ServerType, TLSSettings},
+    types::{authentication::Authentication, response::APIResponse},
+};
 use log::info;
 use md5::Digest;
 use poem::{
@@ -15,15 +19,12 @@ use reqwest::StatusCode;
 use serde_json::json;
 
 use crate::{
-    connection::{Connection, TLSSettings},
-    task_fetcher::{
-        single_thread_task_fetcher::SingleThreadTaskFetcher, task_fetcher::TaskFetcher,
-    },
+    task_fetcher::{single_thread_task_fetcher::SingleThreadTaskFetcher, task_fetcher::TaskFetcher},
     tests::{
         init,
         mock_service_api::{MockServiceServer, TEST_AUTH_KEY, TEST_SERVER_VERSION},
     },
-    types::{errors::ServiceHandlerError, response::APIResponse},
+    types::errors::ServiceClientError,
 };
 
 async fn get_test_connection(port: u16) -> Connection {
@@ -34,6 +35,9 @@ async fn get_test_connection(port: u16) -> Connection {
     headers.insert("X-APIKey".to_string(), TEST_AUTH_KEY.to_string());
     Connection::connect(
         service_api_address.clone(),
+        ServerType::ServiceServer,
+        false,
+        Authentication::None,
         None,
         tls_setting.clone(),
         headers,
@@ -58,19 +62,11 @@ async fn download_file(
             return Ok(poem::Response::builder()
                 .content_type("application/octet-stream")
                 .header("Content-Length", file_size.to_string())
-                .header(
-                    "Content-Disposition",
-                    format!("attachment; filename=file.bin; filename*={filename}"),
-                )
+                .header("Content-Disposition", format!("attachment; filename=file.bin; filename*={filename}"))
                 .body(body));
         }
 
-        None => {
-            return Err(MockServiceServer::make_empty_api_error(
-                StatusCode::NOT_FOUND,
-                "Cannot find file sha.",
-            ))
-        }
+        None => return Err(MockServiceServer::make_empty_api_error(StatusCode::NOT_FOUND, "Cannot find file sha.")),
     }
 }
 
@@ -81,9 +77,7 @@ pub struct TaskFetcherData {
 }
 
 #[handler]
-pub async fn get_task(
-    fetcher_data: Data<&TaskFetcherData>,
-) -> Result<poem::Response, poem::error::Error> {
+pub async fn get_task(fetcher_data: Data<&TaskFetcherData>) -> Result<poem::Response, poem::error::Error> {
     if let Some(task) = &fetcher_data.task {
         let data = json!({"task": task});
         Ok(Json(APIResponse {
@@ -113,8 +107,8 @@ fn fetcher_api(data: TaskFetcherData) -> impl Endpoint {
 
 fn initialize_download_task_file_data() -> (Sha256, Vec<u8>, HashMap<Sha256, Vec<u8>>) {
     // create test file data and sha
-    let file_size = 1000;
-    let file_data = b"x".repeat(file_size);
+    let file_size = 500;
+    let file_data = b"az".repeat(file_size);
     let mut hasher = sha2::Sha256::default();
     std::io::Write::write_all(&mut hasher, &file_data).unwrap();
     let good_sha: Sha256 = hex::encode(hasher.finalize()).parse().unwrap();
@@ -138,20 +132,14 @@ async fn test_download_task_file_success() {
         task: None,
     };
 
-    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data)).await.unwrap();
     let connection = get_test_connection(port).await;
 
     let task_fetcher = SingleThreadTaskFetcher {};
 
     // Task fetcher should download file to disk
     let file_path = task_fetcher
-        .download_file(
-            good_sha.clone(),
-            tasking_dir.path().to_path_buf(),
-            &connection,
-        )
+        .download_file(good_sha.clone(), tasking_dir.path().to_path_buf(), &connection)
         .await
         .expect(format!("Cannot find {good_sha}.").as_str());
 
@@ -162,10 +150,7 @@ async fn test_download_task_file_success() {
         "Returned file path should be in the format of tasking_dir/sha256"
     );
 
-    assert!(
-        file_path.exists(),
-        "The downloaded file should exist on disk."
-    );
+    assert!(file_path.exists(), "The downloaded file should exist on disk.");
 
     // make sure the file requested is downloaded with correct data
     let data = tokio::fs::read(file_path).await.unwrap();
@@ -188,29 +173,18 @@ async fn test_download_task_file_mismatched_sha() {
         task: None,
     };
 
-    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data)).await.unwrap();
     let connection = get_test_connection(port).await;
 
-    let mut task_fetcher = SingleThreadTaskFetcher {};
+    let task_fetcher = SingleThreadTaskFetcher {};
     // throw error when downloaded file sha doesn't match
     let response_error = task_fetcher
-        .download_file(
-            bad_sha.clone(),
-            tasking_dir.path().to_path_buf(),
-            &connection,
-        )
+        .download_file(bad_sha.clone(), tasking_dir.path().to_path_buf(), &connection)
         .await
-        .expect_err(
-            "Task fetcher should throw error when the data body does not match that requested sha",
-        );
+        .expect_err("Task fetcher should throw error when the data body does not match that requested sha");
 
     match response_error {
-        ServiceHandlerError::FileHashMisMatch {
-            requested_sha,
-            content_sha,
-        } => {
+        ServiceClientError::FileHashMisMatch { requested_sha, content_sha } => {
             assert_eq!(requested_sha, bad_sha);
             assert_eq!(content_sha, good_sha);
         }
@@ -231,9 +205,7 @@ async fn test_download_task_file_unknown_sha() {
         task: None,
     };
 
-    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data)).await.unwrap();
     let connection = get_test_connection(port).await;
 
     let task_fetcher = SingleThreadTaskFetcher {};
@@ -241,26 +213,17 @@ async fn test_download_task_file_unknown_sha() {
     // throw error when server cannot find file
     let unknown_sha: Sha256 = rand::rng().random();
     let response_error = task_fetcher
-        .download_file(
-            unknown_sha.clone(),
-            tasking_dir.path().to_path_buf(),
-            &connection,
-        )
+        .download_file(unknown_sha.clone(), tasking_dir.path().to_path_buf(), &connection)
         .await
-        .expect_err(
-            "Task fetcher should throw error when it cannot find a file with the given sha.",
-        );
+        .expect_err("Task fetcher should throw error when it cannot find a file with the given sha.");
 
     match response_error {
-        ServiceHandlerError::ServiceApiConnectionError {
+        ServiceClientError::ApiConnection {
             message,
             status_code,
             server_version,
         } => {
-            assert_eq!(
-                status_code.expect("Status code should exist."),
-                StatusCode::NOT_FOUND.as_u16()
-            );
+            assert_eq!(status_code.expect("Status code should exist."), StatusCode::NOT_FOUND.as_u16());
         }
         e => panic!("Requesting unknown sha results in unexpected error: {e}"),
     }
@@ -278,15 +241,10 @@ async fn test_request_task_none() {
         file_hashes: HashMap::new(),
         task: None,
     };
-    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data)).await.unwrap();
     let connection = get_test_connection(port).await;
 
-    let response = task_fetcher
-        .get_task(&connection)
-        .await
-        .expect("Get task should not return error.");
+    let response = task_fetcher.get_task(&connection).await.expect("Get task should not return error.");
 
     assert_eq!(response, None);
 }
@@ -303,15 +261,10 @@ async fn test_request_task_some() {
 
     let task_fetcher = SingleThreadTaskFetcher {};
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data))
-        .await
-        .unwrap();
+    let (port, server) = MockServiceServer::launch_with_custom_endpoints(fetcher_api(fetcher_data)).await.unwrap();
     let connection = get_test_connection(port).await;
 
-    let response = task_fetcher
-        .get_task(&connection)
-        .await
-        .expect("Get task should not return error.");
+    let response = task_fetcher.get_task(&connection).await.expect("Get task should not return error.");
     assert!(response.is_some());
 
     let data = response.expect("Server should return a task.");

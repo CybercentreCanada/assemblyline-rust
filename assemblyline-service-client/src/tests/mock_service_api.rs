@@ -1,7 +1,11 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use assemblyline_models::types::JsonMap;
+use assemblyline_utilities::{
+    connection::ServerType,
+    types::response::{APIResponse, ErrorApiResponse},
+};
 use itertools::Itertools;
 use log::{error, info, warn};
 use parking_lot::Mutex;
@@ -10,19 +14,13 @@ use poem::{
     http::{HeaderMap, HeaderName},
     listener::{Acceptor, TcpAcceptor},
     middleware::{AddData, NormalizePath},
-    web::{Data, Json},
-    Endpoint, EndpointExt, FromRequest, IntoResponse, Middleware, Request, RequestBody, Response,
-    Route, Server,
+    web::Json,
+    Endpoint, EndpointExt, FromRequest, IntoResponse, Middleware, Request, RequestBody, Response, Route, Server,
 };
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::{net::TcpListener, task::JoinHandle};
-
-use crate::{
-    constants::SUPPORTED_API,
-    types::response::{APIResponse, ErrorApiResponse},
-};
 
 pub const TEST_AUTH_KEY: &str = "test_key_abc_123";
 pub const TEST_SERVER_VERSION: &str = "test_server_version";
@@ -68,9 +66,7 @@ impl MockServerConfig {
 }
 
 impl MockServiceServer {
-    pub async fn launch_with_test_endpoints(
-        config: MockServerConfig,
-    ) -> Result<(u16, JoinHandle<()>)> {
+    pub async fn launch_with_test_endpoints(config: MockServerConfig) -> Result<(u16, JoinHandle<()>)> {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let acceptor = TcpAcceptor::from_tokio(listener).unwrap();
         let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
@@ -94,14 +90,12 @@ impl MockServiceServer {
         Ok((port, handle))
     }
 
-    pub async fn launch_with_custom_endpoints(
-        api: impl Endpoint + 'static,
-    ) -> Result<(u16, JoinHandle<()>)> {
+    pub async fn launch_with_custom_endpoints(api: impl Endpoint + 'static) -> Result<(u16, JoinHandle<()>)> {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let acceptor = TcpAcceptor::from_tokio(listener).unwrap();
         let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
         let app = Route::new()
-            .nest(format!("/api/{}/", SUPPORTED_API), api)
+            .nest(format!("/api/{}/", ServerType::ServiceServer.supported_version()), api)
             .with(NormalizePath::new(poem::middleware::TrailingSlash::Trim))
             // .with(AddData::new(self.config.clone()));
             .with(ServiceAuth {
@@ -122,11 +116,7 @@ impl MockServiceServer {
         Ok((port, handle))
     }
 
-    pub fn make_api_error(
-        code: poem::http::StatusCode,
-        err: &str,
-        response: impl Serialize + Send,
-    ) -> poem::error::Error {
+    pub fn make_api_error(code: poem::http::StatusCode, err: &str, response: impl Serialize + Send) -> poem::error::Error {
         let mut response = Json(APIResponse {
             api_response: response,
             api_error_message: Some(err.to_owned()),
@@ -158,8 +148,6 @@ impl MockServiceServer {
         Route::new()
             .at(format!("index"), get(index))
             .at(format!("get_request_data"), get(get_request_data))
-            .at(format!("test_retry"), get(test_retry))
-            .at(format!("error_response"), get(test_error_response))
     }
 }
 
@@ -169,10 +157,7 @@ async fn index() -> &'static str {
 }
 
 #[handler]
-async fn get_request_data(
-    header: RawHeaderMap,
-    query: poem::web::Query<JsonMap>,
-) -> Result<Response> {
+async fn get_request_data(header: RawHeaderMap, query: poem::web::Query<JsonMap>) -> Result<Response> {
     let mut header_data: HashMap<String, String> = HashMap::new();
     let mut error_data: Vec<String> = Vec::new();
     for (k, v) in header.map {
@@ -201,64 +186,13 @@ async fn get_request_data(
     Ok(Json(response_data).into_response())
 }
 
-#[handler]
-async fn test_retry(config: Data<&MockServerConfig>) -> Result<Response> {
-    let retry_arc = config.retry.clone().unwrap();
-    let mut retry_value = { retry_arc.lock().to_owned() };
-
-    if retry_value > 1 {
-        retry_value -= 1;
-        *retry_arc.lock() = retry_value;
-        tokio::time::sleep(tokio::time::Duration::from_secs_f64(3.0)).await;
-
-        return Err(anyhow!(
-            "Retry will error out for {retry_value} more times."
-        ));
-    }
-
-    Ok(Json(json!({
-        "data": "OK",
-    }))
-    .into_response())
-}
-
-#[handler]
-async fn test_error_response(
-    config: Data<&MockServerConfig>,
-) -> Result<Response, poem::error::Error> {
-    match &config.error_response {
-        Some(data) => {
-            let mut response = Json(data.to_owned()).into_response();
-            response.set_status(StatusCode::from_u16(data.api_status_code).unwrap());
-            let mut error = poem::error::Error::from_response(response);
-            error.set_error_message(format!(
-                "[{}] {}",
-                data.api_status_code,
-                data.api_error_message
-                    .to_owned()
-                    .unwrap_or("no error message.".to_string())
-            ));
-            return Err(error);
-        }
-        None => {
-            let mut response = Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body("This is test internal server error.".to_string());
-            Err(poem::error::Error::from_response(response))
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct RawHeaderMap {
     pub map: HeaderMap,
 }
 
 impl<'a> FromRequest<'a> for RawHeaderMap {
-    async fn from_request(
-        req: &'a Request,
-        _body: &mut RequestBody,
-    ) -> Result<Self, poem::error::Error> {
+    async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self, poem::error::Error> {
         let headers: HeaderMap = req.headers().to_owned();
 
         Ok(RawHeaderMap { map: headers })
@@ -317,11 +251,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
 
         if self.auth_key != apikey {
             let client_id = req.header("CONTAINER-ID").unwrap_or("Unknown Client");
-            let header_dump = req
-                .headers()
-                .iter()
-                .map(|(k, v)| format!("{k}={v:?}"))
-                .join("; ");
+            let header_dump = req.headers().iter().map(|(k, v)| format!("{k}={v:?}")).join("; ");
             warn!("Client [{client_id}] provided wrong api key [{apikey}] headers: {header_dump}");
             return Err(MockServiceServer::make_empty_api_error(
                 StatusCode::UNAUTHORIZED,

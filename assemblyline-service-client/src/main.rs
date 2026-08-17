@@ -1,12 +1,14 @@
-use std::sync::Arc;
-
+use anyhow::Result;
+use assemblyline_models::config::Config;
+use assemblyline_utilities::logging::configure_logging;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use signal_hook::iterator::Signals;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     constants::{
-        DEFAULT_API_HOST, DEFAULT_CONTAINER_ID, DEFAULT_ROOT_CA_PATH, DEFAULT_RUNTIME_PREFIX,
+        DEFAULT_API_HOST, DEFAULT_ASSEMBLYLINE_CONFIG_PATH, DEFAULT_CONTAINER_ID, DEFAULT_LOG_LEVEL, DEFAULT_ROOT_CA_PATH, DEFAULT_RUNTIME_PREFIX,
         DEFAULT_SERVICE_API_KEY,
     },
     service_client::ServiceClient,
@@ -15,7 +17,6 @@ use crate::{
     task_uploader::task_uploader::TaskUploader,
 };
 
-pub mod connection;
 pub mod constants;
 pub mod service_client;
 pub mod service_launcher;
@@ -28,46 +29,43 @@ pub(crate) mod tests;
 
 #[tokio::main]
 async fn main() {
-    // TODO: Revisit this block. Do we need to have a more dynamic logger?
-    let _ = env_logger::builder()
-        .target(env_logger::Target::Stdout)
-        .try_init();
-
     // Service handler is a messenger between the service process and the service API, it doesn't need to validate classification
     assemblyline_models::disable_global_classification();
 
     // load environment variables to configure service client.
-    let mut default_tmp_folder = std::env::temp_dir()
-        .as_os_str()
-        .to_str()
-        .unwrap_or("/tmp")
-        .to_string();
+    let mut default_tmp_folder = std::env::temp_dir().as_os_str().to_string_lossy().to_string();
     default_tmp_folder.push('/');
 
-    let runtime_prefix =
-        std::env::var("RUNTIME_PREFIX").unwrap_or(DEFAULT_RUNTIME_PREFIX.to_owned());
+    let runtime_prefix = std::env::var("RUNTIME_PREFIX").unwrap_or(DEFAULT_RUNTIME_PREFIX.to_owned());
     let tasking_dir = std::env::var("TASKING_DIR").unwrap_or(default_tmp_folder.clone());
 
     let manifest_folder = std::env::var("MANIFEST_FOLDER").unwrap_or("".to_owned());
 
-    let server_host_string: String =
-        std::env::var("SERVICE_API_HOST").unwrap_or(DEFAULT_API_HOST.to_string());
-    let service_api_key =
-        std::env::var("SERVICE_API_KEY").unwrap_or(DEFAULT_SERVICE_API_KEY.to_owned());
+    let server_host_string = std::env::var("SERVICE_API_HOST").unwrap_or(DEFAULT_API_HOST.to_string());
+    let service_api_key = std::env::var("SERVICE_API_KEY").unwrap_or(DEFAULT_SERVICE_API_KEY.to_owned());
     let container_id = std::env::var("HOSTNAME").unwrap_or(DEFAULT_CONTAINER_ID.to_owned());
-    let root_ca_path =
-        std::env::var("SERVICE_SERVER_ROOT_CA_PATH").unwrap_or(DEFAULT_ROOT_CA_PATH.to_owned());
+    let root_ca_path = std::env::var("SERVICE_SERVER_ROOT_CA_PATH").unwrap_or(DEFAULT_ROOT_CA_PATH.to_owned());
+
+    let _log_level = std::env::var("LOG_LEVEL").unwrap_or(DEFAULT_LOG_LEVEL.to_owned());
+    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match m.as_str() {
+        "true" => true,
+        _ => false,
+    });
 
     let service_dir = std::env::var("SERVICE_DIR").map_or(None, |dir| Some(dir));
 
-    let task_complete_limit = std::env::var("AL_SERVICE_TASK_LIMIT")
-        .map_or(None, |val| val.parse::<i32>().map_or(None, |v| Some(v)));
+    let task_complete_limit = std::env::var("AL_SERVICE_TASK_LIMIT").map_or(None, |val| val.parse::<i32>().map_or(None, |v| Some(v)));
+
+    let config_path = std::env::var("ASSEMBLYLINE_CONFIG_PATH").unwrap_or(DEFAULT_ASSEMBLYLINE_CONFIG_PATH.to_owned());
+
+    let config = load_configuration(config_path).await.expect("Cannot load configuration.");
+    let _log_manager = configure_logging(&config).expect("Cannot configure logging.");
 
     let sc_running = Arc::new(Mutex::new(true));
 
     let mut sc = ServiceClient::new(
         false,
-        true,
+        container_mode,
         sc_running.clone(),
         container_id,
         runtime_prefix,
@@ -80,14 +78,12 @@ async fn main() {
         task_complete_limit,
     )
     .await
-    .unwrap();
+    .expect("Cannot initialize service client.");
 
     // setup different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
     let task_uploader = TaskUploader {};
-    let service_launcher = DefaultServiceLauncher {
-        service_dir: service_dir,
-    };
+    let service_launcher = DefaultServiceLauncher { service_dir: service_dir };
 
     // handler for termination signals
     let signals = Signals::new(&[signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]);
@@ -103,9 +99,7 @@ async fn main() {
                 while !signal_thread_handler.is_closed() {
                     match sig.pending().next() {
                         Some(e) => {
-                            if (e == signal_hook::consts::SIGTERM)
-                                || (e == signal_hook::consts::SIGINT)
-                            {
+                            if (e == signal_hook::consts::SIGTERM) || (e == signal_hook::consts::SIGINT) {
                                 *run.lock() = false;
                                 break;
                             } else {
@@ -116,7 +110,6 @@ async fn main() {
                     }
                     tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
                 }
-
             });
 
             Some(handler)
@@ -130,9 +123,7 @@ async fn main() {
     // run service in a loop
     while *sc_running.lock() {
         info!("Start running service client...");
-        let res = sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        let res = sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
 
         if let Err(err) = res {
             error!("Error running service client: {}", err);
@@ -155,4 +146,19 @@ async fn main() {
     }
 
     info!("Service client ended.");
+}
+
+async fn load_configuration(config_path: String) -> Result<Arc<Config>> {
+    let path = PathBuf::from(config_path);
+
+    let data = if path.exists() {
+        let body = tokio::fs::read_to_string(&path).await?;
+        let body = environment_template::apply_env(&body)?;
+        serde_yaml::from_str(&body)?
+    } else {
+        Config::default()
+    };
+
+    // parse the configuration
+    Ok(Arc::new(data))
 }

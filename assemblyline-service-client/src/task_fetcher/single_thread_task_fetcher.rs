@@ -1,7 +1,5 @@
-use assemblyline_models::{
-    messages::task::Task,
-    types::{JsonMap, Sha256},
-};
+use assemblyline_models::{messages::task::Task, types::Sha256};
+use assemblyline_utilities::connection::{convert_api_output_map, convert_output_stream, Connection};
 
 use std::{
     collections::HashMap,
@@ -11,17 +9,12 @@ use std::{
 use anyhow::Result;
 use futures::StreamExt;
 
-use log::debug;
+use log::{debug, info};
 use sha2::Digest;
 
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::{
-    connection::{self, Connection},
-    constants::{DEFAULT_REQUEST_TASK_TIMEOUT, SUPPORTED_API},
-    task_fetcher::task_fetcher::TaskFetcher,
-    types::{errors::ServiceHandlerError, response::APIResponse},
-};
+use crate::{constants::DEFAULT_REQUEST_TASK_TIMEOUT, task_fetcher::task_fetcher::TaskFetcher, types::errors::ServiceClientError};
 use std::io::Write;
 
 #[derive(Debug, Clone)]
@@ -42,28 +35,15 @@ impl TaskFetcher for SingleThreadTaskFetcher {
         // file_required: bool,
         // tasking_dir: String,
         con: &Connection,
-    ) -> Result<Option<Task>, ServiceHandlerError> {
+    ) -> Result<Option<Task>, ServiceClientError> {
         let mut headers: HashMap<String, String> = HashMap::new();
-        headers.insert(
-            "Timeout".to_string(),
-            DEFAULT_REQUEST_TASK_TIMEOUT.to_string(),
-        );
-        let request_task_url = con.get_api_path(SUPPORTED_API, "task", &[])?;
+        headers.insert("Timeout".to_string(), DEFAULT_REQUEST_TASK_TIMEOUT.to_string());
+        let request_task_url = con.get_api_path("task", &[])?;
 
-        let response = con
-            .request(
-                reqwest::Method::GET,
-                request_task_url,
-                connection::Body::None,
-                None,
-                None,
-                Some(headers),
-            )
-            .await?;
+        info!("Requesting a task with {}s timeout...", DEFAULT_REQUEST_TASK_TIMEOUT);
+        let data = con.get(request_task_url, Some(headers), convert_api_output_map).await?;
 
-        let data = response.json::<APIResponse<JsonMap>>().await?;
-
-        if let Some(value) = data.api_response.get("task") {
+        if let Some(value) = data.get("task") {
             if value.is_boolean() {
                 //service server returns a boolean when no task if found
                 return Ok(None);
@@ -72,37 +52,20 @@ impl TaskFetcher for SingleThreadTaskFetcher {
                 return Ok(Some(task));
             }
 
-            return Err(ServiceHandlerError::Default(
+            return Err(ServiceClientError::Default(
                 "Unknown response from get_task. Should be boolean or task.".into(),
             ));
         } else {
-            return Err(ServiceHandlerError::Default(
+            return Err(ServiceClientError::Default(
                 "Error response from get_task. Cannot find key 'task' in response.".into(),
             ));
         }
     }
 
-    async fn download_file(
-        &self,
-        sha256: Sha256,
-        task_dir: PathBuf,
-        con: &Connection,
-    ) -> Result<PathBuf, ServiceHandlerError> {
-        let donwload_file_url =
-            con.get_api_path(SUPPORTED_API, "file", &[sha256.to_string().as_str()])?;
+    async fn download_file(&self, sha256: Sha256, task_dir: PathBuf, con: &Connection) -> Result<PathBuf, ServiceClientError> {
+        let donwload_file_url = con.get_api_path("file", &[sha256.to_string().as_str()])?;
 
-        let response = con
-            .request(
-                reqwest::Method::GET,
-                donwload_file_url,
-                connection::Body::None,
-                None,
-                None,
-                None,
-            )
-            .await?;
-
-        let mut data_stream = response.bytes_stream();
+        let mut data_stream = con.get(donwload_file_url, None, convert_output_stream).await?;
 
         let file_path = task_dir.join(Path::new(&sha256.to_string()));
 
@@ -117,12 +80,10 @@ impl TaskFetcher for SingleThreadTaskFetcher {
 
         let file_sha256: Sha256 = (&hasher.finalize()[..]).try_into()?;
 
-        debug!(
-            "Download task file. File sha requested: {sha256} and content sha is: {file_sha256}"
-        );
+        debug!("Download task file. File sha requested: {sha256} and content sha is: {file_sha256}");
 
         if file_sha256 != sha256 {
-            return Err(ServiceHandlerError::FileHashMisMatch {
+            return Err(ServiceClientError::FileHashMisMatch {
                 requested_sha: sha256,
                 content_sha: file_sha256,
             });

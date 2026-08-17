@@ -23,7 +23,7 @@ use crate::{
     constants::{TASK_DONE_ERROR, TASK_DONE_SUCCESS},
     service_launcher::ServiceLauncher,
     tests::{create_random_service_result, init},
-    types::errors::ServiceHandlerError,
+    types::errors::ServiceClientError,
 };
 
 pub struct MockService {
@@ -40,7 +40,7 @@ pub struct MockService {
 pub struct DoNothingServiceLauncher {}
 
 impl ServiceLauncher for DoNothingServiceLauncher {
-    async fn launch_service(&self) -> Result<Child, ServiceHandlerError> {
+    async fn launch_service(&self) -> Result<Child, ServiceClientError> {
         info!("LAUNCH Mock service...");
         let mut cmd = Command::new("sleep");
         cmd.args(["infinity"]);
@@ -68,7 +68,7 @@ pub struct MockServiceLauncher {
 }
 
 impl ServiceLauncher for MockServiceLauncher {
-    async fn launch_service(&self) -> Result<Child, ServiceHandlerError> {
+    async fn launch_service(&self) -> Result<Child, ServiceClientError> {
         info!("LAUNCH Mock service...");
         let mut cmd = Command::new("sleep");
         cmd.args(["infinity"]);
@@ -121,10 +121,7 @@ impl MockService {
         }
     }
 
-    pub async fn setup_fifo(
-        task_fifo_path: &String,
-        done_fifo_path: &String,
-    ) -> Result<TaskFifoPipes> {
+    pub async fn setup_fifo(task_fifo_path: &String, done_fifo_path: &String) -> Result<TaskFifoPipes> {
         debug!("Open receiver......");
         let open_receiver = loop {
             let open_receiver = pipe::OpenOptions::new().open_receiver(task_fifo_path);
@@ -167,8 +164,7 @@ impl MockService {
         }
 
         tokio::time::sleep(tokio::time::Duration::from_secs_f64(3.0)).await;
-        let mut fifo_pipes =
-            MockService::setup_fifo(&self.task_fifo_path, &self.done_fifo_path).await?;
+        let mut fifo_pipes = MockService::setup_fifo(&self.task_fifo_path, &self.done_fifo_path).await?;
 
         let _ = File::create(&self.service_ready_path)?;
         tokio::time::sleep(tokio::time::Duration::from_secs_f64(5.0)).await;
@@ -197,10 +193,7 @@ impl MockService {
                     if Path::new(&task_file_path).exists() {
                         debug!("The task at {:?} exists", task_file_path);
                     } else {
-                        return Err(anyhow!(
-                            "Task file is not at file path {:?}.",
-                            task_file_path
-                        ));
+                        return Err(anyhow!("Task file is not at file path {:?}.", task_file_path));
                     }
                     let file = std::fs::File::open(&task_file_path)?;
                     let task: Task = serde_json::from_reader(file)?;
@@ -236,11 +229,9 @@ impl MockService {
                     };
 
                     if self.task_done_success {
-                        result_json_path
-                            .push(format!("{}_{}_result.json", task.sid, task.fileinfo.sha256));
+                        result_json_path.push(format!("{}_{}_result.json", task.sid, task.fileinfo.sha256));
                     } else {
-                        result_json_path
-                            .push(format!("{}_{}_error.json", task.sid, task.fileinfo.sha256));
+                        result_json_path.push(format!("{}_{}_error.json", task.sid, task.fileinfo.sha256));
                     }
 
                     let mut result_file = File::create(&result_json_path)?;
@@ -249,11 +240,7 @@ impl MockService {
 
                     debug!("Write task success to result fifo");
                     if let Some(path_str) = result_json_path.as_os_str().to_str() {
-                        let task_done_type = if self.task_done_success {
-                            TASK_DONE_SUCCESS
-                        } else {
-                            TASK_DONE_ERROR
-                        };
+                        let task_done_type = if self.task_done_success { TASK_DONE_SUCCESS } else { TASK_DONE_ERROR };
                         let val = vec![path_str, task_done_type];
                         let msg = format!("{}\n", serde_json::to_string(&val)?);
                         debug!("Service done fifo message: {}", &msg);

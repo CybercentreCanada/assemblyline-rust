@@ -10,9 +10,6 @@ pub mod test_task_fetcher;
 pub mod test_task_uploader;
 
 #[cfg(test)]
-pub(crate) mod test_connection;
-
-#[cfg(test)]
 pub(crate) mod mock_service_api;
 
 use assemblyline_models::{
@@ -30,7 +27,7 @@ pub fn sha256_data(body: &[u8]) -> String {
 }
 
 pub fn test_sha_file() -> (String, Vec<u8>) {
-    let mut data: Vec<u8> = "abcdefg".to_string().into_bytes();
+    let data: Vec<u8> = "abcdefg".to_string().into_bytes();
 
     let sha_hash = sha256_data(data.as_bytes());
     (sha_hash, data)
@@ -70,11 +67,11 @@ pub fn create_random_service_result(
 }
 
 fn init() {
-    // let _ = env_logger::builder()
-    //     .target(env_logger::Target::Stdout)
-    //     .filter_level(log::LevelFilter::Info)
-    //     .is_test(true)
-    //     .try_init();
+    let _ = env_logger::builder()
+        .target(env_logger::Target::Stdout)
+        .filter_level(log::LevelFilter::Trace)
+        .is_test(true)
+        .try_init();
 
     assemblyline_models::disable_global_classification();
 }
