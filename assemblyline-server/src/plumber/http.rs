@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::config::TLSConfig;
 use crate::dispatcher::client::DispatchCapable;
-use crate::logging::LoggerMiddleware;
 
 use super::Plumber;
 
 use anyhow::{Context, Result};
+use assemblyline_utilities::logging::LoggerMiddleware;
 use log::{error, info};
 use poem::listener::{Listener, OpensslTlsConfig, TcpListener};
 use poem::{get, handler, EndpointExt, Route, Server};
@@ -47,4 +47,3 @@ async fn _start<Dispatch: DispatchCapable>(bind_address: std::net::SocketAddr, t
     info!("HTTP interface stopped");
     Ok(())
 }
-

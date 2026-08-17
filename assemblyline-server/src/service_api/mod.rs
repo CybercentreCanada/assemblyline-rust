@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use assemblyline_utilities::logging::LoggerMiddleware;
 use helpers::tasking::TaskingClient;
 use poem::middleware::NormalizePath;
 use poem::{Endpoint, EndpointExt, Route, Server};
 
-use crate::logging::LoggerMiddleware;
 use crate::Core;
 use crate::service_api::helpers::auth::{ApiKeyLoader, ServiceAuth};
 

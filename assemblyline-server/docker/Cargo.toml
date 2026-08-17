@@ -6,6 +6,7 @@ members = [
     "assemblyline-markings",
     "assemblyline-models",
     "assemblyline-server",
+    "assemblyline-utilities",
     "environment_template",
-    "redis-objects"
+    "redis-objects",
 ]
