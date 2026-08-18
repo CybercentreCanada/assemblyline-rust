@@ -79,6 +79,8 @@ pub enum TLSSettings {
     Native,
     /// Use the native set of certificates and the given certificate
     CARoot(String),
+    /// Use the native st of certificates and the given certificate at the given path
+    CARootPath(String),
     /// Use the given certificate and only verify against it doing no other checks
     UnsafeClusterCARoot(String),
     /// Just let any old certificate work
@@ -89,6 +91,12 @@ impl Default for TLSSettings {
     fn default() -> Self {
         Self::Native
     }
+}
+
+async fn unpack_cert_from_path(cert_path: String) -> Result<Vec<u8>, ApiClientError> {
+    let cert_data = tokio::fs::read_to_string(cert_path).await?;
+
+    return unpack_certs(cert_data);
 }
 
 fn unpack_certs(cert: String) -> Result<Vec<u8>, ApiClientError> {
@@ -186,6 +194,9 @@ impl Connection {
             TLSSettings::CARoot(root) => reqwest::Client::builder()
                 .use_rustls_tls()
                 .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(root.to_owned())?)?),
+            TLSSettings::CARootPath(path) => reqwest::Client::builder()
+                .use_rustls_tls()
+                .add_root_certificate(reqwest::Certificate::from_pem(&unpack_cert_from_path(path.to_owned()).await?)?),
             TLSSettings::UnsafeClusterCARoot(root) => {
                 let store = to_rustls_certs(unpack_certs(root.to_owned())?)?;
                 let verify = OnlyCAVerify::new(store);

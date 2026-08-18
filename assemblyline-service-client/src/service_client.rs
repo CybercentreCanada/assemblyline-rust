@@ -131,7 +131,7 @@ impl ServiceClient {
         info!("HEURISTICS_COUNT: {}", service_manifest.heuristics.len());
 
         let tls_setting = if server_host_url.scheme().eq("https") {
-            TLSSettings::CARoot(root_ca_path.clone())
+            TLSSettings::CARootPath(root_ca_path.clone())
         } else {
             TLSSettings::Native
         };
