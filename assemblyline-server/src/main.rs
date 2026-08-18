@@ -196,7 +196,7 @@ async fn main() -> ExitCode {
         Commands::Ingester {} => crate::ingester::main(core).await,
         Commands::Dispatcher {} => crate::dispatcher::main(core).await,
         Commands::Plumber {} => crate::plumber::main(core).await,
-        Commands::ServiceAPI { allow_http_mode } => crate::service_api::main(core, allow_http_mode).await
+        Commands::ServiceAPI { allow_http_mode } => crate::service_api::main(core, allow_http_mode).await,
         _ => {
             error!("Module not implemented");
             return ExitCode::FAILURE;
