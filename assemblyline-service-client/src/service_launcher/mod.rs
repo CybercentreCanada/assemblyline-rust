@@ -1,12 +1,12 @@
 use log::debug;
 use tokio::process::{Child, Command};
 
-use crate::types::errors::ServiceHandlerError;
+use crate::types::errors::ServiceClientError;
 
 pub trait ServiceLauncher {
     fn launch_service(
         &self,
-    ) -> impl std::future::Future<Output = Result<Child, ServiceHandlerError>> + Send;
+    ) -> impl std::future::Future<Output = Result<Child, ServiceClientError>> + Send;
 }
 
 pub struct DefaultServiceLauncher {
@@ -14,7 +14,7 @@ pub struct DefaultServiceLauncher {
 }
 
 impl ServiceLauncher for DefaultServiceLauncher {
-    async fn launch_service(&self) -> Result<Child, ServiceHandlerError> {
+    async fn launch_service(&self) -> Result<Child, ServiceClientError> {
         let mut cmd = Command::new("python3");
         cmd.args(["-m", "assemblyline_v4_service.run_service"]);
 

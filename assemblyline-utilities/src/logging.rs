@@ -4,8 +4,8 @@
 use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
-use assemblyline_models::config::{Config, SyslogTransport};
 use assemblyline_models::config::LogLevel;
+use assemblyline_models::config::{Config, SyslogTransport};
 use flexi_logger::{DeferredNow, LoggerHandle};
 use log::Record;
 use log::{debug, error};
@@ -32,7 +32,6 @@ pub struct LoggerMiddlewareImpl<E> {
     ep: E,
 }
 
-
 impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
     type Output = E::Output;
 
@@ -44,33 +43,32 @@ impl<E: Endpoint> Endpoint for LoggerMiddlewareImpl<E> {
             Ok(resp) => {
                 debug!("request for {uri} handled ({} ms)", start.elapsed().as_millis());
                 Ok(resp)
-            },
+            }
             Err(err) if err.status() == StatusCode::NOT_FOUND => {
                 debug!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
                 Err(err)
-            },
+            }
             Err(err) => {
                 error!("error handling {uri} ({} ms) {err}", start.elapsed().as_millis());
                 Err(err)
-            },
+            }
         }
     }
 }
-
 
 static INIT_LOGGING: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static LOCAL_IP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
-    use flexi_logger::*;
     use flexi_logger::writers::{FileLogWriter, SyslogConnection, SyslogWriter};
+    use flexi_logger::*;
 
     // make sure we only init logging once
     {
         let mut init = INIT_LOGGING.lock().unwrap();
         if *init {
-            return Err(anyhow::anyhow!("Logger double initalized"))
+            return Err(anyhow::anyhow!("Logger double initalized"));
         }
         *init = true;
 
@@ -80,7 +78,7 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     }
 
     // map to the log model's log level
-    let log_level  = match config.logging.log_level {
+    let log_level = match config.logging.log_level {
         LogLevel::Debug => log::Level::Debug,
         LogLevel::Info => log::Level::Info,
         LogLevel::Warning => log::Level::Warn,
@@ -90,8 +88,8 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
         // if logging is disabled initilize the backend with the filter set to ignore all
         LogLevel::Disabled => {
             let logger = Logger::with(LogSpecification::off());
-            return Ok(logger.start()?)
-        },
+            return Ok(logger.start()?);
+        }
     };
 
     // setup our log handler
@@ -100,56 +98,60 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     let log_spec = format!("warn, assemblyline={log_level}");
     let spec = LogSpecification::env_or_parse(log_spec)?;
 
-    let formatter = if config.logging.log_as_json {
-        json_format
-    } else {
-        basic_format
-    };
+    let formatter = if config.logging.log_as_json { json_format } else { basic_format };
 
     // build our log handler
-    let mut builder = Logger::with(spec)
-        .format(formatter);
+    let mut builder = Logger::with(spec).format(formatter);
 
     if config.logging.log_to_file {
         let log_directory = config.logging.log_directory.clone();
         if !log_directory.exists() {
-            println!("Warning: log directory does not exist. Will try to create {}", log_directory.to_string_lossy());
+            println!(
+                "Warning: log directory does not exist. Will try to create {}",
+                log_directory.to_string_lossy()
+            );
             std::fs::create_dir_all(&log_directory)?;
         }
 
         if log_level <= log::Level::Debug {
             builder = builder.add_writer(
                 "DebugFile",
-                Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".dbg"))
-                .append()
-                .max_level(log::LevelFilter::Debug)
-                .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
-                .format(formatter)
-                .try_build()?)
+                Box::new(
+                    FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".dbg"))
+                        .append()
+                        .max_level(log::LevelFilter::Debug)
+                        .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
+                        .format(formatter)
+                        .try_build()?,
+                ),
             );
         }
 
         if log_level <= log::Level::Info {
             builder = builder.add_writer(
                 "LogFile",
-                Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".log"))
-                .append()
-                .max_level(log::LevelFilter::Info)
-                .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
-                .format(formatter)
-                .try_build()?)
+                Box::new(
+                    FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".log"))
+                        .append()
+                        .max_level(log::LevelFilter::Info)
+                        .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
+                        .format(formatter)
+                        .try_build()?,
+                ),
             );
         }
 
         if log_level <= log::Level::Error {
             builder = builder.add_writer(
                 "ErrorFile",
-                Box::new(FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".err"))
-                .append()
-                .max_level(log::LevelFilter::Error)
-                .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
-                .format(formatter)
-                .try_build()?)
+                Box::new(
+                    FileLogWriter::builder(FileSpec::default().directory(&log_directory).suffix(".err"))
+                        .append()
+                        .max_level(log::LevelFilter::Error)
+                        .rotate(Criterion::Size(10485760), Naming::Numbers, Cleanup::KeepLogFiles(5))
+                        .format(formatter)
+                        .try_build()?,
+                ),
             );
         }
     }
@@ -162,14 +164,18 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     if config.logging.log_to_syslog {
         let connection = match config.logging.syslog_transport {
             SyslogTransport::Udp => SyslogConnection::try_udp(("0.0.0.0", 0), (&config.logging.syslog_host, config.logging.syslog_port))?,
-            SyslogTransport::Tcp => SyslogConnection::try_tcp( (config.logging.syslog_host.as_str(), config.logging.syslog_port))?,
+            SyslogTransport::Tcp => SyslogConnection::try_tcp((config.logging.syslog_host.as_str(), config.logging.syslog_port))?,
         };
 
-        builder = builder.add_writer("Syslog", SyslogWriter::builder(
-            connection,
-            writers::SyslogLineHeader::Rfc5424("assemblyline".to_owned()),
-            writers::SyslogFacility::SystemDaemons,
-        ).max_log_level(log_level.to_level_filter()).build()?
+        builder = builder.add_writer(
+            "Syslog",
+            SyslogWriter::builder(
+                connection,
+                writers::SyslogLineHeader::Rfc5424("assemblyline".to_owned()),
+                writers::SyslogFacility::SystemDaemons,
+            )
+            .max_log_level(log_level.to_level_filter())
+            .build()?,
         );
 
         // builder = builder.add_writer("Syslog", SyslogWriter::try_new(
@@ -184,17 +190,13 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     Ok(builder.start()?)
 }
 
-fn basic_format(
-    w: &mut dyn std::io::Write,
-    now: &mut DeferredNow,
-    record: &Record,
-) -> Result<(), std::io::Error> {
+fn basic_format(w: &mut dyn std::io::Write, now: &mut DeferredNow, record: &Record) -> Result<(), std::io::Error> {
     let time = now.format_rfc3339();
     let level = record.level();
     let name = record.module_path().unwrap_or("<unknown>");
     let message = record.args();
     let process = std::process::id();
-    let hostname = HOSTNAME.get().map_or("<unknown>", |row|row.as_str());
+    let hostname = HOSTNAME.get().map_or("<unknown>", |row| row.as_str());
 
     // AL_LOG_FORMAT = f'%(asctime)-16s %(levelname)8s {hostname} %(process)d %(name)40s | %(message)s'
     write!(w, "{time:-16} {level:8} {hostname} {process} {name:40} | {message}")
@@ -233,7 +235,7 @@ struct LogLineProcess<'b> {
 
 #[derive(Serialize)]
 struct LogLine<'a, 'b> {
-    #[serde(rename="@timestamp")]
+    #[serde(rename = "@timestamp")]
     timestamp: String,
     event: LogLineEvent<'b>,
     host: LogLineHost<'b>,
@@ -242,21 +244,23 @@ struct LogLine<'a, 'b> {
     message: &'a std::fmt::Arguments<'a>,
 }
 
-fn json_format(
-    w: &mut dyn std::io::Write,
-    now: &mut DeferredNow,
-    record: &Record,
-) -> Result<(), std::io::Error> {
+fn json_format(w: &mut dyn std::io::Write, now: &mut DeferredNow, record: &Record) -> Result<(), std::io::Error> {
     let module = record.module_path().unwrap_or("<unknown>");
-    let hostname = HOSTNAME.get().map_or("<unknown>", |row|row.as_str());
-    let ip = LOCAL_IP.get().map_or("<unknown>", |row|row.as_str());
+    let hostname = HOSTNAME.get().map_or("<unknown>", |row| row.as_str());
+    let ip = LOCAL_IP.get().map_or("<unknown>", |row| row.as_str());
     let process = std::process::id().to_string();
 
     let line = LogLine {
         timestamp: now.format_rfc3339(),
-        event: LogLineEvent { module: "assemblyline", dataset: module },
+        event: LogLineEvent {
+            module: "assemblyline",
+            dataset: module,
+        },
         host: LogLineHost { ip, hostname },
-        log: LogLineLevel { level: record.level().as_str(), logger: module },
+        log: LogLineLevel {
+            level: record.level().as_str(),
+            logger: module,
+        },
         process: LogLineProcess { pid: &process },
         message: record.args(),
     };
@@ -266,7 +270,7 @@ fn json_format(
 }
 
 /// A wrapper over a slice reference to print it as a comma separated list
-pub struct FormattedList<'a, I: std::fmt::Display> (pub &'a [I]);
+pub struct FormattedList<'a, I: std::fmt::Display>(pub &'a [I]);
 
 impl<I: std::fmt::Display> std::fmt::Display for FormattedList<'_, I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

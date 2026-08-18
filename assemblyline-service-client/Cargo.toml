@@ -14,7 +14,6 @@ flexi_logger = { version = "0.31", features=["syslog_writer"] }
 gethostname = "1.0"
 local-ip-address = "0.6"
 
-simple_logger = "4.3"
 
 # Metric collection
 tracing = "0.1"
@@ -54,7 +53,7 @@ futures = "0.3"
 
 
 # Network libraries
-reqwest = { version = "0.12", features = ["json", "native-tls", "rustls-tls-native-roots", "stream"] }
+reqwest = { version = "0.13", features = ["json", "cookies", "multipart", "stream", "gzip", "brotli", "deflate", "query", "rustls", "native-tls"] }
 poem = { version = "3.1", features = ["websocket", "openssl-tls", "anyhow", "multipart"] }
 url = "2.5"
 rustls = { version = "0.21.7", features = ["dangerous_configuration"] }
@@ -85,6 +84,9 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 serde_with = "3.12"
 
+# Assemblyline Utilities
+assemblyline-utilities = { version = "0.1.0", path = "../assemblyline-utilities" }
+
 # data parsing
 nom = "8"
 regex = "1.11"
@@ -92,7 +94,6 @@ reqwest-retry = "=0.9.1"
 
 # binding to C library
 libc = "0.2"
-env_logger = "0"
 signal-hook = "0.4.4"
 
 #[dependencies.magic-sys]

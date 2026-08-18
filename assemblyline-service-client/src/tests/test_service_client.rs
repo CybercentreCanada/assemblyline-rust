@@ -3,6 +3,9 @@ use assemblyline_models::{
     messages::{self, service_api::service_manifest::ServiceManifest, task::Task},
     types::{JsonMap, Sha256},
 };
+use assemblyline_utilities::{
+    connection::{ convert_output_map}, types::response::{APIResponse, RegisterResponse, TaskUploadResponse},
+};
 use log::{debug, info};
 use std::{collections::HashMap, io::Write, path::Path, str::FromStr, sync::Arc};
 
@@ -22,7 +25,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use url::Url;
 
 use crate::{
-    connection::{self},
     constants::{RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE},
     service_client::ServiceClient,
     task_fetcher::single_thread_task_fetcher::SingleThreadTaskFetcher,
@@ -30,16 +32,10 @@ use crate::{
     tests::{
         create_random_service_result, init,
         mock_service::{DoNothingServiceLauncher, MockService, MockServiceLauncher},
-        mock_service_api::{
-            MockServerConfig, MockServiceServer, RequestDataResponse, TEST_API_VERSION,
-            TEST_AUTH_KEY, TEST_SERVER_VERSION,
-        },
+        mock_service_api::{MockServerConfig, MockServiceServer, RequestDataResponse, TEST_API_VERSION, TEST_AUTH_KEY, TEST_SERVER_VERSION},
         test_sha_file,
     },
-    types::{
-        response::{APIResponse, RegisterResponse, TaskUploadResponse},
-        task::{ErrorBody, ErrorResponse},
-    },
+    types::task::{ErrorBody, ErrorResponse},
 };
 
 pub const TESTING_PREFIX: &str = "test";
@@ -61,19 +57,13 @@ pub struct RunServiceData {
 
 fn register_api(service_data: RegisterServiceData) -> impl Endpoint {
     Route::new()
-        .at(
-            format!("/service/register"),
-            put(register_service).post(register_service),
-        )
+        .at(format!("/service/register"), put(register_service).post(register_service))
         .with(AddData::new(service_data))
 }
 
 fn run_service_api(data: RunServiceData) -> impl Endpoint {
     Route::new()
-        .at(
-            format!("/service/register"),
-            put(simple_register).post(simple_register),
-        )
+        .at(format!("/service/register"), put(simple_register).post(simple_register))
         .at(format!("/task"), get(get_task).post(upload_task_result))
         .at(format!("/file/:sha256"), get(download_file))
         .at(format!("/file"), put(upload_file))
@@ -105,10 +95,7 @@ pub async fn get_task(data: Data<&RunServiceData>) -> Result<poem::Response, poe
 }
 
 #[handler]
-async fn upload_task_result(
-    Json(body): Json<JsonMap>,
-    data: Data<&RunServiceData>,
-) -> poem::Result<poem::Response, poem::error::Error> {
+async fn upload_task_result(Json(body): Json<JsonMap>, data: Data<&RunServiceData>) -> poem::Result<poem::Response, poem::error::Error> {
     *data.num_upload_called.lock() += 1;
 
     if !data.upload_value.is_null() {
@@ -134,10 +121,7 @@ async fn upload_task_result(
 }
 
 #[handler]
-async fn simple_register(
-    Json(_body): Json<JsonMap>,
-    data: Data<&RunServiceData>,
-) -> poem::Result<poem::Response> {
+async fn simple_register(Json(_body): Json<JsonMap>, data: Data<&RunServiceData>) -> poem::Result<poem::Response> {
     let new_heuristics: Vec<String> = Vec::new();
     let register_response = RegisterResponse {
         keep_alive: true,
@@ -156,13 +140,9 @@ async fn simple_register(
 }
 
 #[handler]
-async fn register_service(
-    Json(body): Json<JsonMap>,
-    service_data: Data<&RegisterServiceData>,
-) -> poem::Result<poem::Response> {
+async fn register_service(Json(body): Json<JsonMap>, service_data: Data<&RegisterServiceData>) -> poem::Result<poem::Response> {
     // Data sent from service client should serialize to service
-    let mut service: Service =
-        serde_json::from_value::<Service>(serde_json::Value::Object(body)).unwrap();
+    let mut service: Service = serde_json::from_value::<Service>(serde_json::Value::Object(body)).unwrap();
 
     // register service either return the service that we got from the request body or
     // return an updated version of the service
@@ -196,9 +176,7 @@ async fn upload_file(_body: poem::Body) -> Result<poem::Response, poem::error::E
 }
 
 #[handler]
-async fn download_file(
-    poem::web::Path(_sha256): poem::web::Path<String>,
-) -> Result<poem::Response, poem::error::Error> {
+async fn download_file(poem::web::Path(_sha256): poem::web::Path<String>) -> Result<poem::Response, poem::error::Error> {
     // let hash: Sha256 = sha256.parse().unwrap();
     let (file_hash, file_data) = test_sha_file();
     let file_size = file_data.len();
@@ -208,17 +186,11 @@ async fn download_file(
     return Ok(poem::Response::builder()
         .content_type("application/octet-stream")
         .header("Content-Length", file_size.to_string())
-        .header(
-            "Content-Disposition",
-            format!("attachment; filename=file.bin; filename*={filename}"),
-        )
+        .header("Content-Disposition", format!("attachment; filename=file.bin; filename*={filename}"))
         .body(file_data));
 }
 
-async fn make_run_service_data(
-    base_folder: String,
-    file_required: bool,
-) -> (ServiceManifest, Service, Task) {
+async fn make_run_service_data(base_folder: String, file_required: bool) -> (ServiceManifest, Service, Task) {
     let mut base_manifest: ServiceManifest = rand::rng().random();
     base_manifest.file_required = file_required;
     let base_service = base_manifest.service.clone();
@@ -230,8 +202,7 @@ async fn make_run_service_data(
     let mut task: Task = rand::rng().random();
 
     let (file_hash, _) = test_sha_file();
-    task.fileinfo.sha256 =
-        Sha256::from_str(&file_hash).expect("File hash should be hex representation of sha256.");
+    task.fileinfo.sha256 = Sha256::from_str(&file_hash).expect("File hash should be hex representation of sha256.");
 
     task.service_name = base_manifest.service.name;
 
@@ -268,9 +239,7 @@ async fn make_test_service_client(
 async fn test_service_client_connection() {
     init();
 
-    let (port, _) = MockServiceServer::launch_with_test_endpoints(MockServerConfig::default())
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_test_endpoints(MockServerConfig::default()).await.unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     let test_manifest: ServiceManifest = rand::rng().random();
@@ -289,14 +258,8 @@ async fn test_service_client_connection() {
     let headers: HashMap<String, String> = HashMap::from([
         ("x-apikey".to_string(), TEST_AUTH_KEY.to_string()),
         ("container-id".to_string(), "test_container_id".to_string()),
-        (
-            "service-name".to_string(),
-            test_manifest.service.name.to_string(),
-        ),
-        (
-            "service-tool-version".to_string(),
-            test_manifest.tool_version.unwrap_or("".to_string()),
-        ),
+        ("service-name".to_string(), test_manifest.service.name.to_string()),
+        ("service-tool-version".to_string(), test_manifest.tool_version.unwrap_or("".to_string())),
         ("service-version".to_string(), test_manifest.service.version),
     ]);
 
@@ -320,21 +283,11 @@ async fn test_service_client_connection() {
     .unwrap();
 
     // make sure service connection has the correct header setup
-    let get_request_data =
-        Url::parse(format!("{service_api_address}/test/get_request_data/").as_str()).unwrap();
-    let response = sc
-        .connection
-        .request(
-            reqwest::Method::GET,
-            get_request_data.clone(),
-            connection::Body::None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    let response_data: RequestDataResponse = response.json().await.unwrap();
+    let get_request_data = Url::parse(format!("{service_api_address}/test/get_request_data/").as_str()).unwrap();
+
+    let response: Value = sc.get_connection().get(get_request_data, None, convert_output_map).await.unwrap();
+
+    let response_data: RequestDataResponse = serde_json::from_value(response).unwrap();
 
     let mut missing_headers: Vec<String> = Vec::new();
     let mut incorrect_headers: Vec<String> = Vec::new();
@@ -350,11 +303,7 @@ async fn test_service_client_connection() {
         }
     }
 
-    assert!(
-        missing_headers.is_empty(),
-        "Missing request headers: {}",
-        missing_headers.join(",")
-    );
+    assert!(missing_headers.is_empty(), "Missing request headers: {}", missing_headers.join(","));
     assert!(
         incorrect_headers.is_empty(),
         "Incorrect request headers values for: {}",
@@ -385,33 +334,21 @@ async fn test_register_service() {
 
     updated_service.config = serde_json::from_value(update_config).unwrap();
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(register_api(RegisterServiceData {
-            updated_service: Some(updated_service.clone()),
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(register_api(RegisterServiceData {
+        updated_service: Some(updated_service.clone()),
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     let sc_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        base_dir_string,
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, base_dir_string, None).await;
 
-    let _ = sc
-        .register_service()
-        .await
-        .expect("Register service should pass.");
+    let _ = sc.register_service().await.expect("Register service should pass.");
 
     // the updated manifest should be written to file
-    let file = tokio::fs::File::open(&sc.get_runtime_manifest_path())
-        .await
-        .unwrap();
+    let file = tokio::fs::File::open(&sc.get_runtime_manifest_path()).await.unwrap();
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
     buf_reader.read_to_string(&mut contents).await.unwrap();
@@ -433,29 +370,22 @@ async fn test_run_service_write_task_pipe() {
 
     let (_, base_service, task) = make_run_service_data(tasking_dir_string.clone(), true).await;
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: Some(task.clone()),
-            num_get_task_called: Arc::new(Mutex::new(0)),
-            num_upload_called: Arc::new(Mutex::new(0)),
-            upload_value: Value::Null,
-            task_done_success: false,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task.clone()),
+        num_get_task_called: Arc::new(Mutex::new(0)),
+        num_upload_called: Arc::new(Mutex::new(0)),
+        upload_value: Value::Null,
+        task_done_success: false,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
     let sc_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        tasking_dir_string.clone(),
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, tasking_dir_string.clone(), None).await;
 
     // different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
@@ -463,21 +393,11 @@ async fn test_run_service_write_task_pipe() {
     let service_launcher = DoNothingServiceLauncher {};
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
-    let task_fifo_path = format!(
-        "{}{}_task.fifo",
-        tasking_dir_string,
-        TESTING_PREFIX.to_owned()
-    );
-    let done_fifo_path = format!(
-        "{}{}_done.fifo",
-        tasking_dir_string,
-        TESTING_PREFIX.to_owned()
-    );
+    let task_fifo_path = format!("{}{}_task.fifo", tasking_dir_string, TESTING_PREFIX.to_owned());
+    let done_fifo_path = format!("{}{}_done.fifo", tasking_dir_string, TESTING_PREFIX.to_owned());
     let service_ready_path = format!("{}{}_ready", tasking_dir_string, TESTING_PREFIX.to_owned());
 
     // start the task fifo setup process
@@ -503,13 +423,9 @@ async fn test_run_service_write_task_pipe() {
                     continue;
                 }
                 msg.truncate(n);
-                let value = serde_json::from_slice::<Vec<String>>(msg.as_slice())
-                    .expect("The message from task_fifo should be a vector of string");
+                let value = serde_json::from_slice::<Vec<String>>(msg.as_slice()).expect("The message from task_fifo should be a vector of string");
 
-                let task_dir_path = value
-                    .get(0)
-                    .expect("The task fifo_message should have task_dir at index 0")
-                    .to_owned();
+                let task_dir_path = value.get(0).expect("The task fifo_message should have task_dir at index 0").to_owned();
                 let task_file_path = value
                     .get(1)
                     .expect("The task fifo_message should have task_file path at index 1")
@@ -541,28 +457,18 @@ async fn test_run_service_write_task_pipe() {
                 let mut task_download_file_path = Path::new(&task_dir_path).to_path_buf();
                 task_download_file_path.push(format!("{}", task.fileinfo.sha256));
 
-                assert!(
-                    task_download_file_path.exists(),
-                    "Task file should be downloaded."
-                );
+                assert!(task_download_file_path.exists(), "Task file should be downloaded.");
 
                 assert_eq!(
-                    task_download_file_path
-                        .parent()
-                        .expect("Downloaded file should have a parent."),
+                    task_download_file_path.parent().expect("Downloaded file should have a parent."),
                     task_dir,
                     "The parent directory of the downloaded file should be tasking_dir"
                 );
 
-                let file =
-                    std::fs::File::open(&task_file_path).expect("Task file should be openable.");
-                let output_task: Task = serde_json::from_reader(file)
-                    .expect("The data in the task file should deserialize to a task object.");
+                let file = std::fs::File::open(&task_file_path).expect("Task file should be openable.");
+                let output_task: Task = serde_json::from_reader(file).expect("The data in the task file should deserialize to a task object.");
 
-                assert_eq!(
-                    output_task, task,
-                    "The task given from service API should be written to task_file."
-                );
+                assert_eq!(output_task, task, "The task given from service API should be written to task_file.");
 
                 break;
             }
@@ -585,13 +491,8 @@ async fn test_run_service_write_task_pipe() {
 
     // Task fifo, done fifo, service ready should all be removed from tasking_dir, each individual folder from tasking_dir should be removed too.
     let task_dir_path = tasking_dir.path().to_path_buf();
-    assert!(
-        task_dir_path.exists(),
-        "The base tasking_dir should still exists."
-    );
-    let task_dir_iterator = task_dir_path
-        .read_dir()
-        .expect("Should be able to read from tasking dir.");
+    assert!(task_dir_path.exists(), "The base tasking_dir should still exists.");
+    let task_dir_iterator = task_dir_path.read_dir().expect("Should be able to read from tasking dir.");
     // everything should be deleted except for the test service manifest file
     assert_eq!(task_dir_iterator.count(), 1)
 }
@@ -615,30 +516,23 @@ async fn test_run_service_task_done_with_result() {
         None,
     );
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: Some(task.clone()),
-            num_get_task_called: num_get_task_called.clone(),
-            num_upload_called: num_upload_called.clone(),
-            upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
-            task_done_success: task_done_success,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task.clone()),
+        num_get_task_called: num_get_task_called.clone(),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
+        task_done_success: task_done_success,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
     let sc_running = Arc::new(Mutex::new(true));
     let service_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        base_dir_string.clone(),
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await;
 
     // different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
@@ -650,28 +544,18 @@ async fn test_run_service_task_done_with_result() {
         running: service_running.clone(),
         task_done_success: task_done_success,
         wait_forever: false,
-        service_result: Some(
-            serde_json::to_value(&result_value).expect("Result should serialize."),
-        ),
+        service_result: Some(serde_json::to_value(&result_value).expect("Result should serialize.")),
     };
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_secs_f64(10.0)).await;
     *sc_running.lock() = false;
 
-    assert!(
-        *num_get_task_called.lock() > 0,
-        "Service client should call get task at least once."
-    );
-    assert!(
-        *num_upload_called.lock() > 0,
-        "Service client should call upload task at least once."
-    );
+    assert!(*num_get_task_called.lock() > 0, "Service client should call get task at least once.");
+    assert!(*num_upload_called.lock() > 0, "Service client should call upload task at least once.");
 
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");
@@ -698,17 +582,16 @@ async fn test_run_service_task_process_with_limit() {
 
     let task_complete_limit = 3;
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: Some(task.clone()),
-            num_get_task_called: num_get_task_called.clone(),
-            num_upload_called: num_upload_called.clone(),
-            upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
-            task_done_success: task_done_success,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task.clone()),
+        num_get_task_called: num_get_task_called.clone(),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
+        task_done_success: task_done_success,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
@@ -733,25 +616,18 @@ async fn test_run_service_task_process_with_limit() {
         running: service_running.clone(),
         task_done_success: task_done_success,
         wait_forever: false,
-        service_result: Some(
-            serde_json::to_value(&result_value).expect("Result should serialize."),
-        ),
+        service_result: Some(serde_json::to_value(&result_value).expect("Result should serialize.")),
     };
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
     // task handler should terminate after processing 3 tasks
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");
 
-    assert!(
-        !*sc_running.lock(),
-        "Service client running mutex should be set to false."
-    );
+    assert!(!*sc_running.lock(), "Service client running mutex should be set to false.");
 
     assert!(
         *num_get_task_called.lock() == (task_complete_limit as usize),
@@ -777,30 +653,23 @@ async fn test_run_service_task_done_with_error() {
     let task_done_success = false;
     let result_value: datastore::error::Error = rand::random();
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: Some(task.clone()),
-            num_get_task_called: num_get_task_called.clone(),
-            num_upload_called: num_upload_called.clone(),
-            upload_value: serde_json::to_value(&result_value).expect("Error should serialize."),
-            task_done_success: task_done_success,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task.clone()),
+        num_get_task_called: num_get_task_called.clone(),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: serde_json::to_value(&result_value).expect("Error should serialize."),
+        task_done_success: task_done_success,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
     let sc_running = Arc::new(Mutex::new(true));
     let service_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        base_dir_string.clone(),
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await;
 
     // different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
@@ -816,23 +685,15 @@ async fn test_run_service_task_done_with_error() {
     };
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_secs_f64(10.0)).await;
 
     *sc_running.lock() = false;
 
-    assert!(
-        *num_get_task_called.lock() > 0,
-        "Service client should call get task at least once."
-    );
-    assert!(
-        *num_upload_called.lock() > 0,
-        "Service client should call upload task at least once."
-    );
+    assert!(*num_get_task_called.lock() > 0, "Service client should call get task at least once.");
+    assert!(*num_upload_called.lock() > 0, "Service client should call upload task at least once.");
 
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");
@@ -850,30 +711,23 @@ async fn test_run_service_task_get_no_task() {
     let num_get_task_called = Arc::new(Mutex::new(0));
     let num_upload_called = Arc::new(Mutex::new(0));
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: None,
-            num_get_task_called: num_get_task_called.clone(),
-            num_upload_called: num_upload_called.clone(),
-            upload_value: Value::Null,
-            task_done_success: false,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: None,
+        num_get_task_called: num_get_task_called.clone(),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: Value::Null,
+        task_done_success: false,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
     let sc_running = Arc::new(Mutex::new(true));
     let service_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        base_dir_string.clone(),
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await;
 
     // different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
@@ -889,9 +743,7 @@ async fn test_run_service_task_get_no_task() {
     };
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
     tokio::time::sleep(tokio::time::Duration::from_secs_f64(11.0)).await;
@@ -901,10 +753,7 @@ async fn test_run_service_task_get_no_task() {
         *num_get_task_called.lock() > 1,
         "Service client should continuously request task when no task received."
     );
-    assert!(
-        *num_upload_called.lock() == 0,
-        "There should be nothing uploaded when there is no task."
-    );
+    assert!(*num_upload_called.lock() == 0, "There should be nothing uploaded when there is no task.");
 
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");
@@ -926,8 +775,7 @@ async fn test_run_service_task_service_terminated() {
         sha256: task.fileinfo.sha256.clone(),
         error_type: UNKNOWN_SERVICE_ERROR_TYPE.to_string(),
         response: ErrorResponse {
-            message: "The service instance processing this task has terminated unexpectedly."
-                .to_owned(),
+            message: "The service instance processing this task has terminated unexpectedly.".to_owned(),
             service_name: base_service.name.clone(),
             service_version: base_service.version.clone(),
             service_tool_version: None,
@@ -935,31 +783,23 @@ async fn test_run_service_task_service_terminated() {
         },
     };
 
-    let (port, _) =
-        MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
-            service: base_service.clone(),
-            task: Some(task),
-            num_get_task_called: num_get_task_called.clone(),
-            num_upload_called: num_upload_called.clone(),
-            upload_value: serde_json::to_value(error_body)
-                .expect("ErrorBody type should be serializable."),
-            task_done_success: false,
-        }))
-        .await
-        .unwrap();
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task),
+        num_get_task_called: num_get_task_called.clone(),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: serde_json::to_value(error_body).expect("ErrorBody type should be serializable."),
+        task_done_success: false,
+    }))
+    .await
+    .unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
 
     //  build a test core
     let sc_running = Arc::new(Mutex::new(true));
     let service_running = Arc::new(Mutex::new(true));
 
-    let mut sc = make_test_service_client(
-        sc_running.clone(),
-        service_api_address,
-        base_dir_string.clone(),
-        None,
-    )
-    .await;
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await;
 
     // different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
@@ -975,9 +815,7 @@ async fn test_run_service_task_service_terminated() {
     };
 
     let handler = tokio::spawn(async move {
-        return sc
-            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
-            .await;
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
     // terminate service
@@ -986,14 +824,8 @@ async fn test_run_service_task_service_terminated() {
     // give service client some time to upload error to service api
     tokio::time::sleep(tokio::time::Duration::from_secs_f64(5.0)).await;
 
-    assert!(
-        *num_get_task_called.lock() > 0,
-        "Service client should call get task at least once."
-    );
-    assert!(
-        *num_upload_called.lock() > 0,
-        "Service client should call upload task at least once."
-    );
+    assert!(*num_get_task_called.lock() > 0, "Service client should call get task at least once.");
+    assert!(*num_upload_called.lock() > 0, "Service client should call upload task at least once.");
 
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");

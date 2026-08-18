@@ -1,14 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    connection::{Body, Connection},
-    constants::{
-        DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, SUPPORTED_API,
-        UNKNOWN_SERVICE_ERROR_TYPE,
-    },
+    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS,  UNKNOWN_SERVICE_ERROR_TYPE},
     types::{
-        errors::ServiceHandlerError,
-        response::{APIResponse, TaskUploadResponse},
+        errors::ServiceClientError,
         task::{ErrorBody, ErrorResponse, TaskUploadBody},
     },
 };
@@ -18,6 +13,10 @@ use assemblyline_models::{
     datastore::Service,
     messages::{service_api, task::Task},
     types::Sha256,
+};
+use assemblyline_utilities::{
+    connection::{convert_api_output_obj, convert_output_map, Body, Connection},
+    types::response::TaskUploadResponse,
 };
 use log::{debug, info, warn};
 use serde_json::Value;
@@ -36,7 +35,7 @@ impl TaskUploader {
         message: Option<String>,
         error_type: Option<String>,
         status: Option<String>,
-    ) -> Result<(), ServiceHandlerError> {
+    ) -> Result<(), ServiceClientError> {
         let error_data = error_json.unwrap_or({
             let error_body = ErrorBody {
                 sha256: task.fileinfo.sha256.clone(),
@@ -60,18 +59,11 @@ impl TaskUploader {
             error: Some(error_data),
         };
 
-        let task_error_url = connection.get_api_path(SUPPORTED_API, "task", &[])?;
+        let task_error_url = connection.get_api_path("task", &[])?;
 
         let _ = connection
-            .request(
-                reqwest::Method::POST,
-                task_error_url,
-                Body::Json(serde_json::to_value(task_upload_body)?),
-                None,
-                None,
-                None,
-            )
-            .await?;
+            .post(task_error_url, Body::Json(task_upload_body), None, convert_output_map)
+            .await;
 
         Ok(())
     }
@@ -81,11 +73,8 @@ impl TaskUploader {
         task: &Task,
         task_done_result: service_api::result::Result,
         connection: &Connection,
-    ) -> Result<(), ServiceHandlerError> {
-        info!(
-            " [{}]-sid[{}] upload task result.",
-            &task.task_id, &task.sid
-        );
+    ) -> Result<(), ServiceClientError> {
+        info!(" [{}]-sid[{}] upload task result.", &task.task_id, &task.sid);
 
         let mut file_map: HashMap<Sha256, service_api::result::File> = task_done_result
             .response
@@ -94,13 +83,7 @@ impl TaskUploader {
             .map(|r| (r.sha256.to_owned(), r.to_owned()))
             .collect();
 
-        file_map.extend(
-            task_done_result
-                .response
-                .extracted
-                .iter()
-                .map(|r| (r.sha256.to_owned(), r.to_owned())),
-        );
+        file_map.extend(task_done_result.response.extracted.iter().map(|r| (r.sha256.to_owned(), r.to_owned())));
 
         let mut request_body = TaskUploadBody {
             task: task.clone(),
@@ -109,102 +92,56 @@ impl TaskUploader {
             error: None,
         };
 
-        debug!(
-            "[{}]-sid[{}] Uploading task results.",
-            &task.task_id, &task.sid
-        );
-        let task_result_url = connection.get_api_path(SUPPORTED_API, "task", &[])?;
+        debug!("[{}]-sid[{}] Uploading task results.", &task.task_id, &task.sid);
+        let task_result_url = connection.get_api_path("task", &[])?;
 
-        let response = connection
-            .request(
-                reqwest::Method::POST,
-                task_result_url.clone(),
-                Body::Json(serde_json::to_value(request_body.clone())?),
-                None,
-                None,
-                None,
-            )
+        let result_response: TaskUploadResponse = connection
+            .post(task_result_url.clone(), Body::Json(request_body.clone()), None, convert_api_output_obj)
             .await?;
 
-        let result_response = response.json::<APIResponse<TaskUploadResponse>>().await?;
-
-        if !result_response.api_response.success
-            && result_response.api_response.missing_files.is_none()
-        {
-            return Err(ServiceHandlerError::Default(
-                "Invalid state. Result response should NOT be successful with missing files "
-                    .to_string(),
+        if !result_response.success && result_response.missing_files.is_none() {
+            return Err(ServiceClientError::Default(
+                "Invalid state. Result response should NOT be successful with missing files ".to_string(),
             ));
         }
 
-        let file_upload_url = connection.get_api_path(SUPPORTED_API, "file", &[])?;
+        let file_upload_url = connection.get_api_path("file", &[])?;
 
-        if let Some(missing_files) = result_response.api_response.missing_files {
+        if let Some(missing_files) = result_response.missing_files {
             for file_sha in missing_files {
-                debug!(
-                    "[{}]-sid[{}] Uploading missing file: {}",
-                    &task.task_id, &task.sid, &file_sha
-                );
+                debug!("[{}]-sid[{}] Uploading missing file: {}", &task.task_id, &task.sid, &file_sha);
                 if let Some(upload_file) = file_map.get(&file_sha) {
                     let mut headers: HashMap<String, String> = HashMap::new();
 
-                    info!(
-                        "Trying to upload file: {:?}",
-                        upload_file.sha256.to_string()
-                    );
+                    info!("Trying to upload file: {:?}", upload_file.sha256.to_string());
 
                     headers.insert("Sha256".to_string(), upload_file.sha256.to_string());
-                    headers.insert(
-                        "Classification".to_string(),
-                        upload_file.classification.to_string(),
-                    );
+                    headers.insert("Classification".to_string(), upload_file.classification.to_string());
                     headers.insert("Ttl".to_string(), task.ttl.to_string());
-                    headers.insert(
-                        "Is-Section-Image".to_string(),
-                        upload_file.is_section_image.to_string(),
-                    );
-                    headers.insert(
-                        "Is-Supplementary".to_string(),
-                        upload_file.is_supplementary.to_string(),
-                    );
+                    headers.insert("Is-Section-Image".to_string(), upload_file.is_section_image.to_string());
+                    headers.insert("Is-Supplementary".to_string(), upload_file.is_supplementary.to_string());
 
                     let file = tokio::fs::File::open(upload_file.path.clone()).await?;
                     let stream = FramedRead::new(file, BytesCodec::new());
                     let stream_body = reqwest::Body::wrap_stream(stream);
 
-                    // if this upload failed there is big issue. Need to upload error to server
                     let _ = connection
-                        .request(
-                            reqwest::Method::PUT,
+                        .put(
                             file_upload_url.clone(),
-                            Body::Prepared(stream_body),
-                            None,
-                            None,
+                            Body::<()>::Prepared(stream_body),
                             Some(headers),
+                            convert_output_map,
                         )
                         .await?;
-                    tokio::time::sleep(tokio::time::Duration::from_secs_f64(1.0)).await;
                 } else {
-                    warn!(
-                        "Service server requesting file sha {} that is not part of the task.",
-                        file_sha
-                    );
-                    // SHOULD I ERROR OUT HERE?
+                    warn!("Service server requesting file sha {} that is not part of the task.", file_sha);
                 }
             }
 
-            // finished uploading files. Upload task again with freshen = false to tell service-api there shouldn't be any
-            // missing files
+            // finished uploading files. Upload task again with freshen = false to tell service-api there shouldn't be any missing files
             request_body.freshen = false;
             let _ = connection
-                .request(
-                    reqwest::Method::POST,
-                    task_result_url.clone(),
-                    Body::Json(serde_json::to_value(request_body.clone())?),
-                    None,
-                    None,
-                    None,
-                )
+                .post(task_result_url.clone(), Body::Json(request_body.clone()), None, convert_output_map)
                 .await?;
         }
 

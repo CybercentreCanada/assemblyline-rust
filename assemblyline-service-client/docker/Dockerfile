@@ -15,6 +15,7 @@ COPY ./assemblyline-filestore ./assemblyline-filestore
 COPY ./assemblyline-markings ./assemblyline-markings
 COPY ./assemblyline-models ./assemblyline-models
 COPY ./assemblyline-service-client ./assemblyline-service-client
+COPY ./assemblyline-utilities ./assemblyline-utilities
 COPY ./redis-objects ./redis-objects
 
 # Build the executable

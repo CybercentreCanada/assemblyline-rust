@@ -14,8 +14,10 @@ pub struct APIResponse<B: Send> {
 pub struct ErrorApiResponse {
     #[serde(default)]
     pub api_error_message: Option<String>,
-    pub api_server_version: String,
-    pub api_status_code: u16,
+    #[serde(default)]
+    pub api_server_version: Option<String>,
+    #[serde(default)]
+    pub api_status_code: Option<u16>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

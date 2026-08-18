@@ -5,6 +5,7 @@ pub const DEFAULT_CONTAINER_ID: &str = "dev-service";
 pub const DEFAULT_RUNTIME_PREFIX: &str = "service";
 pub const DEFAULT_API_HOST: &str = "http://localhost:5003";
 pub const DEFAULT_ROOT_CA_PATH: &str = "/etc/assemblyline/ssl/al_root-ca.crt";
+pub const DEFAULT_ASSEMBLYLINE_CONFIG_PATH: &str = "/etc/assemblyline/config.yml";
 pub const SUPPORTED_API: &str = "v1";
 
 pub const TASK_DONE_SUCCESS: &str = "RESULT_FOUND";
@@ -26,7 +27,8 @@ pub const RECOVERABLE_ERROR_STATUS: &str = "FAIL_RECOVERABLE";
 pub const UNRECOVERABLE_ERROR_STATUS: &str = "FAIL_NONRECOVERABLE";
 
 
-pub const DEFAULT_REQUEST_TASK_TIMEOUT: &str = "10";
+pub const DEFAULT_LOG_LEVEL: &str = "warn";
+pub const DEFAULT_REQUEST_TASK_TIMEOUT: &str = "30";
 
 pub const TASK_FIFO_NAME: &str = "task_fifo";
 pub const DONE_FIFO_NAME: &str = "done_fifo";
