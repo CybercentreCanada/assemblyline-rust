@@ -14,7 +14,7 @@ COPY ./assemblyline-markings ./assemblyline-markings
 COPY ./assemblyline-models ./assemblyline-models
 COPY ./assemblyline-server ./assemblyline-server
 COPY ./environment_template ./environment_template
-COPY ./assembyline-utilities ./assembyline-utilities
+COPY ./assemblyline-utilities ./assemblyline-utilities
 COPY ./redis-objects ./redis-objects
 
 # Build the executable
