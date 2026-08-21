@@ -47,8 +47,13 @@ async fn main() {
     let root_ca_path = std::env::var("SERVICE_SERVER_ROOT_CA_PATH").unwrap_or(DEFAULT_ROOT_CA_PATH.to_owned());
 
     let _log_level = std::env::var("LOG_LEVEL").unwrap_or(DEFAULT_LOG_LEVEL.to_owned());
-    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match m.as_str() {
-        "true" => true,
+    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match &m.to_lowercase().as_str() {
+        &"true" => true,
+        _ => false,
+    });
+
+    let register_only = std::env::var("REGISTER_ONLY").map_or(false, |m| match &m.to_lowercase().as_str() {
+        &"true" => true,
         _ => false,
     });
 
@@ -64,7 +69,7 @@ async fn main() {
     let sc_running = Arc::new(Mutex::new(true));
 
     let mut sc = ServiceClient::new(
-        false,
+        register_only,
         container_mode,
         sc_running.clone(),
         container_id,

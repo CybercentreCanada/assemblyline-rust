@@ -459,7 +459,7 @@ impl ServiceClient {
                 if !keep_alive || self.register_only {
                     let mut running = self.running.lock();
                     *running = false;
-                    info!("Keep alive is false. Shut down now.");
+                    info!("keep_alive is false or register only. Shut down now.");
                     return Ok(());
                 } else {
                     info!("Finished registering service.");
