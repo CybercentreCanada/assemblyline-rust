@@ -477,11 +477,7 @@ impl ServiceClient {
         let mut fifo_pipes = self._setup_fifo_pipes().await?;
 
         // wait for service to be ready and fifo pipes to be connected
-        let service_ready_path = Path::new(&self.service_ready_path);
-
-        while !service_ready_path.exists() && self.is_running() {
-            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
-        }
+        let _ = self.wait_for_service_ready().await;
 
         let mut is_service_running = true;
 
@@ -586,6 +582,10 @@ impl ServiceClient {
                 log_error!("Service process terminated with status code: {code}");
                 is_service_running = false;
             }
+
+            // make sure the service is still ready before trying to fetch another task.
+            let _ = self.wait_for_service_ready().await;
+
         }
 
         info!("Service client terminated. Start clean up.");
@@ -644,5 +644,14 @@ impl ServiceClient {
         }
 
         *self.running.lock()
+    }
+
+    pub async fn wait_for_service_ready(&self) {
+        let service_ready_path = Path::new(&self.service_ready_path);
+
+        while !service_ready_path.exists() && self.is_running() {
+            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+        }
+
     }
 }

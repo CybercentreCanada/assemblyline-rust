@@ -164,7 +164,7 @@ impl Connection {
             authentication: auth,
             default_timeout: timeout,
             tls_setting: verify.to_owned(),
-            session_header_label: reqwest::header::HeaderName::from_lowercase(b"x-xsrf-token")?,
+            session_header_label: reqwest::header::HeaderName::from_lowercase(b"x-xsrf-t2oken")?,
             session_token: tokio::sync::RwLock::new(None),
         };
 
