@@ -62,6 +62,7 @@ mod service_api;
 mod services;
 mod string_utils;
 mod submit;
+mod validate_classification;
 
 #[cfg(test)]
 mod tests;
@@ -96,7 +97,7 @@ enum Commands {
         #[arg(long, default_value_t=false)]
         allow_http_mode: bool
     },
-    ClassificationValidate {
+    ValidateClassification {
         // This command should accept a classification string that the parser will attempt to load and validate relative to the current definition
         #[arg(last = true)]
         classification: String,
@@ -112,7 +113,7 @@ impl Commands {
             Commands::Dispatcher { .. } => "dispatcher",
             Commands::Plumber { .. } => "plumber",
             Commands::ServiceAPI { .. } => "service_server",
-            Commands::ClassificationValidate { .. } => "classification_validate",
+            Commands::ValidateClassification { .. } => "validate_classification",
         }
     }
 }
@@ -125,45 +126,28 @@ async fn main() -> ExitCode {
     // Load configuration
     let (config, config_path) = load_configuration(args.config).await.expect("Could not load configuration");
 
-    // configure logging, the object returned here owns the log processing internals
-    // and needs to be held until the program ends
-    let _log_manager = configure_logging(&config).expect("Could not configure logging");
-    info!("Configuration loaded from: {}", config_path.to_string_lossy());
-
     // This utility command runs before initializing the core
-    if let Commands::ClassificationValidate { classification } = args.command {
+    if let Commands::ValidateClassification { classification } = args.command {
+
         // For troubleshooting ensure it's understood what the parser is using when performing validation
         let c12n_config = match &config.classification.path {
             Some(config_path) => {
-                info!("Testing against mounted classification configuration: {config_path:?}");
+                println!("Testing against mounted classification configuration: {config_path:?}");
                 ready_classification(Some(&fs::read_to_string(config_path).expect("Could not read classification config from file"))).expect("Could not load classification config from file")
             },
             None => {
-                info!("No mounted classification configuration found. Proceeding with default configuration...");
+                println!("No mounted classification configuration found. Proceeding with default configuration...");
                 ClassificationConfig::default()
             }
         };
 
-        // Validate the classification string and print the normalized result or an error
-        match ClassificationParser::new(c12n_config) {
-            Ok(parser) => {
-                match parser.normalize_classification(&classification) {
-                            Ok(norm_c12n) => {
-                                println!("Classification is valid: {norm_c12n:#?}");
-                                return ExitCode::SUCCESS;
-                            },
-                            Err(err) => {
-                                println!("Classification is invalid: {err:?}");
-                                return ExitCode::FAILURE;
-                            }
-                        }
-            },
-            Err(err) => {
-                println!("Classification configuration is invalid: {err:?}");
-                return ExitCode::FAILURE;
-            }
-        };
+        return crate::validate_classification::main(classification, c12n_config);
     }
+
+    // configure logging, the object returned here owns the log processing internals
+    // and needs to be held until the program ends
+    let _log_manager: flexi_logger::LoggerHandle = configure_logging(&config).expect("Could not configure logging");
+    info!("Configuration loaded from: {}", config_path.to_string_lossy());
 
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {

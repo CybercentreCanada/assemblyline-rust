@@ -187,7 +187,7 @@ impl TransportS3 {
 
         // Log the credential provider being when debugging is enabled for the transport
         if parameters.debug{
-            debug!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().unwrap().provide_credentials().await?);
+            debug!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().expect("credentials provider from sdk_config").provide_credentials().await?);
         }
         
         let s3_builder = if parameters.compatability {
@@ -415,7 +415,7 @@ impl Transport for TransportS3 {
 //                 yield chunk['Key']
 
 
-pub mod verifier {
+pub(crate) mod verifier {
     use legacy_rustls::client::{ServerCertVerified, ServerCertVerifier};
 
     /// A dummy certificate verifier that just accepts anything
