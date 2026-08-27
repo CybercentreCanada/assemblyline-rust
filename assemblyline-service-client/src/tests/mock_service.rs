@@ -105,9 +105,15 @@ impl MockService {
         wait_forever: bool,
         service_result: Option<Value>,
     ) -> Self {
-        let task_fifo_path = format!("{}{}_task.fifo", fifo_dir, runtime_prefix);
-        let done_fifo_path = format!("{}{}_done.fifo", fifo_dir, runtime_prefix);
-        let service_ready_path = format!("{}{}_ready", fifo_dir, runtime_prefix);
+        let task_fifo_path = Path::new(&fifo_dir)
+            .join(format!("{runtime_prefix}_task.fifo"))
+            .to_string_lossy()
+            .to_string();
+        let done_fifo_path = Path::new(&fifo_dir)
+            .join(format!("{runtime_prefix}_done.fifo"))
+            .to_string_lossy()
+            .to_string();
+        let service_ready_path = Path::new(&fifo_dir).join(format!("{runtime_prefix}_ready")).to_string_lossy().to_string();
 
         MockService {
             service,
@@ -122,6 +128,8 @@ impl MockService {
     }
 
     pub async fn setup_fifo(task_fifo_path: &String, done_fifo_path: &String) -> Result<TaskFifoPipes> {
+
+        debug!("Trying to connect fifo pipes at: {task_fifo_path} and {done_fifo_path}");
         debug!("Open receiver......");
         let open_receiver = loop {
             let open_receiver = pipe::OpenOptions::new().open_receiver(task_fifo_path);
@@ -293,7 +301,7 @@ async fn test_service_launcher() {
     let child = service_launcher.launch_service().await.unwrap();
     debug!("Sleep for 5 seconds");
     tokio::time::sleep(tokio::time::Duration::from_secs_f64(5.0)).await;
-    debug!("Try to kill the child");
+    debug!("Try to kill the child process");
     *sc_running.lock() = false;
     std::mem::forget(child);
 

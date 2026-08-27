@@ -6,7 +6,7 @@ use assemblyline_utilities::{
     types::{authentication::Authentication, response::APIResponse},
 };
 use log::info;
-use md5::Digest;
+use sha2::Digest;
 use poem::{
     get, handler,
     middleware::AddData,
