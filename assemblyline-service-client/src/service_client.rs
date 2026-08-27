@@ -24,7 +24,6 @@ use assemblyline_utilities::{
 };
 use libc::mkfifo;
 use log::{debug, error as log_error, info, warn};
-use ort::tensor::Utf8Data;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tempfile::tempdir_in;
@@ -88,18 +87,33 @@ impl ServiceClient {
         root_ca_path: String,
         task_complete_limit: Option<i32>,
     ) -> Result<Self> {
-        let task_fifo_path = format!("{}{}_task.fifo", tmp_folder, runtime_prefix);
-        let done_fifo_path = format!("{}{}_done.fifo", tmp_folder, runtime_prefix);
-        let service_ready = format!("{}{}_ready", tmp_folder, runtime_prefix);
-        let runtime_manifest_path = format!("{}{}_manifest.yml", tmp_folder, runtime_prefix);
+        let task_fifo_path = Path::new(&tmp_folder)
+            .join(format!("{runtime_prefix}_task.fifo"))
+            .to_string_lossy()
+            .to_string();
+        let done_fifo_path = Path::new(&tmp_folder)
+            .join(format!("{runtime_prefix}_done.fifo"))
+            .to_string_lossy()
+            .to_string();
+        let service_ready = Path::new(&tmp_folder)
+            .join(format!("{runtime_prefix}_ready"))
+            .to_string_lossy()
+            .to_string();
 
-        info!("-----------load_service_manifest from file-------");
+        let runtime_manifest_path = Path::new(&tmp_folder).join(format!("{runtime_prefix}_manifest.yml"));
+
+        debug!("Task fifo: {task_fifo_path}");
+        debug!("Done fifo: {done_fifo_path}");
+        debug!("runtime manifest path: {}", runtime_manifest_path.clone().to_string_lossy());
+
+        info!("loading service_manifest from file.. .");
         // if there isn't a manifest file loaded for the current runtime, create one
-        if !Path::new(&runtime_manifest_path).exists() {
-            let manifest_path = format!("{}service_manifest.yml", manifest_folder);
+        if !runtime_manifest_path.exists() {
+            let manifest_path = Path::new(&manifest_folder).join("service_manifest.yml");
             // read the service manifest provided with the given service and write it to the runtime_manifest_path
             // which will be the loaded manifest for this run.
-            fs::copy(Path::new(&manifest_path), Path::new(&runtime_manifest_path))?;
+            debug!("loading manifest path: {}", manifest_path.clone().to_string_lossy());
+            fs::copy(&manifest_path, &runtime_manifest_path)?;
         }
 
         let runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
@@ -168,7 +182,7 @@ impl ServiceClient {
             service_heuristics: service_manifest.heuristics,
             tool_version: service_manifest.tool_version,
             service_api_host: server_host_url,
-            manifest_file_path: runtime_manifest_path,
+            manifest_file_path: runtime_manifest_path.to_string_lossy().to_string(),
             service_api_key,
             container_id,
             tasking_dir,
@@ -321,8 +335,8 @@ impl ServiceClient {
                                         &self.connection,
                                         None,
                                         Some(err.to_string()),
-                                        Some(UNRECOVERABLE_ERROR_STATUS.to_owned()),
                                         Some(EXCEPTION_SERVICE_ERROR_TYPE.to_owned()),
+                                        Some(UNRECOVERABLE_ERROR_STATUS.to_owned()),
                                     )
                                     .await;
                             }
@@ -354,6 +368,14 @@ impl ServiceClient {
         task_file_path.push(format!("{sid}_{sha256}_task.json"));
         let mut task_file = File::create(task_file_path.as_path()).await?;
         let _ = task_file.write_all(task_json.as_bytes()).await?;
+        let _ = task_file.flush().await?;
+
+        debug!(
+            "[{}]-sid[{}]: Successfully written task file to: {}",
+            task.task_id,
+            task.sid,
+            &task_file_path.to_string_lossy()
+        );
 
         Ok(task_file_path)
     }
@@ -365,7 +387,7 @@ impl ServiceClient {
             task_file.to_owned().to_string_lossy().to_string()
         ]);
 
-        let data = [task_message_data.to_string().as_bytes(), "\n".as_utf8_bytes()].concat();
+        let data = [task_message_data.to_string().as_bytes(), "\n".as_bytes()].concat();
         fifo_pipes
             .task_fifo
             .write_all(data.as_slice())
@@ -459,7 +481,7 @@ impl ServiceClient {
                 if !keep_alive || self.register_only {
                     let mut running = self.running.lock();
                     *running = false;
-                    info!("Keep alive is false. Shut down now.");
+                    info!("keep_alive is false or register only. Shut down now.");
                     return Ok(());
                 } else {
                     info!("Finished registering service.");
@@ -477,11 +499,7 @@ impl ServiceClient {
         let mut fifo_pipes = self._setup_fifo_pipes().await?;
 
         // wait for service to be ready and fifo pipes to be connected
-        let service_ready_path = Path::new(&self.service_ready_path);
-
-        while !service_ready_path.exists() && self.is_running() {
-            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
-        }
+        let _ = self.wait_for_service_ready().await;
 
         let mut is_service_running = true;
 
@@ -541,7 +559,6 @@ impl ServiceClient {
                         }
                     }
 
-                    // write task to a file for the service process to use
                     let task_file_path = self.create_task_file(&task, &task_dir_path).await?;
 
                     // notify service process through task fifo queue that a task is ready
@@ -576,7 +593,6 @@ impl ServiceClient {
                                 .await;
                         }
                     }
-
                     self.tasks_processed += 1;
                 }
             }
@@ -586,6 +602,9 @@ impl ServiceClient {
                 log_error!("Service process terminated with status code: {code}");
                 is_service_running = false;
             }
+
+            // make sure the service is still ready before trying to fetch another task.
+            let _ = self.wait_for_service_ready().await;
         }
 
         info!("Service client terminated. Start clean up.");
@@ -644,5 +663,13 @@ impl ServiceClient {
         }
 
         *self.running.lock()
+    }
+
+    pub async fn wait_for_service_ready(&self) {
+        let service_ready_path = Path::new(&self.service_ready_path);
+
+        while !service_ready_path.exists() && self.is_running() {
+            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+        }
     }
 }

@@ -4,7 +4,8 @@ use assemblyline_models::{
     types::{JsonMap, Sha256},
 };
 use assemblyline_utilities::{
-    connection::{ convert_output_map}, types::response::{APIResponse, RegisterResponse, TaskUploadResponse},
+    connection::convert_output_map,
+    types::response::{APIResponse, RegisterResponse, TaskUploadResponse},
 };
 use log::{debug, info};
 use std::{collections::HashMap, io::Write, path::Path, str::FromStr, sync::Arc};
@@ -194,7 +195,7 @@ async fn make_run_service_data(base_folder: String, file_required: bool) -> (Ser
     let mut base_manifest: ServiceManifest = rand::rng().random();
     base_manifest.file_required = file_required;
     let base_service = base_manifest.service.clone();
-    let manifest_path = format!("{}service_manifest.yml", &base_folder);
+    let manifest_path = Path::new(&base_folder).join("service_manifest.yml");
 
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
@@ -241,15 +242,11 @@ async fn test_service_client_connection() {
 
     let (port, _) = MockServiceServer::launch_with_test_endpoints(MockServerConfig::default()).await.unwrap();
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
-
     let test_manifest: ServiceManifest = rand::rng().random();
-
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
-    base_dir_string.push('/');
-    // let base_manifest: ServiceManifest = rand::rng().random();
-    let manifest_path = format!("{}service_manifest.yml", &base_dir_string);
+    let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
+    let manifest_path = Path::new(&base_dir_string).join("service_manifest.yml");
     // let manifest_path = Path::new("service_manifest.yml");
     let mut manifest_file = std::fs::File::create(&manifest_path).unwrap();
     let data = serde_yaml::to_string(&test_manifest).unwrap();
@@ -315,11 +312,9 @@ async fn test_service_client_connection() {
 async fn test_register_service() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
-    base_dir_string.push('/');
+    let base_dir_string = temp_dir.path().to_string_lossy().to_string();
     let base_manifest: ServiceManifest = rand::rng().random();
-
-    let manifest_path = format!("{}service_manifest.yml", &base_dir_string);
+    let manifest_path = Path::new(&base_dir_string).join("service_manifest.yml");
 
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
@@ -365,8 +360,7 @@ async fn test_register_service() {
 async fn test_run_service_write_task_pipe() {
     init();
     let tasking_dir = tempfile::tempdir().unwrap();
-    let mut tasking_dir_string = tasking_dir.path().to_string_lossy().to_string();
-    tasking_dir_string.push('/');
+    let tasking_dir_string = tasking_dir.path().to_string_lossy().to_string();
 
     let (_, base_service, task) = make_run_service_data(tasking_dir_string.clone(), true).await;
 
@@ -396,9 +390,18 @@ async fn test_run_service_write_task_pipe() {
         return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
-    let task_fifo_path = format!("{}{}_task.fifo", tasking_dir_string, TESTING_PREFIX.to_owned());
-    let done_fifo_path = format!("{}{}_done.fifo", tasking_dir_string, TESTING_PREFIX.to_owned());
-    let service_ready_path = format!("{}{}_ready", tasking_dir_string, TESTING_PREFIX.to_owned());
+    let task_fifo_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_task.fifo"))
+        .to_string_lossy()
+        .to_string();
+    let done_fifo_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_done.fifo"))
+        .to_string_lossy()
+        .to_string();
+    let service_ready_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_ready"))
+        .to_string_lossy()
+        .to_string();
 
     // start the task fifo setup process
     let fifo_pipes = MockService::setup_fifo(&task_fifo_path, &done_fifo_path)
@@ -501,8 +504,7 @@ async fn test_run_service_write_task_pipe() {
 async fn test_run_service_task_done_with_result() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
-    base_dir_string.push('/');
+    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -565,8 +567,7 @@ async fn test_run_service_task_done_with_result() {
 async fn test_run_service_task_process_with_limit() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
-    base_dir_string.push('/');
+    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -643,8 +644,7 @@ async fn test_run_service_task_process_with_limit() {
 async fn test_run_service_task_done_with_error() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
-    base_dir_string.push('/');
+    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -746,7 +746,7 @@ async fn test_run_service_task_get_no_task() {
         return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
     });
 
-    tokio::time::sleep(tokio::time::Duration::from_secs_f64(11.0)).await;
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(5.0)).await;
     *sc_running.lock() = false;
 
     assert!(

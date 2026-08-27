@@ -93,9 +93,15 @@ pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     };
 
     // setup our log handler
-    //  log level is WARN for everything by default
-    //  if the package name includes assemblyline set the level to the given value
-    let log_spec = format!("warn, assemblyline={log_level}");
+    // log level is WARN for everything by default
+    // if the package name includes assemblyline set the level to the given value
+    // Assemblyline systems by default uses LOG_LEVEL environment variable instead of RUST_LOG
+    // LOG_LEVEL will override default config and RUST_LOG.
+    let log_spec = match std::env::var("LOG_LEVEL") {
+        Ok(log_level) => log_level,
+        Err(_) => format!("warn, assemblyline={log_level}"),
+    };
+
     let spec = LogSpecification::env_or_parse(log_spec)?;
 
     let formatter = if config.logging.log_as_json { json_format } else { basic_format };

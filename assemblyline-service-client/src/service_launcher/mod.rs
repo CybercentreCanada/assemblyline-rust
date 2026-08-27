@@ -22,7 +22,7 @@ impl ServiceLauncher for DefaultServiceLauncher {
             cmd.current_dir(dir);
         }
 
-        let service_process = cmd.spawn()?;
+        let service_process = cmd.kill_on_drop(true).spawn()?;
 
         debug!("Service launched in the background");
 

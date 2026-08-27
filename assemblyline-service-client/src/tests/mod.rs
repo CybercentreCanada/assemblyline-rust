@@ -16,14 +16,14 @@ use assemblyline_models::{
     messages::service_api::{self, result::Result as ServiceResult},
     types::{ClassificationString, ServiceName, Sha256},
 };
-use md5::Digest;
+
 use nom::AsBytes;
 
 /// Calculate the sha256 of a buffer
 pub fn sha256_data(body: &[u8]) -> String {
     let mut hasher = sha2::Sha256::default();
     std::io::Write::write_all(&mut hasher, body).unwrap();
-    hex::encode(hasher.finalize())
+    hex::encode(sha2::Digest::finalize(hasher))
 }
 
 pub fn test_sha_file() -> (String, Vec<u8>) {

@@ -8,7 +8,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     constants::{
-        DEFAULT_API_HOST, DEFAULT_ASSEMBLYLINE_CONFIG_PATH, DEFAULT_CONTAINER_ID, DEFAULT_LOG_LEVEL, DEFAULT_ROOT_CA_PATH, DEFAULT_RUNTIME_PREFIX,
+        DEFAULT_API_HOST, DEFAULT_ASSEMBLYLINE_CONFIG_PATH, DEFAULT_CONTAINER_ID, DEFAULT_ROOT_CA_PATH, DEFAULT_RUNTIME_PREFIX,
         DEFAULT_SERVICE_API_KEY,
     },
     service_client::ServiceClient,
@@ -33,26 +33,34 @@ async fn main() {
     assemblyline_models::disable_global_classification();
 
     // load environment variables to configure service client.
-    let mut default_tmp_folder = std::env::temp_dir().as_os_str().to_string_lossy().to_string();
-    default_tmp_folder.push('/');
+    let default_tmp_folder = std::env::temp_dir().as_os_str().to_string_lossy().to_string();
 
     let runtime_prefix = std::env::var("RUNTIME_PREFIX").unwrap_or(DEFAULT_RUNTIME_PREFIX.to_owned());
     let tasking_dir = std::env::var("TASKING_DIR").unwrap_or(default_tmp_folder.clone());
-
-    let manifest_folder = std::env::var("MANIFEST_FOLDER").unwrap_or("".to_owned());
 
     let server_host_string = std::env::var("SERVICE_API_HOST").unwrap_or(DEFAULT_API_HOST.to_string());
     let service_api_key = std::env::var("SERVICE_API_KEY").unwrap_or(DEFAULT_SERVICE_API_KEY.to_owned());
     let container_id = std::env::var("HOSTNAME").unwrap_or(DEFAULT_CONTAINER_ID.to_owned());
     let root_ca_path = std::env::var("SERVICE_SERVER_ROOT_CA_PATH").unwrap_or(DEFAULT_ROOT_CA_PATH.to_owned());
 
-    let _log_level = std::env::var("LOG_LEVEL").unwrap_or(DEFAULT_LOG_LEVEL.to_owned());
-    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match m.as_str() {
-        "true" => true,
+    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match &m.to_lowercase().as_str() {
+        &"true" => true,
+        _ => false,
+    });
+
+    let register_only = std::env::var("REGISTER_ONLY").map_or(false, |m| match &m.to_lowercase().as_str() {
+        &"true" => true,
         _ => false,
     });
 
     let service_dir = std::env::var("SERVICE_DIR").map_or(None, |dir| Some(dir));
+
+    let manifest_folder = std::env::var("MANIFEST_FOLDER").unwrap_or(
+        std::env::current_dir()
+            .expect("Failed to load current directory.")
+            .to_string_lossy()
+            .to_string(),
+    );
 
     let task_complete_limit = std::env::var("AL_SERVICE_TASK_LIMIT").map_or(None, |val| val.parse::<i32>().map_or(None, |v| Some(v)));
 
@@ -64,7 +72,7 @@ async fn main() {
     let sc_running = Arc::new(Mutex::new(true));
 
     let mut sc = ServiceClient::new(
-        false,
+        register_only,
         container_mode,
         sc_running.clone(),
         container_id,
@@ -99,7 +107,7 @@ async fn main() {
                 while !signal_thread_handler.is_closed() {
                     match sig.pending().next() {
                         Some(e) => {
-                            if (e == signal_hook::consts::SIGTERM) || (e == signal_hook::consts::SIGINT) {
+                            if (e == signal_hook::consts::SIGTERM) || (e == signal_hook::consts::SIGINT) || (e == signal_hook::consts::SIGUSR1) {
                                 *run.lock() = false;
                                 break;
                             } else {
@@ -134,6 +142,7 @@ async fn main() {
             break;
         } else {
             info!("Restart service client.");
+            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
         }
     }
 

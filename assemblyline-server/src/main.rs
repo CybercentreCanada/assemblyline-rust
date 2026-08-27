@@ -44,7 +44,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 mod archive;
 mod cachestore;
-mod common;
 mod config;
 mod constants;
 mod core_dispatcher;
@@ -63,6 +62,7 @@ mod services;
 mod string_utils;
 mod submit;
 mod validate_classification;
+
 
 #[cfg(test)]
 mod tests;
@@ -101,9 +101,7 @@ enum Commands {
         // This command should accept a classification string that the parser will attempt to load and validate relative to the current definition
         #[arg(last = true)]
         classification: String,
-
     }
-
 }
 
 impl Commands {
@@ -176,17 +174,22 @@ async fn main() -> ExitCode {
 
     // pick the module to launch
     let result = match args.command {
-
-        Commands::Ingester {} => crate::ingester::main(core).await,
-        Commands::Dispatcher {} => crate::dispatcher::main(core).await,
-        Commands::Plumber {} => crate::plumber::main(core).await,
-        Commands::ServiceAPI { allow_http_mode } => crate::service_api::main(core, allow_http_mode).await,
+        Commands::Ingester {  } => {
+            crate::ingester::main(core).await
+        },
+        Commands::Dispatcher {  } => {
+            crate::dispatcher::main(core).await
+        }
+        Commands::Plumber {  } => {
+            crate::plumber::main(core).await
+        }
+        Commands::ServiceAPI { allow_http_mode } => {
+            crate::service_api::main(core, allow_http_mode).await
+        }
         _ => {
             error!("Module not implemented");
             return ExitCode::FAILURE;
         }
-
-
     };
 
     // log if the module failed

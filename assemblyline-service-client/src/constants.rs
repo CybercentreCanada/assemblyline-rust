@@ -19,15 +19,12 @@ pub const PLACEHOLDER_VERSION_TAG: &str = "$SERVICE_TAG";
 
 pub const MANIFEST_FILE_NAME: &str = "service_manifest.yml";
 
-pub const DEFAULT_SERVICE_ERROR_MESSAGE: &str =
-    "The service instance processing this task has terminated unexpectedly.";
+pub const DEFAULT_SERVICE_ERROR_MESSAGE: &str = "The service instance processing this task has terminated unexpectedly.";
 pub const UNKNOWN_SERVICE_ERROR_TYPE: &str = "UNKNOWN";
 pub const EXCEPTION_SERVICE_ERROR_TYPE: &str = "EXCEPTION";
 pub const RECOVERABLE_ERROR_STATUS: &str = "FAIL_RECOVERABLE";
 pub const UNRECOVERABLE_ERROR_STATUS: &str = "FAIL_NONRECOVERABLE";
 
-
-pub const DEFAULT_LOG_LEVEL: &str = "warn";
 pub const DEFAULT_REQUEST_TASK_TIMEOUT: &str = "30";
 
 pub const TASK_FIFO_NAME: &str = "task_fifo";
