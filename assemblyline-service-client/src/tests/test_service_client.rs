@@ -22,12 +22,17 @@ use poem::{
 use rand::RngExt;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, Command},
+};
 use url::Url;
 
 use crate::{
     constants::{RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE},
     service_client::ServiceClient,
+    service_launcher::ServiceLauncher,
     task_fetcher::single_thread_task_fetcher::SingleThreadTaskFetcher,
     task_uploader::task_uploader::TaskUploader,
     tests::{
@@ -36,7 +41,10 @@ use crate::{
         mock_service_api::{MockServerConfig, MockServiceServer, RequestDataResponse, TEST_API_VERSION, TEST_AUTH_KEY, TEST_SERVER_VERSION},
         test_sha_file,
     },
-    types::task::{ErrorBody, ErrorResponse},
+    types::{
+        errors::ServiceClientError,
+        task::{ErrorBody, ErrorResponse},
+    },
 };
 
 pub const TESTING_PREFIX: &str = "test";
@@ -829,4 +837,110 @@ async fn test_run_service_task_service_terminated() {
 
     let res = handler.await;
     assert!(res.is_ok(), "Service handler should return with no error.");
+}
+
+#[tokio::test]
+async fn test_wait_for_service_ready() {
+    init();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    base_dir_string.push('/');
+
+    let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
+
+    let service_api_address: String = "http://localhost:1".to_string();
+    let service_launcher = DoNothingServiceLauncher {};
+    let sc_running = Arc::new(Mutex::new(true));
+
+    let sc = Arc::new(make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await);
+
+    // when service client is running and service process is running,
+    // service ready waits for the service ready file to exist and return true
+    let sc_ref = sc.clone();
+    let mut service_process = service_launcher.launch_service().await.unwrap();
+    let res = tokio::spawn(async move { sc_ref.wait_for_service_ready(&mut service_process).await });
+
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(5.0)).await;
+    assert!(!res.is_finished(), "wait_for_service_ready should still be waiting for the ready file.");
+
+    let _ready_file = File::create(sc.get_service_ready_path()).await.unwrap();
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(4.0)).await;
+    assert!(res.is_finished(), "Ready file is ready. Done waiting.");
+    // wait_for_service_ready should return true when service client is ready to take new task.
+    assert_eq!(res.await.expect("Wait for service ready should terminate."), true);
+}
+
+#[tokio::test]
+async fn test_wait_for_service_ready_sc_terminated() {
+    init();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    base_dir_string.push('/');
+
+    let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
+
+    let service_api_address: String = "http://localhost:1".to_string();
+    let service_launcher = DoNothingServiceLauncher {};
+    let sc_running = Arc::new(Mutex::new(true));
+
+    let sc = Arc::new(make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await);
+
+    let sc_ref = sc.clone();
+    let mut service_process = service_launcher.launch_service().await.unwrap();
+    let res = tokio::spawn(async move { sc_ref.wait_for_service_ready(&mut service_process).await });
+
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+    assert!(!res.is_finished(), "wait_for_service_ready should still be waiting for the ready file.");
+
+    // set service client running to false should terminate wait for service ready
+    *sc_running.lock() = false;
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(4.0)).await;
+    assert!(res.is_finished(), "Service client is terminated. Stop waiting.");
+    // wait_for_service_ready should return false because service client is no longer running.
+    assert_eq!(res.await.expect("Wait for service ready should terminate."), false);
+}
+
+struct SleepFiveSecondServiceLauncher {}
+
+impl ServiceLauncher for SleepFiveSecondServiceLauncher {
+    async fn launch_service(&self) -> Result<Child, ServiceClientError> {
+        info!("LAUNCH Mock service...");
+        let mut cmd = Command::new("sleep");
+        cmd.args(["5"]);
+
+        // make sure this process gets terminated when the reference to service_process is dropped.
+        cmd.kill_on_drop(true);
+
+        let service_process = cmd.spawn()?;
+        Ok(service_process)
+    }
+}
+
+#[tokio::test]
+async fn test_wait_for_service_ready_service_terminated() {
+    init();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    base_dir_string.push('/');
+
+    let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
+
+    let service_api_address: String = "http://localhost:1".to_string();
+    let service_launcher = SleepFiveSecondServiceLauncher {};
+    let sc_running = Arc::new(Mutex::new(true));
+
+    let sc = Arc::new(make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await);
+
+    let sc_ref = sc.clone();
+    let mut service_process = service_launcher.launch_service().await.unwrap();
+    let res = tokio::spawn(async move { sc_ref.wait_for_service_ready(&mut service_process).await });
+
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(1.0)).await;
+    assert!(!res.is_finished(), "wait_for_service_ready should still be waiting for the ready file.");
+
+    // Service process should terminate after five seconds.
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64(7.0)).await;
+    assert!(res.is_finished(), "Service client is terminated. Stop waiting.");
+    // wait_for_service_ready should return false because service client is no longer running.
+    assert_eq!(res.await.expect("Wait for service ready should terminate."), false);
 }

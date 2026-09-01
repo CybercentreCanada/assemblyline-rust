@@ -214,6 +214,11 @@ impl ServiceClient {
         &self.connection
     }
 
+    #[cfg(test)]
+    pub fn get_service_ready_path(&self) -> String {
+        self.service_ready_path.clone()
+    }
+
     async fn _setup_fifo_pipes(&self) -> Result<TaskFifoPipes> {
         info!("Setting up task and result fifo pipe to communicate with service process.");
         // create named pipe to communicate with service
@@ -498,13 +503,9 @@ impl ServiceClient {
         // setup fifo queue for service to use
         let mut fifo_pipes = self._setup_fifo_pipes().await?;
 
-        // wait for service to be ready and fifo pipes to be connected
-        let _ = self.wait_for_service_ready().await;
-
-        let mut is_service_running = true;
-
-        info!("Service ready. Start task fetching loop...");
-        while self.is_running() && is_service_running {
+        // wait for service to be ready in task fetching
+        info!("Start task fetching loop...");
+        while self.is_running() && self.wait_for_service_ready(&mut service_process).await {
             let task_fetched = task_fetcher.get_task(&self.connection).await;
 
             match task_fetched {
@@ -571,7 +572,7 @@ impl ServiceClient {
                             .await;
 
                         // if we failed to write to task fifo, the service process is likely dead.
-                        is_service_running = false;
+                        self.stop_service_client();
                         continue;
                     }
 
@@ -596,15 +597,6 @@ impl ServiceClient {
                     self.tasks_processed += 1;
                 }
             }
-
-            // check if service process terminated if so, terminate service handler
-            if let Ok(Some(code)) = service_process.try_wait() {
-                log_error!("Service process terminated with status code: {code}");
-                is_service_running = false;
-            }
-
-            // make sure the service is still ready before trying to fetch another task.
-            let _ = self.wait_for_service_ready().await;
         }
 
         info!("Service client terminated. Start clean up.");
@@ -665,11 +657,57 @@ impl ServiceClient {
         *self.running.lock()
     }
 
-    pub async fn wait_for_service_ready(&self) {
+    pub fn stop_service_client(&self) {
+        *self.running.lock() = false;
+    }
+
+    pub async fn wait_for_service_ready(&self, service_process: &mut Child) -> bool {
+        debug!("Wait for service to be in ready state.");
         let service_ready_path = Path::new(&self.service_ready_path);
 
-        while !service_ready_path.exists() && self.is_running() {
-            tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+        if !service_ready_path.exists() {
+            info!("Cannot find service ready file. Wait for service to be ready.");
+        }
+
+        async fn wait_for_ready_file(ready_path: &Path) {
+            while !ready_path.exists() {
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+            }
+        }
+
+        async fn service_client_terminated(sc: &ServiceClient) {
+            while sc.is_running() {
+                tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
+            }
+        }
+
+        tokio::select! {
+            _ = wait_for_ready_file(service_ready_path) => {
+                info!("Service ready file found. Service in ready state.");
+
+                // make sure that service is actually running.
+                let service_running = service_process.try_wait().map_or_else(|e| {
+                    log_error!("Cannot retrieve service process status. {e}");
+                    false
+                },
+                    |c| match c {
+                    Some(code) => {
+                        log_error!("Service process terminated with: {code}");
+                        false
+                    },
+                    None => true,
+                });
+
+                return service_running;
+            },
+            _ = service_client_terminated(self) => {
+                info!("Service client terminated. Do not wait for service ready.");
+                return false;
+            }
+            status_code = service_process.wait() => {
+                log_error!("Service process terminated with status code: {:?}. Do not wait for service ready.", status_code);
+                return false;
+            }
         }
     }
 }

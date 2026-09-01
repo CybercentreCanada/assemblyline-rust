@@ -108,6 +108,7 @@ async fn main() {
                     match sig.pending().next() {
                         Some(e) => {
                             if (e == signal_hook::consts::SIGTERM) || (e == signal_hook::consts::SIGINT) || (e == signal_hook::consts::SIGUSR1) {
+                                info!("Termination signal caught: Code {e}.");
                                 *run.lock() = false;
                                 break;
                             } else {
@@ -147,7 +148,7 @@ async fn main() {
     }
 
     // Make sure to set service client to stop running.
-    *sc_running.lock() = false;
+    sc.stop_service_client();
 
     if let Some(handle) = signal_handler {
         debug!("Terminate signal handler loop.");
