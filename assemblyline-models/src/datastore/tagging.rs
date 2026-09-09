@@ -187,7 +187,7 @@ impl TagInformation {
 // MARK: Tag List
 /// The list of all tags we are willing to accept.
 /// This includes their path within a tagging dict, a textual description and how they should be processed for validation or normalization
-static ALL_VALID_TAGS: [TagInformation; 214] = [
+static ALL_VALID_TAGS: [TagInformation; 216] = [
     TagInformation::new(&["attribution", "actor"], "Attribution Actor", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "campaign"], "Attribution Campaign", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "category"], "Attribution Category", TagProcessor::Uppercase),
