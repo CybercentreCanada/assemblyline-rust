@@ -225,6 +225,9 @@ pub struct ServiceDelta {
     #[metadata(store=true)]
     pub enabled: Option<bool>,
     /// REF_SERVICE
+    #[serde(default)]
+    pub expected_queue_length: Option<i32>,
+    /// REF_SERVICE
     pub is_external: Option<bool>,
     /// REF_SERVICE
     pub licence_count: Option<i32>,
