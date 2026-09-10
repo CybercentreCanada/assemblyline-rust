@@ -17,7 +17,7 @@ pub struct Heuristic {
     filetype: String,
     heur_id: u32,
     name: String,
-    score: u32,
+    score: i32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -52,7 +52,7 @@ impl rand::distr::Distribution<ServiceManifest> for rand::distr::StandardUniform
                 filetype: "txt".to_owned(),
                 heur_id: 1,
                 name: "heu1".to_owned(),
-                score: 100,
+                score: -100,
             },
             Heuristic {
                 description: "test heuristic 2".to_owned(),
