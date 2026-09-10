@@ -187,7 +187,7 @@ impl TagInformation {
 // MARK: Tag List
 /// The list of all tags we are willing to accept.
 /// This includes their path within a tagging dict, a textual description and how they should be processed for validation or normalization
-static ALL_VALID_TAGS: [TagInformation; 214] = [
+static ALL_VALID_TAGS: [TagInformation; 216] = [
     TagInformation::new(&["attribution", "actor"], "Attribution Actor", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "campaign"], "Attribution Campaign", TagProcessor::Uppercase),
     TagInformation::new(&["attribution", "category"], "Attribution Category", TagProcessor::Uppercase),
@@ -361,6 +361,8 @@ static ALL_VALID_TAGS: [TagInformation; 214] = [
     TagInformation::new(&["file", "shortcut", "icon_location"], "Shortcut File Properties: Icon Location", TagProcessor::String),
     TagInformation::new(&["file", "shortcut", "machine_id"], "Shortcut File Properties: Machine ID", TagProcessor::String),
     TagInformation::new(&["file", "shortcut", "tracker_mac"], "Shortcut File Properties: Possible MAC address from the Tracker block", TagProcessor::String),
+    TagInformation::new(&["file", "shortcut", "sid"], "Shortcut File Properties: Security Identifier of the user who created the shortcut", TagProcessor::String),
+    TagInformation::new(&["file", "shortcut", "drive_serial"], "Shortcut File Properties: Drive Serial Number", TagProcessor::String),
     TagInformation::new(&["file", "swf", "header", "frame", "count"], "SWF File Properties: Header Information: Header Frame Information: Number of Frames", TagProcessor::I32),
     TagInformation::new(&["file", "swf", "header", "frame", "rate"], "SWF File Properties: Header Information: Header Frame Information: Speed of Animation", TagProcessor::String),
     TagInformation::new(&["file", "swf", "header", "frame", "size"], "SWF File Properties: Header Information: Header Frame Information: Size of Frame", TagProcessor::String),
@@ -1049,4 +1051,82 @@ fn number_tag_parsing() {
     assert_eq!(proc.apply(json!("55")), Ok(json!(55)));
     assert_eq!(proc.apply(json!(1_000_000)), Err(json!("1000000")));
 
+}
+
+#[test]
+fn shortcut_identity_tags_round_trip() {
+    use serde_json::json;
+
+    let sid = "S-1-5-21-100-200-300-1001";
+    let second_sid = "S-1-5-21-400-500-600-1002";
+
+    let cases = [
+        (
+            json!({
+                "file": {"shortcut": {
+                    "sid": sid,
+                    "drive_serial": "00000123"
+                }}
+            }),
+            vec![sid],
+            vec!["00000123"],
+        ),
+        (
+            json!({
+                "file": {"shortcut": {
+                    "sid": [sid, second_sid],
+                    "drive_serial": ["00000123", "5A8C5E7D"]
+                }}
+            }),
+            vec![sid, second_sid],
+            vec!["00000123", "5A8C5E7D"],
+        ),
+    ];
+
+    for (input, sids, serials) in cases {
+        let serde_json::Value::Object(input) = input else {
+            panic!("Expected an object");
+        };
+
+        let (accepted, rejected) = load_tags_from_object(input);
+        assert!(rejected.is_empty(), "{rejected:?}");
+        assert_eq!(accepted.len(), 2);
+
+        for (name, values) in [
+            ("file.shortcut.sid", &sids),
+            ("file.shortcut.drive_serial", &serials),
+        ] {
+            let info = get_tag_information(name).expect("Tag must be registered");
+            let expected: Vec<TagValue> =
+                values.iter().map(|value| TagValue::from(*value)).collect();
+            assert_eq!(accepted.get(info).unwrap(), &expected);
+        }
+
+        let tagging = accepted.to_tagging().unwrap();
+        assert_eq!(
+            serde_json::to_value(&tagging).unwrap(),
+            json!({
+                "file": {"shortcut": {
+                    "sid": sids,
+                    "drive_serial": serials
+                }}
+            })
+        );
+
+        let entries = tagging.to_list(None).unwrap();
+        assert_eq!(entries.len(), sids.len() + serials.len());
+
+        for (name, values) in [
+            ("file.shortcut.sid", &sids),
+            ("file.shortcut.drive_serial", &serials),
+        ] {
+            for value in values {
+                assert!(entries.contains(&TagEntry {
+                    score: 0,
+                    tag_type: name.to_owned(),
+                    value: TagValue::from(*value),
+                }));
+            }
+        }
+    }
 }
