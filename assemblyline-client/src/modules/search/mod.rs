@@ -1,6 +1,5 @@
 mod facet;
 
-
 // from assemblyline_client.v4_client.module.search.fields import Fields
 // from assemblyline_client.v4_client.module.search.grouped import Grouped
 // from assemblyline_client.v4_client.module.search.histogram import Histogram
@@ -9,11 +8,11 @@ mod facet;
 
 use std::sync::Arc;
 
+use assemblyline_utilities::connection::{convert_api_output_obj, Body, Connection};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::connection::{Connection, Body, convert_api_output_obj};
-use crate::types::{JsonMap, Error};
+use crate::types::{Error, JsonMap};
 
 use self::facet::Facet;
 
@@ -55,21 +54,19 @@ impl std::fmt::Display for Searchable {
     }
 }
 
-
 pub struct Search {
     connection: Arc<Connection>,
 
     pub facet: Facet,
-//         self.fields = Fields(connection)
-//         self.grouped = Grouped(connection)
-//         self.histogram = Histogram(connection)
-//         self.stats = Stats(connection)
-//         self.stream = Stream(connection, self._do_search)
-
+    //         self.fields = Fields(connection)
+    //         self.grouped = Grouped(connection)
+    //         self.histogram = Histogram(connection)
+    //         self.stats = Stats(connection)
+    //         self.stream = Stream(connection, self._do_search)
 }
 
 impl Search {
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
         Self {
             facet: Facet::new(connection.clone()),
             connection,
@@ -158,40 +155,49 @@ impl SearchBuilder {
 
     /// Additional lucene query used to filter the data
     pub fn filter(mut self, filter: String) -> Self {
-        self.filters.push(filter); self
+        self.filters.push(filter);
+        self
     }
 
     /// List of fields to return (comma separated string of fields)
     pub fn field_list(mut self, fields: String) -> Self {
-        self.field_list = Some(fields); self
+        self.field_list = Some(fields);
+        self
     }
     /// List of fields to return (comma separated string of fields)
     pub fn fl(mut self, fields: String) -> Self {
-        self.field_list = Some(fields); self
+        self.field_list = Some(fields);
+        self
     }
     /// Offset at which the query items should start
     pub fn offset(mut self, value: usize) -> Self {
-        self.offset = value; self
+        self.offset = value;
+        self
     }
     /// Number of records to return
     pub fn rows(mut self, value: usize) -> Self {
-        self.rows = value; self
+        self.rows = value;
+        self
     }
     /// Field used for sorting with direction (string: ex. 'id desc')
     pub fn sort(mut self, value: String) -> Self {
-        self.sort = Some(value); self
+        self.sort = Some(value);
+        self
     }
     /// Max amount of miliseconds the query will run
     pub fn timeout(mut self, value: usize) -> Self {
-        self.timeout = Some(value); self
+        self.timeout = Some(value);
+        self
     }
     /// Also query the archive
     pub fn use_archive(mut self, value: bool) -> Self {
-        self.use_archive = value; self
+        self.use_archive = value;
+        self
     }
     /// Number of hits to track (default: 10k)
     pub fn track_total_hits(mut self, value: usize) -> Self {
-        self.track_total_hits = Some(value); self
+        self.track_total_hits = Some(value);
+        self
     }
 
     pub async fn search(self) -> Result<DictSearchResult, Error> {
@@ -208,10 +214,10 @@ impl SearchBuilder {
         });
 
         if let Some(data) = data.as_object_mut() {
-            data.retain(|_k, v|!v.is_null());
+            data.retain(|_k, v| !v.is_null());
         }
 
-        let path = api_path!("search", self.index.to_string());
-        self.connection.post(&path, Body::Json(data), convert_api_output_obj).await
+        let url = self.connection.get_server_path(&api_path!("search", self.index.to_string()))?;
+        Ok(self.connection.post(url, Body::Json(data), None, convert_api_output_obj).await?)
     }
 }

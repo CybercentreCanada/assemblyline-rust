@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use crate::connection::Connection;
+use assemblyline_utilities::connection::Connection;
+
 
 
 pub struct Facet {

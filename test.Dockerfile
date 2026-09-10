@@ -18,6 +18,7 @@ COPY ./assemblyline-markings ./assemblyline-markings
 COPY ./assemblyline-models ./assemblyline-models
 COPY ./assemblyline-server ./assemblyline-server
 COPY ./environment_template ./environment_template
+COPY ./assemblyline-service-client ./assemblyline-service-client
 COPY ./redis-objects ./redis-objects
 
 # copy in python packages we will want
@@ -36,6 +37,7 @@ RUN rm -rf ./assemblyline-markings
 RUN rm -rf ./assemblyline-models
 RUN rm -rf ./assemblyline-server
 RUN rm -rf ./environment_template
+RUN rm -rf ./assemblyline-service-client
 RUN rm -rf ./redis-objects
 
 CMD ["cargo"]

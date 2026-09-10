@@ -9,8 +9,7 @@ description = """A client for the Assemblyline malware analysis platform."""
 
 [dependencies]
 reqwest = { version = "0.13", features = ["json", "cookies", "multipart", "stream", "gzip", "brotli", "deflate", "query", "rustls", "native-tls"] }
-rustls = { version = "0.21.7", features = ["dangerous_configuration"] }
-rustls-pemfile = "1.0"
+
 
 serde = { version = "1.0", features = ["derive", "std"] }
 serde_with = "3.3"
@@ -22,11 +21,11 @@ tokio-util = "0.7"
 futures = "0.3"
 async-recursion = { version = "1" }
 
-base64 = "0.22"
 url = "2"
-log = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
+# Assemblyline Utilities
+assemblyline-utilities = { version = "0.1.0", path = "../assemblyline-utilities" }
 assemblyline-models = { version="0.8", path = "../assemblyline-models" }
 
 # Libraries used for the ingest binary

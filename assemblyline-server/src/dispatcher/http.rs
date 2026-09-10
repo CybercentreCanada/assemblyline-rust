@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::dispatcher::ServiceStartMessage;
 use crate::http::TlsAcceptor;
-use crate::logging::LoggerMiddleware;
+use assemblyline_utilities::logging::LoggerMiddleware;
 use tracing::instrument;
 
 use super::Dispatcher;
@@ -36,10 +36,10 @@ async fn start_task(
 
 /// API endpoint for finishing a task (with an error)
 #[instrument(skip(request), fields(
-    sid = %request.sid, 
-    sha256 = %request.service_task.fileinfo.sha256, 
-    service_name = %request.error.response.service_name, 
-    service_version = %request.error.response.service_version, 
+    sid = %request.sid,
+    sha256 = %request.service_task.fileinfo.sha256,
+    service_name = %request.error.response.service_name,
+    service_version = %request.error.response.service_version,
     error_key = %request.error_key
 ))]
 #[handler]
@@ -105,4 +105,3 @@ pub async fn start(acceptor: TlsAcceptor, dispatcher: Arc<Dispatcher>) {
         error!("http interface failed: {err}");
     }
 }
-
