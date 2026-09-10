@@ -683,7 +683,7 @@ impl ServiceClient {
 
         tokio::select! {
             _ = wait_for_ready_file(service_ready_path) => {
-                info!("Service ready file found. Service in ready state.");
+                debug!("Service ready file found. Service in ready state.");
 
                 // make sure that service is actually running.
                 let service_running = service_process.try_wait().map_or_else(|e| {
