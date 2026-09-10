@@ -361,7 +361,7 @@ static ALL_VALID_TAGS: [TagInformation; 216] = [
     TagInformation::new(&["file", "shortcut", "icon_location"], "Shortcut File Properties: Icon Location", TagProcessor::String),
     TagInformation::new(&["file", "shortcut", "machine_id"], "Shortcut File Properties: Machine ID", TagProcessor::String),
     TagInformation::new(&["file", "shortcut", "tracker_mac"], "Shortcut File Properties: Possible MAC address from the Tracker block", TagProcessor::String),
-    TagInformation::new(&["file", "shortcut", "sid"],"Shortcut File Properties: Security Identifier", TagProcessor::String),
+    TagInformation::new(&["file", "shortcut", "sid"],"Shortcut File Properties: Security Identifier of the user who created the shortcut", TagProcessor::String),
     TagInformation::new(&["file", "shortcut", "drive_serial"],"Shortcut File Properties: Drive Serial Number", TagProcessor::String),
     TagInformation::new(&["file", "swf", "header", "frame", "count"], "SWF File Properties: Header Information: Header Frame Information: Number of Frames", TagProcessor::I32),
     TagInformation::new(&["file", "swf", "header", "frame", "rate"], "SWF File Properties: Header Information: Header Frame Information: Speed of Animation", TagProcessor::String),
