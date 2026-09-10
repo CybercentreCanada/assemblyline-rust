@@ -1095,7 +1095,6 @@ impl ClassificationParser {
         //     return c12n
 
         let parts = self.get_classification_parts(c12n, long_format, get_dynamic_groups, !skip_auto_select)?;
-        println!("{:?}", parts);
         let new_c12n = self.get_normalized_classification_text(parts, long_format, skip_auto_select)?;
 
         return Ok(new_c12n)
