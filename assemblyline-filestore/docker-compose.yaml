@@ -1,7 +1,7 @@
 
 services:
   minio:
-    image: minio/minio
+    image: cccs/minio
     environment:
       MINIO_ROOT_USER: al_storage_key
       MINIO_ROOT_PASSWORD: Ch@ngeTh!sPa33w0rd
@@ -22,4 +22,4 @@ services:
     environment:
       - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
     ports:
-      - "4566:4566"    
+      - "4566:4566"
