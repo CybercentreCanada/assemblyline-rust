@@ -32,16 +32,12 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 
 use crate::{
-    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE},
-    task_uploader::task_uploader::TaskUploader,
-    tests::{
+    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE}, task_uploader::task_uploader::TaskUploader, tests::{
         create_random_service_result, init,
         mock_service_api::{MockServiceServer, RawHeaderMap, TEST_API_VERSION, TEST_AUTH_KEY},
         sha256_data,
-    },
-    types::{
-        errors::ServiceClientError,
-        task::{ErrorBody, ErrorResponse, TaskUploadBody},
+    }, types::{
+        ServiceInfo, errors::ServiceClientError, task::{ErrorBody, ErrorResponse, TaskUploadBody},
     },
 };
 
@@ -65,15 +61,19 @@ async fn get_test_connection(port: u16) -> Connection {
     .unwrap()
 }
 
-fn initialize_upload_error_test_data() -> (ServiceManifest, Task) {
+fn initialize_upload_error_test_data() -> (ServiceManifest, ServiceInfo, Task) {
     let test_manifest: ServiceManifest = rand::rng().random();
     let mut initial_task: Task = rand::rng().random();
 
     let service_name = test_manifest.service.name.clone();
+    let service_info = ServiceInfo {
+        name: test_manifest.service.name.clone(),
+        version: test_manifest.service.version.clone()
+    };
 
     initial_task.service_name = service_name.clone();
 
-    (test_manifest, initial_task)
+    (test_manifest, service_info, initial_task)
 }
 
 fn create_upload_task_data(
@@ -369,11 +369,9 @@ async fn upload_error(Json(body): Json<JsonMap>, task_error_data: Data<&TaskErro
 #[tokio::test]
 async fn test_upload_error_default_values() {
     init();
-    let (test_manifest, initial_task) = initialize_upload_error_test_data();
+    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
-    let service_name = test_manifest.service.name.clone();
-    let service_version = test_manifest.service.version.clone();
 
     // task uploader should upload task with default values when None are given
     let task_error = ErrorBody {
@@ -381,8 +379,8 @@ async fn test_upload_error_default_values() {
         error_type: UNKNOWN_SERVICE_ERROR_TYPE.to_string(),
         response: ErrorResponse {
             message: DEFAULT_SERVICE_ERROR_MESSAGE.to_string(),
-            service_name: service_name.clone(),
-            service_version: service_version.clone(),
+            service_name: service_info.name.clone(),
+            service_version: service_info.version.clone(),
             service_tool_version: None,
             status: RECOVERABLE_ERROR_STATUS.to_string(),
         },
@@ -401,7 +399,7 @@ async fn test_upload_error_default_values() {
     let task_uploader = TaskUploader {};
 
     let res = task_uploader
-        .upload_task_error(&initial_task, &test_manifest.service, &connection, None, None, None, None)
+        .upload_task_error(&initial_task, &service_info, &connection, None, None, None, None)
         .await;
 
     assert!(res.is_ok(), "Task Uploader should complete with no error.");
@@ -411,11 +409,9 @@ async fn test_upload_error_default_values() {
 #[tokio::test]
 async fn test_upload_error_default_custom_values() {
     init();
-    let (test_manifest, initial_task) = initialize_upload_error_test_data();
+    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
-    let service_name = test_manifest.service.name.clone();
-    let service_version = test_manifest.service.version.clone();
 
     // task uploader should use the custom values given
     let error_type = "test type";
@@ -428,8 +424,8 @@ async fn test_upload_error_default_custom_values() {
         error_type: error_type.to_string(),
         response: ErrorResponse {
             message: message.to_string(),
-            service_name: service_name.clone(),
-            service_version: service_version.clone(),
+            service_name: service_info.name.clone(),
+            service_version: service_info.version.clone(),
             service_tool_version: None,
             status: status.to_string(),
         },
@@ -450,7 +446,7 @@ async fn test_upload_error_default_custom_values() {
     let _ = task_uploader
         .upload_task_error(
             &initial_task,
-            &test_manifest.service,
+            &service_info,
             &connection,
             Some(task_error),
             Some(test_string.clone()),
@@ -466,11 +462,9 @@ async fn test_upload_error_default_custom_values() {
 #[tokio::test]
 async fn test_upload_error_json() {
     init();
-    let (test_manifest, initial_task) = initialize_upload_error_test_data();
+    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
-    let service_name = test_manifest.service.name.clone();
-    let service_version = test_manifest.service.version.clone();
 
     // task uploader should use the custom values given
     let error_type = "test type";
@@ -482,8 +476,8 @@ async fn test_upload_error_json() {
         error_type: error_type.to_string(),
         response: ErrorResponse {
             message: message.to_string(),
-            service_name: service_name.clone(),
-            service_version: service_version.clone(),
+            service_name: service_info.name.clone(),
+            service_version: service_info.version.clone(),
             service_tool_version: None,
             status: status.to_string(),
         },
@@ -502,7 +496,7 @@ async fn test_upload_error_json() {
     let res = task_uploader
         .upload_task_error(
             &initial_task,
-            &test_manifest.service,
+            &service_info,
             &connection,
             None,
             Some(message.to_string()),

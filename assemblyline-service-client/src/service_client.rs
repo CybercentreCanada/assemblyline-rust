@@ -9,7 +9,6 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use assemblyline_models::{
-    datastore::Service,
     messages::{
         service_api::{
             self,
@@ -17,6 +16,7 @@ use assemblyline_models::{
         },
         task::Task,
     },
+    types::JsonMap,
 };
 use assemblyline_utilities::{
     connection::{self, convert_api_output_obj, Connection, ServerType, TLSSettings},
@@ -25,6 +25,7 @@ use assemblyline_utilities::{
 use libc::mkfifo;
 use log::{debug, error as log_error, info, warn};
 use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tempfile::tempdir_in;
 use tokio::{
@@ -42,21 +43,26 @@ use crate::{
     service_launcher::ServiceLauncher,
     task_fetcher::task_fetcher::TaskFetcher,
     task_uploader::task_uploader::TaskUploader,
-    types::errors::ServiceClientError,
+    types::{errors::ServiceClientError, ServiceInfo},
 };
 
 pub struct ServiceClient {
     register_only: bool,
     pub container_mode: bool,
-    pub service: Service,
+    runtime_prefix: String,
+    container_id: String,
+    file_required: bool,
+
+    pub service_info: ServiceInfo,
+
     manifest_file_path: String,
     service_heuristics: Vec<Heuristic>,
     tool_version: Option<String>,
+
     service_api_host: url::Url,
-    runtime_prefix: String,
     service_api_key: String,
-    container_id: String,
-    file_required: bool,
+    connection: Connection,
+
     tasking_dir: String,
     task_fifo_path: String,
     done_fifo_path: String,
@@ -64,12 +70,30 @@ pub struct ServiceClient {
     running: Arc<Mutex<bool>>,
     task_complete_limit: Option<i32>,
     tasks_processed: i32,
-    connection: Connection,
 }
 
 struct TaskFifoPipes {
     task_fifo: Sender,
     done_fifo: Receiver,
+}
+
+
+// A simplified version of service manifest class for serializing manifest file
+// only serialize the information needed for service client
+#[derive(Serialize, Deserialize)]
+struct SimplifiedServiceManifest {
+    #[serde(default)]
+    pub tool_version: Option<String>,
+    #[serde(default = "default_file_required")]
+    pub file_required: bool,
+    #[serde(default)]
+    pub heuristics: Vec<Heuristic>,
+    #[serde(flatten)]
+    pub service: ServiceInfo,
+}
+
+fn default_file_required() -> bool {
+    true
 }
 
 impl ServiceClient {
@@ -117,7 +141,7 @@ impl ServiceClient {
         }
 
         let runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
-        let mut service_manifest: ServiceManifest = serde_yaml::from_reader(runtime_manifest_file)?;
+        let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_reader(runtime_manifest_file)?;
 
         // update service manifest version tag if it is the placeholder value
         if service_manifest.service.version == PLACEHOLDER_VERSION_TAG {
@@ -177,20 +201,24 @@ impl ServiceClient {
             register_only: register_only,
             container_mode: container_mode,
             runtime_prefix: runtime_prefix.to_owned(),
-            service: service_manifest.service,
+
+            service_info: service_manifest.service,
+
+            manifest_file_path: runtime_manifest_path.to_string_lossy().to_string(),
             file_required: service_manifest.file_required,
             service_heuristics: service_manifest.heuristics,
             tool_version: service_manifest.tool_version,
+
             service_api_host: server_host_url,
-            manifest_file_path: runtime_manifest_path.to_string_lossy().to_string(),
             service_api_key,
+            connection: con,
+
             container_id,
             tasking_dir,
             task_fifo_path,
             done_fifo_path,
             service_ready_path: service_ready,
             running,
-            connection: con,
             task_complete_limit,
             tasks_processed: 0,
         })
@@ -201,8 +229,8 @@ impl ServiceClient {
         // need to update connection header to have the new tool version
         headers.insert("X-APIKey".to_string(), self.service_api_key.clone());
         headers.insert("Container-ID".to_string(), self.container_id.clone());
-        headers.insert("Service-Name".to_string(), self.service.name.to_string());
-        headers.insert("Service-Version".to_string(), self.service.version.clone());
+        headers.insert("Service-Name".to_string(), self.service_info.name.to_string());
+        headers.insert("Service-Version".to_string(), self.service_info.version.clone());
         headers.insert("Service-Tool-Version".to_string(), self.tool_version.clone().unwrap_or("".to_string()));
 
         let _ = self.connection.update_client_default_headers(headers).await.map_err(|e| anyhow!(e));
@@ -261,13 +289,9 @@ impl ServiceClient {
     pub async fn register_service(&mut self) -> Result<bool, ServiceClientError> {
         let register_url = self.connection.get_api_path("service", &["register"])?;
 
-        let mut temp_service_manifest = ServiceManifest {
-            service: self.service.clone(),
-            tool_version: self.tool_version.clone(),
-            file_required: self.file_required,
-            heuristics: self.service_heuristics.clone(),
-        };
-
+        // load runtime service manifest
+        let manifest_file = std::fs::File::open(&self.manifest_file_path)?;
+        let temp_service_manifest: JsonMap = serde_yaml::from_reader(manifest_file)?;
         info!("Send request to service server to register service.");
 
         let register_response: RegisterResponse = self
@@ -280,13 +304,18 @@ impl ServiceClient {
         }
 
         // load new service configuration
-        self.service = register_response.service_config.to_owned();
-
         // update and write to manifest file with the updated manifest data
-        temp_service_manifest.service = self.service.clone();
+        let updated_manifest = ServiceManifest {
+            service: register_response.service_config.to_owned(),
+            tool_version: self.tool_version.clone(),
+            file_required: self.file_required,
+            heuristics: self.service_heuristics.clone(),
+        };
+
         let mut manifest_file = File::create(&self.manifest_file_path).await?;
-        let manifest_data = serde_yaml::to_string(&temp_service_manifest).unwrap();
+        let manifest_data = serde_yaml::to_string(&updated_manifest).unwrap();
         manifest_file.write_all(manifest_data.as_bytes()).await?;
+        let _ = manifest_file.flush();
 
         // update connection client header to have the update to date service information
         self.update_client_header().await?;
@@ -336,7 +365,7 @@ impl ServiceClient {
                                 let _ = task_uploader
                                     .upload_task_error(
                                         &task,
-                                        &self.service,
+                                        &self.service_info,
                                         &self.connection,
                                         None,
                                         Some(err.to_string()),
@@ -352,7 +381,7 @@ impl ServiceClient {
                         let error_json: Value = serde_json::from_slice(data.as_slice())?;
 
                         let _ = task_uploader
-                            .upload_task_error(&task, &self.service, &self.connection, Some(error_json), None, None, None)
+                            .upload_task_error(&task, &self.service_info, &self.connection, Some(error_json), None, None, None)
                             .await;
                     }
                     _ => return Err(ServiceClientError::Default(format!("Unknown task done status {}", status))),
@@ -546,7 +575,7 @@ impl ServiceClient {
                                 let _ = task_uploader
                                     .upload_task_error(
                                         &task,
-                                        &self.service,
+                                        &self.service_info,
                                         &self.connection,
                                         None,
                                         Some(err.to_string()),
@@ -568,7 +597,7 @@ impl ServiceClient {
                     if let Some(err) = write_task_fifo_result.err() {
                         log_error!("Error writing to task fifo. Terminating service handler. {:?}", err);
                         let _ = task_uploader
-                            .upload_task_error(&task, &self.service, &self.connection, None, None, None, None)
+                            .upload_task_error(&task, &self.service_info, &self.connection, None, None, None, None)
                             .await;
 
                         // if we failed to write to task fifo, the service process is likely dead.
@@ -590,7 +619,7 @@ impl ServiceClient {
                         Err(e) => {
                             log_error!("{e}");
                             let _ = task_uploader
-                                .upload_task_error(&task, &self.service, &self.connection, None, None, None, None)
+                                .upload_task_error(&task, &self.service_info, &self.connection, None, None, None, None)
                                 .await;
                         }
                     }
@@ -606,8 +635,8 @@ impl ServiceClient {
     }
 
     #[cfg(test)]
-    pub fn get_service(&self) -> Service {
-        self.service.clone()
+    pub fn get_service(&self) -> ServiceInfo {
+        self.service_info.clone()
     }
 
     #[cfg(test)]

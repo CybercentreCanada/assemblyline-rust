@@ -140,3 +140,9 @@ impl From<url::ParseError> for ServiceClientError {
         Self::UrlParseError(value.to_string())
     }
 }
+
+impl From<serde_yaml::Error> for ServiceClientError {
+    fn from(value: serde_yaml::Error) -> Self {
+        Self::SerializeError(value.to_string())
+    }
+}

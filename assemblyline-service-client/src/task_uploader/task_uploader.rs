@@ -1,16 +1,13 @@
 use std::collections::HashMap;
 
 use crate::{
-    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS,  UNKNOWN_SERVICE_ERROR_TYPE},
-    types::{
-        errors::ServiceClientError,
-        task::{ErrorBody, ErrorResponse, TaskUploadBody},
+    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS,  UNKNOWN_SERVICE_ERROR_TYPE}, types::{
+        ServiceInfo, errors::ServiceClientError, task::{ErrorBody, ErrorResponse, TaskUploadBody},
     },
 };
 
 use anyhow::Result;
 use assemblyline_models::{
-    datastore::Service,
     messages::{service_api, task::Task},
     types::Sha256,
 };
@@ -29,7 +26,7 @@ impl TaskUploader {
     pub async fn upload_task_error(
         &self,
         task: &Task,
-        service: &Service,
+        service: &ServiceInfo,
         connection: &Connection,
         error_json: Option<Value>,
         message: Option<String>,
