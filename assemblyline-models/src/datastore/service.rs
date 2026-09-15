@@ -577,7 +577,6 @@ impl rand::distr::Distribution<Service> for rand::distr::StandardUniform {
             update_channel: default_update_channel(),
             update_config: Default::default(),
             recursion_prevention: Default::default(),
-            expected_queue_length: None,
         }
     }
 }
