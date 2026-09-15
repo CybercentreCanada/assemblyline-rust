@@ -32,8 +32,6 @@ impl SingleThreadTaskFetcher {
 impl TaskFetcher for SingleThreadTaskFetcher {
     async fn get_task(
         &self,
-        // file_required: bool,
-        // tasking_dir: String,
         con: &Connection,
     ) -> Result<Option<Task>, ServiceClientError> {
         let mut headers: HashMap<String, String> = HashMap::new();

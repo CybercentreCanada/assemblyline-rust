@@ -1,7 +1,7 @@
 use assemblyline_models::{
     datastore::{self, Service},
     messages::{self, service_api::service_manifest::ServiceManifest, task::Task},
-    types::{JsonMap, Sha256},
+    types::{JsonMap, ServiceName, Sha256},
 };
 use assemblyline_utilities::{
     connection::convert_output_map,
@@ -23,7 +23,7 @@ use rand::RngExt;
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 use tokio::{
-    fs::File,
+    fs::{read_to_string, File},
     io::{AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
 };
@@ -77,6 +77,13 @@ fn run_service_api(data: RunServiceData) -> impl Endpoint {
         .at(format!("/file/:sha256"), get(download_file))
         .at(format!("/file"), put(upload_file))
         .with(AddData::new(data))
+}
+
+fn validate_minimal_register_api() -> impl Endpoint {
+    Route::new().at(
+        format!("/service/register"),
+        put(validate_minimal_register_service).post(validate_minimal_register_service),
+    )
 }
 
 #[handler]
@@ -177,6 +184,41 @@ async fn register_service(Json(body): Json<JsonMap>, service_data: Data<&Registe
 }
 
 #[handler]
+async fn validate_minimal_register_service(Json(body): Json<JsonMap>) -> poem::Result<poem::Response> {
+    // validate that the given json map is minimal and does not contain unnecessary keys
+    // checks for a sample of keys that should not be present
+    assert!(body.get("accepts").is_none());
+    assert!(body.get("category").is_none());
+    assert!(body.get("config").is_none());
+    assert!(body.get("dependencies").is_none());
+    assert!(body.get("is_external").is_none());
+
+    // the given data should at minimum have name, version, and docker_config:image
+    assert!(body.get("name").is_some());
+    assert!(body.get("version").is_some());
+    assert!(body.get("docker_config").is_some_and(|d| d.as_object().unwrap().contains_key("image")));
+
+    // Data sent from service client should serialize to service
+    let mut service: Service = serde_json::from_value::<Service>(serde_json::Value::Object(body)).unwrap();
+
+    let new_heuristics: Vec<String> = Vec::new();
+    let register_response = RegisterResponse {
+        keep_alive: true,
+        new_heuristics,
+        service_config: service,
+    };
+
+    let api_response = APIResponse {
+        api_response: register_response,
+        api_error_message: None,
+        api_server_version: TEST_API_VERSION.to_string(),
+        api_status_code: 200,
+    };
+
+    return Ok(Json(api_response).into_response());
+}
+
+#[handler]
 async fn upload_file(_body: poem::Body) -> Result<poem::Response, poem::error::Error> {
     return Ok(Json(json!({
         "data": "OK",
@@ -242,6 +284,141 @@ async fn make_test_service_client(
     .expect("Failed to make create service client.");
 
     sc
+}
+
+#[tokio::test]
+async fn test_init_runtime_service_manifest() {
+    init();
+    // if there is not a runtime manifest at runtime manifest path,
+    // service client looks at the given manifest_folder to find the service manifest and copy it to runtime manifest
+    // and load it to get service information.
+
+    let base_dir = tempfile::tempdir().unwrap();
+    let base_dir_string = base_dir.path().to_string_lossy().to_string();
+    let manifest_dir = tempfile::tempdir().unwrap();
+    let manifest_dir_string = manifest_dir.path().to_string_lossy().to_string();
+
+    let manifest_path = manifest_dir.path().join("service_manifest.yml");
+    let runtime_manifest_path = base_dir.path().join(format!("{}_manifest.yml", TESTING_PREFIX));
+
+    let base_manifest: ServiceManifest = rand::rng().random();
+    let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
+    let data = serde_yaml::to_string(&base_manifest).unwrap();
+    manifest_file.write_all(data.as_bytes()).await.unwrap();
+    let _ = manifest_file.flush();
+
+    // runtime manifest does not exist
+    assert!(!runtime_manifest_path.exists());
+    // service manifest should exist at the given manifest directory.
+    assert!(manifest_path.exists());
+
+    let _sc = ServiceClient::new(
+        false,
+        true,
+        Arc::new(Mutex::new(false)),
+        "test_container_id".to_string(),
+        TESTING_PREFIX.to_string(),
+        base_dir_string.clone(),
+        base_dir_string.clone(),
+        manifest_dir_string.clone(),
+        "http://127.0.0.1".to_string(),
+        TEST_AUTH_KEY.to_string(),
+        "".to_string(),
+        None,
+    )
+    .await
+    .expect("Failed to make create service client.");
+
+    // after service client is initiated, the runtime manifest should exist in tmp folder
+    assert!(runtime_manifest_path.exists());
+
+    let manifest_file_data = read_to_string(runtime_manifest_path)
+        .await
+        .expect("Should be able to read manifest file data.");
+
+    let runtime_manifest_data = read_to_string(manifest_path)
+        .await
+        .expect("Should be able to read runtime manifest file data.");
+
+    assert_eq!(
+        manifest_file_data, runtime_manifest_data,
+        "The service manifest should be copied exactly to the runtime manifest path."
+    );
+}
+
+#[tokio::test]
+async fn test_register_service_no_extra_data() {
+    init();
+    // given a service manifest file
+    // when service client load its data, it should only parse for the name and version of the service
+    // the service client should send the raw data, without adding any default value
+    // (the service server will fill in other unspecified data based on the system default)
+
+    let test_service_name = ServiceName::from_string("TEST_SERVICE_NAME".to_owned());
+    let test_service_version = "v0.0.-0".to_owned();
+
+    let minimal_service_manifest = json!({
+        "name": test_service_name,
+        "version": test_service_version,
+        "docker_config": {
+            "image": format!("{test_service_name}:{test_service_version}")
+        }
+    });
+
+    let base_dir = tempfile::tempdir().unwrap();
+    let base_dir_string = base_dir.path().to_string_lossy().to_string();
+    let manifest_dir = tempfile::tempdir().unwrap();
+    let manifest_dir_string = manifest_dir.path().to_string_lossy().to_string();
+    let runtime_manifest_path = base_dir.path().join(format!("{}_manifest.yml", TESTING_PREFIX));
+
+    let manifest_path = manifest_dir.path().join("service_manifest.yml");
+    let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
+    let data = serde_yaml::to_string(&minimal_service_manifest).unwrap();
+    manifest_file.write_all(data.as_bytes()).await.unwrap();
+    let _ = manifest_file.flush();
+
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(validate_minimal_register_api())
+        .await
+        .unwrap();
+    let service_api_address: String = format!("http://localhost:{}", port).to_string();
+
+    let mut sc = ServiceClient::new(
+        false,
+        true,
+        Arc::new(Mutex::new(true)),
+        "test_container_id".to_string(),
+        TESTING_PREFIX.to_string(),
+        base_dir_string.clone(),
+        base_dir_string.clone(),
+        manifest_dir_string.clone(),
+        service_api_address,
+        TEST_AUTH_KEY.to_string(),
+        "".to_string(),
+        None,
+    )
+    .await
+    .expect("Failed to make create service client.");
+
+    // service should load service name and version from manifest file.
+    // runtime service manifest file created
+    assert_eq!(sc.service_info.name, test_service_name);
+    assert_eq!(sc.service_info.version, test_service_version);
+    assert!(runtime_manifest_path.exists());
+
+    // after register with the service, the runtime manifest is updated.
+    let _ = sc.register_service().await.expect("Register service should pass.");
+
+    let updated_runtime_manifest_data = read_to_string(&runtime_manifest_path).await.expect("Should be able to read runtime manifest data.");
+
+    let actual_manifest_data: serde_yaml::Value = serde_yaml::from_str(&updated_runtime_manifest_data).unwrap();
+
+    // check a sample of keys where the service server should fill in the data
+    assert!(actual_manifest_data.get("accepts").is_some());
+    assert!(actual_manifest_data.get("default_result_classification").is_some());
+    assert!(actual_manifest_data.get("update_channel").is_some());
+    assert!(actual_manifest_data.get("recursion_prevention").is_some());
+    assert!(actual_manifest_data.get("timeout").is_some());
+
 }
 
 #[tokio::test]
@@ -512,7 +689,7 @@ async fn test_run_service_write_task_pipe() {
 async fn test_run_service_task_done_with_result() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -575,7 +752,7 @@ async fn test_run_service_task_done_with_result() {
 async fn test_run_service_task_process_with_limit() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -652,7 +829,7 @@ async fn test_run_service_task_process_with_limit() {
 async fn test_run_service_task_done_with_error() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
 
@@ -711,7 +888,7 @@ async fn test_run_service_task_done_with_error() {
 async fn test_run_service_task_get_no_task() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
     base_dir_string.push('/');
 
     let (_, base_service, _) = make_run_service_data(base_dir_string.clone(), false).await;
@@ -771,7 +948,7 @@ async fn test_run_service_task_get_no_task() {
 async fn test_run_service_task_service_terminated() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
     base_dir_string.push('/');
 
     let (_, base_service, task) = make_run_service_data(base_dir_string.clone(), false).await;
@@ -843,7 +1020,7 @@ async fn test_run_service_task_service_terminated() {
 async fn test_wait_for_service_ready() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
     base_dir_string.push('/');
 
     let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
@@ -874,7 +1051,7 @@ async fn test_wait_for_service_ready() {
 async fn test_wait_for_service_ready_sc_terminated() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
     base_dir_string.push('/');
 
     let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
@@ -900,9 +1077,9 @@ async fn test_wait_for_service_ready_sc_terminated() {
     assert_eq!(res.await.expect("Wait for service ready should terminate."), false);
 }
 
-struct SleepFiveSecondServiceLauncher {}
+struct SleepFiveSecondsServiceLauncher {}
 
-impl ServiceLauncher for SleepFiveSecondServiceLauncher {
+impl ServiceLauncher for SleepFiveSecondsServiceLauncher {
     async fn launch_service(&self) -> Result<Child, ServiceClientError> {
         info!("LAUNCH Mock service...");
         let mut cmd = Command::new("sleep");
@@ -920,13 +1097,13 @@ impl ServiceLauncher for SleepFiveSecondServiceLauncher {
 async fn test_wait_for_service_ready_service_terminated() {
     init();
     let temp_dir = tempfile::tempdir().unwrap();
-    let mut base_dir_string = temp_dir.path().to_owned().to_str().unwrap().to_string();
+    let mut base_dir_string = temp_dir.path().to_string_lossy().to_string();
     base_dir_string.push('/');
 
     let (_, _, _) = make_run_service_data(base_dir_string.clone(), false).await;
 
     let service_api_address: String = "http://localhost:1".to_string();
-    let service_launcher = SleepFiveSecondServiceLauncher {};
+    let service_launcher = SleepFiveSecondsServiceLauncher {};
     let sc_running = Arc::new(Mutex::new(true));
 
     let sc = Arc::new(make_test_service_client(sc_running.clone(), service_api_address, base_dir_string.clone(), None).await);
