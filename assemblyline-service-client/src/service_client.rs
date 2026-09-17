@@ -1,10 +1,5 @@
 use std::{
-    collections::HashMap,
-    ffi::CString,
-    fs,
-    io::ErrorKind,
-    path::{Path, PathBuf},
-    sync::Arc,
+    collections::HashMap, ffi::CString, fs, io::{ErrorKind, Read}, path::{Path, PathBuf}, sync::Arc,
 };
 
 use anyhow::{anyhow, Result};
@@ -24,6 +19,7 @@ use assemblyline_utilities::{
 };
 use libc::mkfifo;
 use log::{debug, error as log_error, info, warn};
+use nom::AsBytes;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -141,8 +137,10 @@ impl ServiceClient {
             let _size = std::io::copy(&mut manifest_file, &mut runtime_manifest_file)?;
         }
 
-        let runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
-        let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_reader(runtime_manifest_file)?;
+        let mut runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
+        let mut manifest_data = Vec::new();
+        runtime_manifest_file.read_to_end(&mut manifest_data)?;
+        let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_slice(&manifest_data.as_bytes())?;
 
         // update service manifest version tag if it is the placeholder value
         if service_manifest.service.version == PLACEHOLDER_VERSION_TAG {
