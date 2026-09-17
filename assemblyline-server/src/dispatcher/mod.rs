@@ -2207,8 +2207,7 @@ impl Dispatcher {
             trace_event!(task, "submission_check", "Finished");
             debug!("[{sid}] Finalizing submission.");
             // accumulate the score, submissions with no results have no score
-            // max_score = max(file_scores.values()) if file_scores else 0
-            let max_score = file_scores.values().fold(0, |a, b| a.max(*b));
+            let max_score = file_scores.values().copied().max().unwrap_or(0);
             self.finalize_submission(task, max_score, checked).await?;
             return Ok(true)
         }
