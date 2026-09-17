@@ -436,7 +436,7 @@ async fn test_service_client_connection() {
     let mut manifest_file = std::fs::File::create(&manifest_path).unwrap();
     let data = serde_yaml::to_string(&test_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).unwrap();
-    manifest_file.flush();
+    let _ = manifest_file.flush();
 
     let headers: HashMap<String, String> = HashMap::from([
         ("x-apikey".to_string(), TEST_AUTH_KEY.to_string()),
