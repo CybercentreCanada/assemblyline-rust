@@ -77,7 +77,6 @@ struct TaskFifoPipes {
     done_fifo: Receiver,
 }
 
-
 // A simplified version of service manifest class for serializing manifest file
 // only serialize the information needed for service client
 #[derive(Serialize, Deserialize)]
@@ -137,7 +136,9 @@ impl ServiceClient {
             // read the service manifest provided with the given service and write it to the runtime_manifest_path
             // which will be the loaded manifest for this run.
             debug!("loading manifest path: {}", manifest_path.clone().to_string_lossy());
-            fs::copy(&manifest_path, &runtime_manifest_path)?;
+            let mut manifest_file = std::fs::File::open(manifest_path)?;
+            let mut runtime_manifest_file = std::fs::File::create(&runtime_manifest_path)?;
+            let _size = std::io::copy(&mut manifest_file, &mut runtime_manifest_file)?;
         }
 
         let runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
