@@ -133,6 +133,7 @@ impl ServiceClient {
             // which will be the loaded manifest for this run.
             debug!("loading manifest path: {}", manifest_path.clone().to_string_lossy());
             let mut manifest_file = std::fs::File::open(manifest_path)?;
+            manifest_file.flush()?;
             let mut runtime_manifest_file = std::fs::File::create(&runtime_manifest_path)?;
             let _size = std::io::copy(&mut manifest_file, &mut runtime_manifest_file)?;
             runtime_manifest_file.flush()?;
