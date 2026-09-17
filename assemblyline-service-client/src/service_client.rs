@@ -138,8 +138,12 @@ impl ServiceClient {
         }
 
         let mut runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
-        let mut manifest_data = Vec::new();
-        runtime_manifest_file.read_to_end(&mut manifest_data)?;
+        let mut manifest_data = String::new();
+        runtime_manifest_file.read_to_string(&mut manifest_data)?;
+
+        info!("manifest data is: {manifest_data}");
+
+
         let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_slice(&manifest_data.as_bytes())?;
 
         // update service manifest version tag if it is the placeholder value
