@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, ffi::CString, fs, io::{ErrorKind, Read}, path::{Path, PathBuf}, sync::Arc,
+    collections::HashMap, ffi::CString, fs, io::{ErrorKind, Read, Write}, path::{Path, PathBuf}, sync::Arc,
 };
 
 use anyhow::{anyhow, Result};
@@ -132,16 +132,18 @@ impl ServiceClient {
             // read the service manifest provided with the given service and write it to the runtime_manifest_path
             // which will be the loaded manifest for this run.
             debug!("loading manifest path: {}", manifest_path.clone().to_string_lossy());
+            debug!("Writing to runtime path: {}", runtime_manifest_path.clone().to_string_lossy());
             let mut manifest_file = std::fs::File::open(manifest_path)?;
             let mut runtime_manifest_file = std::fs::File::create(&runtime_manifest_path)?;
             let _size = std::io::copy(&mut manifest_file, &mut runtime_manifest_file)?;
+            runtime_manifest_file.flush()?;
         }
 
         let mut runtime_manifest_file = std::fs::File::open(&runtime_manifest_path)?;
         let mut manifest_data = String::new();
         runtime_manifest_file.read_to_string(&mut manifest_data)?;
 
-        info!("manifest data is: {manifest_data}");
+        debug!("manifest data is: {manifest_data}");
 
 
         let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_slice(&manifest_data.as_bytes())?;
