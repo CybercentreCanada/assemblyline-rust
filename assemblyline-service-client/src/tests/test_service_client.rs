@@ -432,10 +432,11 @@ async fn test_service_client_connection() {
     let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
     let manifest_path = Path::new(&base_dir_string).join("service_manifest.yml");
-    // let manifest_path = Path::new("service_manifest.yml");
     let mut manifest_file = std::fs::File::create(&manifest_path).unwrap();
     let data = serde_yaml::to_string(&test_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).unwrap();
+    debug!("Writing test manifest to: {}", manifest_path.to_string_lossy());
+    debug!("Test manifest data: {data}");
     let _ = manifest_file.flush();
 
     let headers: HashMap<String, String> = HashMap::from([
