@@ -132,6 +132,8 @@ impl ServiceClient {
             // read the service manifest provided with the given service and write it to the runtime_manifest_path
             // which will be the loaded manifest for this run.
             debug!("loading manifest path: {}", manifest_path.clone().to_string_lossy());
+            let old_manifest_data = fs::read_to_string(&manifest_path)?;
+            debug!("Old manifest data: {old_manifest_data}");
             debug!("Writing to runtime path: {}", runtime_manifest_path.clone().to_string_lossy());
             let mut manifest_file = std::fs::File::open(manifest_path)?;
             let mut runtime_manifest_file = std::fs::File::create(&runtime_manifest_path)?;
