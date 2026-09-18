@@ -4,6 +4,7 @@ use std::time::Duration;
 use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::{EmptyResult, Error, Service};
 use assemblyline_models::messages::changes::ServiceChange;
+use assemblyline_models::messages::service_api;
 use assemblyline_models::messages::task::Task;
 use assemblyline_models::types::{ClassificationString, ExpandingClassification, JsonMap, Sha256};
 use log::{debug, info};
@@ -514,7 +515,7 @@ async fn parse_sample_result() {
         #[serde(default)]
         exec_time: u64,
         freshen: bool,
-        result: crate::service_api::v1::task::models::Result,
+        result: service_api::result::Result,
     }
 
     let _output: Success = serde_json::from_str(data).unwrap();

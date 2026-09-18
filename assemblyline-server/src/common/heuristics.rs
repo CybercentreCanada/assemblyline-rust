@@ -13,7 +13,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use assemblyline_models::datastore::heuristic::Heuristic as DatastoreHeuristic;
-use crate::service_api::v1::task::models::Heuristic as ServiceHeuristic;
+use assemblyline_models::messages::service_api::result::Heuristic as ServiceHeuristic;
+
 use assemblyline_models::datastore::result::Heuristic as ResultHeuristic;
 use assemblyline_models::{types::ExpandingClassification, Readable};
 use log::{error, info, warn};
@@ -91,9 +92,9 @@ impl HeuristicHandler {
         })
     }
 
-    pub fn service_heuristic_to_result_heuristic(&self, 
+    pub fn service_heuristic_to_result_heuristic(&self,
         srv_heuristic: ServiceHeuristic,
-        heuristics: Arc<Mutex<HashMap<String, DatastoreHeuristic>>>, 
+        heuristics: Arc<Mutex<HashMap<String, DatastoreHeuristic>>>,
         // zerioize_on_sig_safe: bool // =True
     ) -> Result<(ResultHeuristic, Vec<(String, String)>)> {
         // let heur_id = srv_heuristic.heur_id;

@@ -33,9 +33,9 @@ pub async fn launch(core: Arc<Core>) -> (u16, JoinHandle<()>) {
         info!("Starting test server on {:?}", acceptor.local_addr());
         let result = Server::new_with_acceptor(acceptor)
             // .run(
-            //     app, 
+            //     app,
             .run_with_graceful_shutdown(
-                app, 
+                app,
                 async move {
                     core.running.wait_for(false).await
                 }, None
@@ -120,6 +120,7 @@ fn build_service() -> Service {
         update_config: Default::default(),
         recursion_prevention: Default::default(),
         auto_update: Default::default(),
+        expected_queue_length: None,
     }
 }
 
