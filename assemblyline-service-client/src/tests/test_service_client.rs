@@ -250,6 +250,7 @@ async fn make_run_service_data(base_folder: String, file_required: bool) -> (Ser
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).await.unwrap();
+    manifest_file.flush().await.unwrap();
     let mut task: Task = rand::rng().random();
 
     let (file_hash, _) = test_sha_file();
@@ -304,8 +305,9 @@ async fn test_init_runtime_service_manifest() {
     let base_manifest: ServiceManifest = rand::rng().random();
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
+    debug!("Manifest data: {}", &data);
     manifest_file.write_all(data.as_bytes()).await.unwrap();
-    let _ = manifest_file.flush();
+    manifest_file.flush().await.unwrap();
 
     // runtime manifest does not exist
     assert!(!runtime_manifest_path.exists());
@@ -375,7 +377,7 @@ async fn test_register_service_no_extra_data() {
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&minimal_service_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).await.unwrap();
-    let _ = manifest_file.flush();
+    manifest_file.flush().await.unwrap();
 
     let (port, _) = MockServiceServer::launch_with_custom_endpoints(validate_minimal_register_api())
         .await
@@ -432,11 +434,10 @@ async fn test_service_client_connection() {
     let base_dir_string = temp_dir.path().to_string_lossy().to_string();
 
     let manifest_path = Path::new(&base_dir_string).join("service_manifest.yml");
-    // let manifest_path = Path::new("service_manifest.yml");
-    let mut manifest_file = std::fs::File::create(&manifest_path).unwrap();
+    let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&test_manifest).unwrap();
-    manifest_file.write_all(data.as_bytes()).unwrap();
-    manifest_file.flush();
+    manifest_file.write_all(data.as_bytes()).await.unwrap();
+    manifest_file.flush().await.unwrap();
 
     let headers: HashMap<String, String> = HashMap::from([
         ("x-apikey".to_string(), TEST_AUTH_KEY.to_string()),
@@ -505,7 +506,7 @@ async fn test_register_service() {
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).await.unwrap();
-    manifest_file.flush();
+    manifest_file.flush().await.unwrap();
 
     let mut updated_service = base_manifest.service.clone();
     let update_config = json!({
