@@ -250,6 +250,7 @@ async fn make_run_service_data(base_folder: String, file_required: bool) -> (Ser
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
     manifest_file.write_all(data.as_bytes()).await.unwrap();
+    manifest_file.flush().await.unwrap();
     let mut task: Task = rand::rng().random();
 
     let (file_hash, _) = test_sha_file();
