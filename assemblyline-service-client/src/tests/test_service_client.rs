@@ -296,6 +296,7 @@ async fn test_init_runtime_service_manifest() {
 
     let base_dir = tempfile::tempdir().unwrap();
     let base_dir_string = base_dir.path().to_string_lossy().to_string();
+    debug!("Creating test data in temporary directory: {}", &base_dir_string);
     let manifest_dir = tempfile::tempdir().unwrap();
     let manifest_dir_string = manifest_dir.path().to_string_lossy().to_string();
 
@@ -305,8 +306,11 @@ async fn test_init_runtime_service_manifest() {
     let base_manifest: ServiceManifest = rand::rng().random();
     let mut manifest_file = tokio::fs::File::create(&manifest_path).await.unwrap();
     let data = serde_yaml::to_string(&base_manifest).unwrap();
+    debug!("Creating manifest file at: {}", manifest_path.as_path().to_string_lossy());
+    debug!("Manifest data: {}", &data);
+
     manifest_file.write_all(data.as_bytes()).await.unwrap();
-    let _ = manifest_file.flush();
+    manifest_file.flush().await.unwrap();
 
     // runtime manifest does not exist
     assert!(!runtime_manifest_path.exists());
