@@ -101,9 +101,24 @@ impl RedisObjects {
         let config = config.set_tcp_settings(settings);
 
         // Get the path to the root CA certificate for TLS connections
-        let ca_path = std::env::var(format!("{}_ROOT_CA_PATH", hostname.to_uppercase())).unwrap_or_else(|_| DEFAULT_REDIS_ROOT_CA_PATH.to_string());
+        let path_variable = format!("{}_ROOT_CA_PATH", hostname.to_uppercase());
+        let ca_path = match std::env::var(&path_variable) {
+            // if a path is configured it is required
+            Ok(path) => Some(path),
+            // if no path is configured, the default file is used if found, if found it must be valid
+            Err(std::env::VarError::NotPresent) => {
+                if std::fs::exists(DEFAULT_REDIS_ROOT_CA_PATH).unwrap_or(false) {
+                    Some(DEFAULT_REDIS_ROOT_CA_PATH.to_string())
+                } else {
+                    None
+                }
+            },
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(ErrorTypes::Configuration(format!("Could not read environment variable: {path_variable}")))
+            }
+        };
 
-        let client = if std::fs::exists(&ca_path).unwrap_or(false) {
+        let client = if let Some(ca_path) = ca_path {
             // If the custom CA exists, constuct the client using TLS
             debug!("Using mounted trust-store for Redis host [{}]: {}", hostname, ca_path);
             redis::Client::build_with_tls(config, redis::TlsCertificates {
@@ -315,6 +330,9 @@ pub enum ErrorTypes {
     /// Encoding or decoding issue
     #[error("Encoding issue with message: {0}")]
     Serde(serde_json::Error),
+    /// Any other error during any sort of setup or configuration parsing
+    #[error("Issue with configuration: {0}")]
+    Configuration(String),
 }
 
 impl ErrorTypes {
