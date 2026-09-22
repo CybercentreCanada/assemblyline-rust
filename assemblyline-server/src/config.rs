@@ -52,6 +52,12 @@ pub async fn get_cluster_ca_cert() -> Result<Option<String>> {
     load_file("CLUSTER_CA_CERT", "CLUSTER_CA_CERT_PATH").await
 }
 
+pub async fn get_dispatcher_ca() -> Result<Option<String>> {
+    match load_file("DISPATCHER_ROOT_CA", "DISPATCHER_ROOT_CA_PATH").await? {
+        Some(config) => Ok(Some(config)),
+        None => get_cluster_ca_cert().await,
+    }
+}
 
 /// Load the address the server should bind to
 pub fn load_bind_address() -> Result<SocketAddr> {
