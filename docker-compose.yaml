@@ -1,4 +1,21 @@
+# Created for the purpose of development and CI testing
 services:
+
+  azure:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --disableProductStyleUrl
+
+  floci:
+    image: floci/floci:2.0.0
+    environment:
+      - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
+    ports:
+      - "4566:4566"
+
   minio:
     image: cccs/minio
     environment:
@@ -45,16 +62,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 3
-
   cargo_test:
     build:
-      context: ..
       dockerfile: ./assemblyline-server/test.Dockerfile
+      target: setup
     volumes:
-      - ../:/usr/src/
-      - ./test-config.yaml:/etc/assemblyline/config.yml
-    working_dir: /usr/src/assemblyline-server
-    command: "cargo test --target-dir /out"
+      - ./:/usr/src/
+      - ./assemblyline-server/test-config.yaml:/etc/assemblyline/config.yml
+    working_dir: /usr/src
+    command: "sleep infinity"
     network_mode: "host"
     depends_on:
       redis:

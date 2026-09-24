@@ -1,4 +1,4 @@
-ARG build_image=rust:1.96-bookworm
+ARG build_image=rust:1.96-trixie
 FROM ${build_image} AS builder
 
 # Add more build tools
@@ -27,16 +27,16 @@ RUN ls -lah /out
 #  - pyo3
 #  - the python image here
 #  - the python package installed with api below
-FROM python:3.11 AS pybuilder
+FROM python:3.14 AS pybuilder
 RUN pip install --target /packages msoffcrypto-tool
 
 
 # Start over with an empty image
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 # Get required apt packages
 # libssl1.1 is already installed on this base image
-RUN apt-get update && apt-get install -yy ca-certificates libmagic1 libpython3.11 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -yy ca-certificates libmagic1 libpython3.14 && rm -rf /var/lib/apt/lists/*
 
 # copy in python packages from container that downloaded them
 COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/

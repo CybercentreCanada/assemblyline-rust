@@ -8,6 +8,12 @@ services:
     ports:
       - "9000:9000"
     command: server /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   azure:
     image: mcr.microsoft.com/azure-storage/azurite
@@ -23,3 +29,17 @@ services:
       - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
     ports:
       - "4566:4566"
+
+  cargo_test:
+    build:
+      context: ..
+      dockerfile: ./assemblyline-server/test.Dockerfile
+    volumes:
+      - ../:/usr/src/
+    working_dir: /usr/src/assemblyline-filestore
+    command: "cargo test --target-dir /out"
+    network_mode: "host"
+    depends_on:
+      minio:
+        condition: service_healthy
+

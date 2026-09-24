@@ -10,6 +10,15 @@ pool:
 #   # Try to checkout the matching branch, if the command fails, don't care.
 #   BRANCH_NAME: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
 
+resources:
+  repositories:
+    - repository: unittest-samples
+      type: github
+      name: $(unittest_samples_repository)
+      ref: main
+      endpoint: github-repo-sa
+      trigger: ["*"]
+
 jobs:
   # - job: test_client
   #   dependsOn: []
@@ -36,13 +45,13 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd assemblyline-filestore; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd assemblyline-filestore; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build cargo_test
         displayName: Test Filestore
+        workingDirectory: $(System.DefaultWorkingDirectory)/s/assemblyline-filestore
   - job: test_markings
     dependsOn: []
     displayName: Test Markings
@@ -79,6 +88,7 @@ jobs:
     displayName: Test Server
     steps:
       - checkout: self
+      - checkout: unittest-samples
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -86,13 +96,13 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd assemblyline-server; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd assemblyline-server; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build -e SAMPLES_LOCATION=/tmp/samples -v $SYSTEM_DEFAULTWORKINGDIRECTORY/unittest-samples:/tmp/samples cargo_test
         displayName: Test Server
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust/assemblyline-server
   - job: test_environment_template
     dependsOn: []
     displayName: Test Environment Template
@@ -123,10 +133,10 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd redis-objects; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd redis-objects; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build cargo_test
         displayName: Test Redis
+        workingDirectory: $(System.DefaultWorkingDirectory)/s/redis-objects

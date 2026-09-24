@@ -4,3 +4,19 @@ services:
     image: redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  cargo_test:
+    image: rust:1.96-trixie
+    volumes:
+      - ../:/usr/src/
+    working_dir: /usr/src/redis-objects
+    command: "cargo test --target-dir /out"
+    network_mode: "host"
+    depends_on:
+      redis:
+        condition: service_healthy
