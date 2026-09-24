@@ -50,6 +50,7 @@ services:
     build:
       context: ..
       dockerfile: ./assemblyline-server/test.Dockerfile
+      target: setup
     volumes:
       - ../:/usr/src/
       - ./test-config.yaml:/etc/assemblyline/config.yml
