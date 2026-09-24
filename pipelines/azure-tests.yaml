@@ -68,6 +68,7 @@ jobs:
           set -e
           docker run -v ${PWD}:/usr/src/ \
                      --network=host \
+                     -w /usr/src/ \
                      rust:1.96-trixie \
                      bash -c 'cd assemblyline-markings; cargo test --target-dir /out'
         displayName: Test Markings
@@ -118,6 +119,7 @@ jobs:
           set -e
           docker run -v ${PWD}:/usr/src/ \
                      --network=host \
+                     -w /usr/src/ \
                      rust:1.96-trixie \
                      bash -c 'cd environment_template; cargo test --target-dir /out'
         displayName: Test Environment Template
