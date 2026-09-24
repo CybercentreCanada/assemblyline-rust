@@ -40,6 +40,7 @@ jobs:
     displayName: Test Filestore
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -59,6 +60,7 @@ jobs:
     displayName: Test Markings
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -90,7 +92,9 @@ jobs:
     displayName: Test Server
     steps:
       - checkout: self
+        fetchDepth: 1
       - checkout: unittest-samples
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -110,6 +114,7 @@ jobs:
     displayName: Test Environment Template
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -128,6 +133,7 @@ jobs:
     displayName: Test Redis
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
