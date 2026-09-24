@@ -53,7 +53,7 @@ jobs:
           # Run cargo tests
           docker compose run --build cargo_test
         displayName: Test Filestore
-        workingDirectory: $(System.DefaultWorkingDirectory)/s/assemblyline-filestore
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-filestore
   - job: test_markings
     dependsOn: []
     displayName: Test Markings
@@ -66,10 +66,9 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker run -v ${PWD}:/usr/src/ \
                      --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     rust:1.96-trixie \
                      bash -c 'cd assemblyline-markings; cargo test --target-dir /out'
         displayName: Test Markings
   # - job: test_models
@@ -117,10 +116,9 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker run -v ${PWD}:/usr/src/ \
                      --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
+                     rust:1.96-trixie \
                      bash -c 'cd environment_template; cargo test --target-dir /out'
         displayName: Test Environment Template
   - job: test_redis
@@ -141,4 +139,4 @@ jobs:
           # Run cargo tests
           docker compose run --build cargo_test
         displayName: Test Redis
-        workingDirectory: $(System.DefaultWorkingDirectory)/s/redis-objects
+        workingDirectory: $(System.DefaultWorkingDirectory)/redis-objects
