@@ -6,9 +6,11 @@ pr: ["*"]
 pool:
   vmImage: "ubuntu-latest"
 
-# variables:
-#   # Try to checkout the matching branch, if the command fails, don't care.
-#   BRANCH_NAME: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
+variables:
+  - group: unittest-samples
+  # Try to checkout the matching branch, if the command fails, don't care.
+  - name: "BRANCH_NAME"
+    value: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''), 'main')]
 
 resources:
   repositories:
