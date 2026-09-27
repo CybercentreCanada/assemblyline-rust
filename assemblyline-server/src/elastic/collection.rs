@@ -23,7 +23,7 @@ use crate::elastic::{responses, DEFAULT_SEARCH_FIELD, KEEP_ALIVE};
 use super::bulk::TypedBulkPlan;
 use super::pit::PitGuard;
 use super::responses::DeleteResult;
-use super::{parse_sort, CopyMethod, ElasticError, ElasticHelper, Index, Request, Result, SortDirection, Version};
+use super::{mapping_for_backend, parse_sort, CopyMethod, ElasticError, ElasticHelper, Index, Request, Result, SortDirection, Version};
 use super::error::{ElasticErrorInner, WithContext};
 
 pub (super) const DEFAULT_SORT: &str = "_id asc";
@@ -80,6 +80,7 @@ impl<T: CollectionType> Collection<T> {
 
                 let mut mapping = assemblyline_models::meta::build_mapping::<T>().map_err(ElasticError::fatal)?;
                 mapping.apply_defaults();
+                let mapping = mapping_for_backend(&mapping, self.database.backend)?;
 
                 let body = json!({
                     "mappings": mapping,
@@ -289,6 +290,7 @@ impl<T: CollectionType> Collection<T> {
         for index in self.get_index_list(None)? {
             // self.with_retries(self.datastore.client.indices.put_mapping, index=index, properties=properties)
             let request = Request::put_index_mapping(&self.database.host, &index)?;
+            let properties = mapping_for_backend(&properties, self.database.backend)?;
             self.database.make_request_json(&mut 0, &request, &json!({
                 "properties": properties
             })).await?;
@@ -318,6 +320,7 @@ impl<T: CollectionType> Collection<T> {
                 //                 settings=self._get_index_settings(archive=archive))
                 let mut mapping = assemblyline_models::meta::build_mapping::<T>().map_err(ElasticError::fatal)?;
                 mapping.apply_defaults();
+                let mapping = mapping_for_backend(&mapping, self.database.backend)?;
 
                 let body = json!({
                     "mappings": mapping,

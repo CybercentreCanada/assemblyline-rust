@@ -21,6 +21,19 @@ services:
     ports:
       - "9200:9200"
 
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    profiles:
+      - opensearch
+    tmpfs:
+      - /usr/share/opensearch/data
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms1024m -Xmx1024m"
+    ports:
+      - "9201:9200"
+
   redis:
     image: redis
     ports:

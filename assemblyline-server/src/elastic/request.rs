@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use reqwest::Method;
-use super::{CopyMethod, Result};
+use super::{Backend, CopyMethod, Result};
 
 /// The header section and local parameters to a request to elasticsearch.
 /// 
@@ -176,8 +176,12 @@ impl Request {
         Ok(Self::new(Method::POST, host.join("_bulk")?, None))
     }
 
-    pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str) -> Result<Self> {
-        let mut url = host.join(&format!("{index}/_pit"))?;
+    pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str, backend: Backend) -> Result<Self> {
+        let path = match backend {
+            Backend::Elasticsearch => format!("{index}/_pit"),
+            Backend::Opensearch => format!("{index}/_search/point_in_time"),
+        };
+        let mut url = host.join(&path)?;
         url.query_pairs_mut().append_pair("keep_alive", keep_alive);
         Ok(Self::new(Method::POST, url, Some(index.to_owned())))
     }
@@ -214,8 +218,12 @@ impl Request {
         Ok(Self::new(Method::POST, url, None))
     }    
 
-    pub fn delete_pit(host: &reqwest::Url) -> Result<Self> {
-        Ok(Self::new(Method::DELETE, host.join("/_pit")?, None))
+    pub fn delete_pit(host: &reqwest::Url, backend: Backend) -> Result<Self> {
+        let path = match backend {
+            Backend::Elasticsearch => "/_pit",
+            Backend::Opensearch => "/_search/point_in_time",
+        };
+        Ok(Self::new(Method::DELETE, host.join(path)?, None))
     }
 
     pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url, index: String) -> Self {
