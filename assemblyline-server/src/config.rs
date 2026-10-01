@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use log::info;
 
+// fallback CA path
+const DEFAULT_ROOT_CA_PATH: &str = "/etc/assemblyline/ssl/al_root-ca.crt";
 
 /// Information server can use to configure its tls binding
 #[derive(Debug, Clone)]
@@ -49,7 +51,16 @@ async fn load_file(direct_key: &str, path_key: &str) -> Result<Option<String>> {
 }
 
 pub async fn get_cluster_ca_cert() -> Result<Option<String>> {
-    load_file("CLUSTER_CA_CERT", "CLUSTER_CA_CERT_PATH").await
+    if let Some(ca) = load_file("CLUSTER_CA_CERT", "CLUSTER_CA_CERT_PATH").await? {
+        return Ok(Some(ca))
+    }
+    // Fall back to legacy hardcoded defaults
+    if tokio::fs::try_exists(DEFAULT_ROOT_CA_PATH).await? {
+        info!("Loading CLUSTER_CA_CERT from {DEFAULT_ROOT_CA_PATH}");
+        Ok(Some(tokio::fs::read_to_string(DEFAULT_ROOT_CA_PATH).await?))
+    } else {
+        Ok(None)
+    }
 }
 
 pub async fn get_dispatcher_ca() -> Result<Option<String>> {
