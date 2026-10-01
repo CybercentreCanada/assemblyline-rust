@@ -297,6 +297,7 @@ dependencies = [
  "russh",
  "russh-sftp",
  "rustls 0.21.12",
+ "rustls-native-certs 0.6.3",
  "safe-path",
  "sha2 0.10.9",
  "suppaftp",
