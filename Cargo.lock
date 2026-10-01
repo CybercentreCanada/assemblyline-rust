@@ -294,6 +294,7 @@ dependencies = [
  "russh",
  "russh-sftp",
  "rustls 0.21.12",
+ "rustls-native-certs 0.6.3",
  "safe-path",
  "sha2 0.10.9",
  "suppaftp",
@@ -4946,15 +4947,16 @@ dependencies = [
  "combine",
  "futures-util",
  "itoa",
- "native-tls",
  "num-bigint",
  "percent-encoding",
  "pin-project-lite",
+ "rustls 0.23.40",
+ "rustls-native-certs 0.8.3",
  "ryu",
  "sha1_smol",
  "socket2 0.6.4",
  "tokio",
- "tokio-native-tls",
+ "tokio-rustls 0.26.4",
  "tokio-util",
  "url",
  "xxhash-rust",
@@ -4962,7 +4964,7 @@ dependencies = [
 
 [[package]]
 name = "redis-objects"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "bb8",
  "chrono",
