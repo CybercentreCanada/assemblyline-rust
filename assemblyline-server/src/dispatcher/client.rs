@@ -299,7 +299,7 @@ impl DispatchClient {
 //         self.dead_dispatchers = []
 
         let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
-        match crate::config::get_cluster_ca_cert().await? {
+        match crate::config::get_dispatcher_ca().await? {
             Some(cert) => {
                 let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
                 http_client = http_client.add_root_certificate(cert);
