@@ -119,7 +119,7 @@ jobs:
           git checkout -b $BRANCH_NAME -t origin/$BRANCH_NAME || true
           git status
         displayName: Checkout branch
-        workingDirectory: $(System.DefaultWorkingDirectory)/unittest-samples
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-unittest-samples
 
       - task: Docker@2
         displayName: Login to docker registry
