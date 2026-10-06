@@ -6,7 +6,7 @@ use uuid::uuid;
 
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
-pub const MAGIC_PATTERNS: [(&str, &str); 101] = [
+pub const MAGIC_PATTERNS: [(&str, &str); 102] = [
     ("network/tnef", "Transport Neutral Encapsulation Format"),
     ("archive/chm", "MS Windows HtmlHelp Data"),
     ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
@@ -24,6 +24,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 101] = [
     ("executable/windows/ia/pe64", "pe32\\+?[^\\|]+Intel Itanium[^\\|]+windows"),
     ("executable/windows/arm/dll64", "pe32\\+?[^\\|]+dll[^\\|]+Aarch64[^\\|]+windows"),
     ("executable/windows/arm/pe64", "pe32\\+?[^\\|]+Aarch64[^\\|]+windows"),
+    ("executable/windows/pe64", "pe with unknown[^\\|]+windows[^\\|]+x86-64"),
     ("executable/windows/pe", "pe unknown[^\\|]+windows"),
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L183
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L185
