@@ -1,0 +1,144 @@
+version: "2.4"
+
+services:
+  minio:
+    image: minio/minio
+    environment:
+      MINIO_ROOT_USER: al_storage_key
+      MINIO_ROOT_PASSWORD: Ch@ngeTh!sPa33w0rd
+    ports:
+      - "9000:9000"
+    command: server /data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.3
+    ports:
+      - "5601:5601"
+    volumes:
+      - ${PATH_REWRITE:-.}/config/kibana.docker.yml:/usr/share/kibana/config/kibana.yml:ro
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    environment:
+      - ELASTIC_PASSWORD=devpass
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --silent --fail -u elastic:$$ELASTIC_PASSWORD http://localhost:5601/kibana" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    profiles:
+      - full
+  apm_server:
+    image: docker.elastic.co/apm/apm-server:8.19.3
+    volumes:
+      - ${PATH_REWRITE:-.}/config/apm-server.docker.yml:/usr/share/apm-server/apm-server.yml:ro
+    command: /bin/bash -c "/usr/local/bin/docker-entrypoint -e --strict.perms=false"
+    ports:
+      - "8200:8200"
+    depends_on:
+      # kibana:
+      elasticsearch:
+        condition: service_healthy
+    profiles:
+      - full
+  setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.3
+    environment:
+      - ELASTIC_PASSWORD=devpass
+      - KIBANA_PASSWORD=kibanapass
+    command: >
+      bash -c '
+        until curl  http://elastic:$$ELASTIC_PASSWORD@elasticsearch:9200 | grep -q "You Know, for Search"; do sleep 2; echo "Elastic not ready"; done;
+        curl -q -X POST -H "Content-Type: application/json" http://elastic:$$ELASTIC_PASSWORD@elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"$$KIBANA_PASSWORD\"}";
+      '
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles:
+      - full
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.3
+    environment:
+      - xpack.security.enabled=true
+      - discovery.type=single-node
+      - logger.level=WARN
+      - ELASTIC_PASSWORD=devpass
+      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+      - "cluster.routing.allocation.disk.watermark.low=10gb"
+      - "cluster.routing.allocation.disk.watermark.high=5gb"
+      - "cluster.routing.allocation.disk.watermark.flood_stage=1gb"
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --silent --fail -u elastic:$$ELASTIC_PASSWORD localhost:9200/_cluster/health || exit 1" ]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.19.3
+    user: root
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${PATH_REWRITE:-.}/config/filebeat.docker.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ${PATH_REWRITE:-.}/config/filebeat_policy.json:/usr/share/filebeat/filebeat_policy.json:ro
+    command: filebeat -e --strict.perms=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles:
+      - full
+
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:8.19.3
+    user: root
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${PATH_REWRITE:-.}/config/metricbeat.docker.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - ${PATH_REWRITE:-.}/config/metricbeat_policy.json:/usr/share/metricbeat/metricbeat_policy.json:ro
+    command: metricbeat -e --strict.perms=false
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    profiles:
+      - full
+
+  redis:
+    image: redis
+    ports:
+      - "6379:6379"
+      - "6380:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: cccs/nginx-ssl-frontend:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - FRONTEND_HOST=172.17.0.1
+      - UI_HOST=172.17.0.1
+      - SOCKET_HOST=172.17.0.1
+      - MCP_HOST=172.17.0.1
+      - KIBANA_HOST=172.17.0.1
+      - FQDN=localhost
+      - MAX_BODY_SIZE=100M
+
+  dev:
+    build: 
+      dockerfile: Dockerfile      
+
+networks:
+  default:
+    name: external
