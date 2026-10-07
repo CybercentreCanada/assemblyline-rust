@@ -3,13 +3,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use assemblyline_client::TLSSettings;
 use assemblyline_models::Sha256;
 use clap::{Args, Parser};
 use expanduser::expanduser;
 use rand::Rng;
 use serde_json::json;
 use sha2::Digest;
+use assemblyline_utilities::{connection::{self, Connection, ServerType}, types::{authentication::Authentication, errors::ApiClientError}};
 
 
 #[derive(Debug, Parser)]
@@ -58,7 +58,7 @@ struct Cli {
     /// Set the 'never_drop' submission parameter, disables some safety checks
     #[arg(long, default_value_t=false)]
     never_drop: bool,
-    
+
     /// Path to the config file
     #[arg(short, long)]
     config: Option<String>,
@@ -112,13 +112,15 @@ async fn main() {
             verify: args.secure_connection.unwrap_or(true),
         }
     };
-    
+
     // ----------------------------------------------------
     // Connect to the AL server
-    let connection = assemblyline_client::Connection::connect(
-        config.host, 
-        assemblyline_client::Authentication::ApiKey { username: config.username, key: config.apikey }, 
-        args.retries, 
+    let connection = Connection::connect(
+        config.host,
+        ServerType::AssemblylineUiServer,
+        true,
+        Authentication::ApiKey { username: config.username, key: config.apikey },
+        args.retries,
         if config.verify {
             TLSSettings::Native
         } else {
@@ -139,7 +141,7 @@ async fn main() {
         match result {
             Ok(Ok(id)) => println!("{id}"),
             Ok(Err(inner_error)) => println!("Error: {inner_error}"),
-            Err(join_error) => panic!("{join_error}"), 
+            Err(join_error) => panic!("{join_error}"),
         }
     };
 
@@ -149,7 +151,7 @@ async fn main() {
 
         async move {
             for _ in 0..args.repeats.unwrap_or(1) {
-        
+
                 if let Some(path) = &args.target.file {
                     enqueue.send(prepare_path(args.as_sha256, path).await.unwrap()).await.unwrap();
                 } else if let Some(hash) = &args.target.sha {
@@ -173,7 +175,7 @@ async fn main() {
                 } else {
                     panic!("A target file must be specified");
                 };
-            }    
+            }
         }
     });
 
@@ -253,7 +255,7 @@ async fn ingest_file(client: Arc<assemblyline_client::Client>, target: Target, a
         Target::Path(path) => builder.path(&path).await,
         Target::Hash(sha256) => builder.sha256(sha256).await,
     };
-        
+
     result.map(|result| result.ingest_id).map_err(|err|err.to_string())
 }
 

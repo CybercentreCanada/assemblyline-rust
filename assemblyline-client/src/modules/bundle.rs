@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
+use assemblyline_utilities::connection::{Body, Connection, convert_api_output_map, convert_output_stream};
+
 use crate::JsonMap;
-use crate::connection::{Connection, convert_api_output_stream, Body, convert_api_output_map};
 use crate::types::{Error, IBool};
 
 use super::api_path;
@@ -29,7 +30,6 @@ impl Bundle {
     /// use_alert  : The ID provided is an alert ID and will be used for bundle creation. (bool)
     /// If output is not specified the content is returned by the function
     pub async fn create(self, sid: &str, use_alert: bool) -> Result<impl futures::Stream, Error> {
-        let path = api_path!(BUNDLE_PATH, sid);
 
         let params = if use_alert {
             vec![("use_alert".to_string(), "".to_string())]
@@ -37,7 +37,8 @@ impl Bundle {
             Default::default()
         };
 
-        return self.connection.get_params(&path, params, convert_api_output_stream).await
+        let url = self.connection.get_server_path(&api_path!(BUNDLE_PATH, sid))?;
+        return Ok(self.connection.get_params(url, params, None, convert_output_stream).await?)
 
 //         if output:
 //             return self._connection.download(path, stream_output(output))
@@ -53,15 +54,14 @@ impl Bundle {
     // min_classification  : Minimum classification at which the bundle is imported. (string)
     // rescan_services     : List of services to rescan after import. (Comma seperated strings)
     // Returns {'success': True/False } depending if it was imported or not
-    pub async fn import_bundle(&self, 
-        bundle: impl Into<reqwest::Body>, 
-        min_classification: Option<String>, 
-        rescan_services: Option<Vec<String>>, 
-        exist_ok: impl IBool, 
-        allow_incomplete: impl IBool, 
+    pub async fn import_bundle(&self,
+        bundle: impl Into<reqwest::Body>,
+        min_classification: Option<String>,
+        rescan_services: Option<Vec<String>>,
+        exist_ok: impl IBool,
+        allow_incomplete: impl IBool,
         _complete_queue: Option<String>
     ) -> Result<JsonMap, Error> {
-        let path = api_path!(BUNDLE_PATH);
 
         let exist_ok = exist_ok.into().unwrap_or(false);
         let allow_incomplete = allow_incomplete.into().unwrap_or(false);
@@ -80,7 +80,8 @@ impl Bundle {
             params.push(("allow_incomplete".to_string(), "".to_string()));
         }
 
-        self.connection.post_params(&path, Body::<()>::Prepared(bundle.into()), params, convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(BUNDLE_PATH))?;
+        return Ok(self.connection.post_params(url, Body::<()>::Prepared(bundle.into()), params, None, convert_api_output_map).await?)
 //         return self._connection.post(api_path('bundle', **kw), data=contents)
     }
 }

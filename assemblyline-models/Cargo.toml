@@ -36,6 +36,7 @@ rand = { version = "0.10", optional = true }
 log = "0.4"
 
 internment = { version = "0.8", features = ["serde", "arc"]}
+anyhow = "1.0.102"
 
 # tokio = { version = "1", features = ["full"], optional = true }
 
