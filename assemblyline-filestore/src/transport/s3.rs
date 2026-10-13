@@ -3,14 +3,15 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_credential_types::provider::ProvideCredentials;
 use bytes::Bytes;
-use log::{warn, debug};
+use legacy_rustls::ClientConfig;
+use log::{debug, info, warn};
 
 use super::Transport;
 
@@ -42,6 +43,10 @@ use super::Transport;
 // This class assumes a flat file structure in the S3 bucket.  This is due to the way the AL datastore currently handles
 // file paths for local/ftp datastores not playing nicely with s3 constraints.
 // """
+
+// Default path to the Redis root CA certificate for TLS connections
+const DEFAULT_ROOT_CA_PATH: &str = "/etc/assemblyline/ssl/al_root-ca.crt";
+const CA_PATH_ENV_NAME: &str = "FILESTORE_ROOT_CA_PATH";
 
 
 const DEFAULT_HOST: &str = "s3.amazonaws.com";
@@ -125,9 +130,66 @@ impl TransportS3 {
             use legacy_hyper_rustls as hyper_rustls;
             use legacy_rustls as rustls;
 
+            fn with_native_roots() -> Result<rustls::RootCertStore> {
+                let mut roots = rustls::RootCertStore::empty();
+                let mut valid_count = 0;
+                let mut invalid_count = 0;
+
+                for cert in rustls_native_certs::load_native_certs().context("could not load platform certs")?
+                {
+                    let cert = rustls::Certificate(cert.0);
+                    match roots.add(&cert) {
+                        Ok(_) => valid_count += 1,
+                        Err(err) => {
+                            debug!("certificate parsing failed: {:?}", err);
+                            invalid_count += 1
+                        }
+                    }
+                }
+                info!(
+                    "with_native_roots processed {} valid and {} invalid certs",
+                    valid_count,
+                    invalid_count
+                );
+                assert!(!roots.is_empty(), "no CA certificates found");
+
+                Ok(roots)
+            }
+
             let https_connector = if parameters.verify {
+
+                let mut root_store = with_native_roots()?;
+
+                let ca_path = match std::env::var(CA_PATH_ENV_NAME) {
+                    // if a path is configured it is required
+                    Ok(path) => Some(path),
+                    // if no path is configured, the default file is used if found, if found it must be valid
+                    Err(std::env::VarError::NotPresent) => {
+                        if std::fs::exists(DEFAULT_ROOT_CA_PATH).unwrap_or(false) {
+                            Some(DEFAULT_ROOT_CA_PATH.to_string())
+                        } else {
+                            None
+                        }
+                    },
+                    Err(std::env::VarError::NotUnicode(_)) => {
+                        anyhow::bail!("Could not read environment variable: {CA_PATH_ENV_NAME}")
+                    }
+                };
+
+                if let Some(ca_path) = ca_path {
+                    let cert_body = tokio::fs::read(ca_path).await?;
+                    let cert = rustls::Certificate(cert_body);
+                    root_store.add(&cert).context("Could not add configured root CA")?;
+                }
+
+                let tls_config = ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth();
+
                 hyper_rustls::HttpsConnectorBuilder::new()
-                    .with_native_roots()
+                    // .with_native_roots()
+                    .with_tls_config(tls_config)
                     .https_or_http()
                     .enable_http1()
                     .enable_http2()
@@ -189,7 +251,7 @@ impl TransportS3 {
         if parameters.debug{
             debug!("Credential provider for '{}': {:?} ", &endpoint_url, sdk_config.credentials_provider().expect("credentials provider from sdk_config").provide_credentials().await?);
         }
-        
+
         let s3_builder = if parameters.compatability {
             aws_sdk_s3::config::Builder::from(&sdk_config)
                 .force_path_style(true)
@@ -198,7 +260,7 @@ impl TransportS3 {
         } else {
             aws_sdk_s3::config::Builder::from(&sdk_config)
         };
-        
+
         // Set the endpoint URL and build the S3 configuration for the client
         let s3_config = s3_builder.endpoint_url(endpoint_url).build();
 

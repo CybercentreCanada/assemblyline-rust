@@ -40,6 +40,9 @@ pub mod set;
 /// maximum exponent over 2 used in the retry loop
 pub const BACKOFF_MAXIMUM: f64 = 3.0;
 
+// Default path to the Redis root CA certificate for TLS connections
+const DEFAULT_REDIS_ROOT_CA_PATH: &str = "/etc/assemblyline/ssl/al_root-ca.crt";
+
 /// Handle for a pool of connections to a redis server.
 pub struct RedisObjects {
     pool: bb8::Pool<redis::Client>,
@@ -97,7 +100,35 @@ impl RedisObjects {
             .set_nodelay(true);
         let config = config.set_tcp_settings(settings);
 
-        let client = redis::Client::open(config)?;
+        // Get the path to the root CA certificate for TLS connections
+        let path_variable = format!("{}_ROOT_CA_PATH", hostname.to_uppercase());
+        let ca_path = match std::env::var(&path_variable) {
+            // if a path is configured it is required
+            Ok(path) => Some(path),
+            // if no path is configured, the default file is used if found, if found it must be valid
+            Err(std::env::VarError::NotPresent) => {
+                if std::fs::exists(DEFAULT_REDIS_ROOT_CA_PATH).unwrap_or(false) {
+                    Some(DEFAULT_REDIS_ROOT_CA_PATH.to_string())
+                } else {
+                    None
+                }
+            },
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(ErrorTypes::Configuration(format!("Could not read environment variable: {path_variable}")))
+            }
+        };
+
+        let client = if let Some(ca_path) = ca_path {
+            // If the custom CA exists, constuct the client using TLS
+            debug!("Using mounted trust-store for Redis host [{}]: {}", hostname, ca_path);
+            redis::Client::build_with_tls(config, redis::TlsCertificates {
+                root_cert: Some(std::fs::read(&ca_path).unwrap()),
+                client_tls: None,
+            })?
+        } else {
+            // Otherwise, fallback to using the default client constructor
+            redis::Client::open(config)?
+        };
 
         // configuration for the pool manager itself
         let pool = bb8::Pool::builder()
@@ -299,6 +330,9 @@ pub enum ErrorTypes {
     /// Encoding or decoding issue
     #[error("Encoding issue with message: {0}")]
     Serde(serde_json::Error),
+    /// Any other error during any sort of setup or configuration parsing
+    #[error("Issue with configuration: {0}")]
+    Configuration(String),
 }
 
 impl ErrorTypes {
