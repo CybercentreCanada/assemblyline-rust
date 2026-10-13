@@ -483,7 +483,7 @@ fn default_description() -> Text {
 fn default_stage() -> String {
     "CORE".to_owned()
 }
-fn default_timeout() -> i32 {
+pub fn default_timeout() -> i32 {
     60
 }
 fn default_update_channel() -> ChannelKinds {

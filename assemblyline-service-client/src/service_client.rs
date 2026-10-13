@@ -1,5 +1,11 @@
 use std::{
-    collections::HashMap, ffi::CString, fs, io::{ErrorKind, Read, Write}, path::{Path, PathBuf}, sync::Arc,
+    collections::HashMap,
+    ffi::CString,
+    fs,
+    io::{ErrorKind, Read, Write},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -50,6 +56,7 @@ pub struct ServiceClient {
     file_required: bool,
 
     pub service_info: ServiceInfo,
+    service_timeout: i32,
 
     manifest_file_path: String,
     service_heuristics: Vec<Heuristic>,
@@ -202,6 +209,8 @@ impl ServiceClient {
             runtime_prefix: runtime_prefix.to_owned(),
 
             service_info: service_manifest.service,
+            // service_timeout will be updated again when register with service server.
+            service_timeout: assemblyline_models::datastore::service::default_timeout(),
 
             manifest_file_path: runtime_manifest_path.to_string_lossy().to_string(),
             file_required: service_manifest.file_required,
@@ -271,10 +280,13 @@ impl ServiceClient {
         let done_receiver = pipe::OpenOptions::new().open_receiver(self.done_fifo_path.clone())?;
         let mut open_sender = pipe::OpenOptions::new().open_sender(self.task_fifo_path.clone());
 
-        while open_sender.is_err() {
-            debug!("Cannot find task sender pipe... waiting for reader");
+        let mut retry = 0;
+        // retry opening sender pipe for a minute or fail.
+        while open_sender.is_err() && retry < 15 {
+            debug!("Cannot find task sender pipe... waiting for reader. Retry #{}", retry);
             tokio::time::sleep(tokio::time::Duration::from_secs_f64(4.0)).await;
             open_sender = pipe::OpenOptions::new().open_sender(self.task_fifo_path.clone());
+            retry += 1;
         }
 
         debug!("Service server finished setting up fifo queues.");
@@ -310,6 +322,8 @@ impl ServiceClient {
             file_required: self.file_required,
             heuristics: self.service_heuristics.clone(),
         };
+
+        self.service_timeout = updated_manifest.service.timeout;
 
         let mut manifest_file = File::create(&self.manifest_file_path).await?;
         let manifest_data = serde_yaml::to_string(&updated_manifest).unwrap();
@@ -383,7 +397,7 @@ impl ServiceClient {
                             .upload_task_error(&task, &self.service_info, &self.connection, Some(error_json), None, None, None)
                             .await;
                     }
-                    _ => return Err(ServiceClientError::Default(format!("Unknown task done status {}", status))),
+                    _ => return Err(ServiceClientError::Default(format!("Unknown task done status from done pipe {}", status))),
                 }
             }
             None => return Err(ServiceClientError::Default(format!("Did not get task done status from service."))),
@@ -441,13 +455,20 @@ impl ServiceClient {
     async fn read_result_from_fifo(&self, fifo_pipes: &mut TaskFifoPipes, service_process: &mut Child) -> Result<Vec<String>, ServiceClientError> {
         // wait for service to process task and listening for notification from the done fifo
         tokio::select! {
-            _ = fifo_pipes.done_fifo.readable() => {
-                debug!("Done fifo is ready to read.");
+            pipe_timeout = tokio::time::timeout( Duration::from_secs(self.service_timeout as u64), fifo_pipes.done_fifo.readable()) => {
+                match pipe_timeout {
+                    Ok(_) => debug!("Done fifo is ready to read."),
+                    Err(_) => {
+                        // kill service process because it is taking too long to process the file.
+                        let _ = service_process.start_kill();
+                        return Err(ServiceClientError::PipeReadError { pipe_name: DONE_FIFO_NAME.to_owned(), message: format!("Read result pipe timeout at {} seconds.", self.service_timeout) });
+                    },
+                };
             },
 
             status_code = service_process.wait() => {
                 log_error!("Service process terminated with status code: {:?}", status_code);
-                return Err(ServiceClientError::PipeWriteError { pipe_name: DONE_FIFO_NAME.to_owned(), message: format!("Service process terminated with status code: {:?}", status_code) });
+                return Err(ServiceClientError::PipeReadError { pipe_name: DONE_FIFO_NAME.to_owned(), message: format!("Service process terminated with status code: {:?}", status_code) });
             }
         }
 
@@ -456,7 +477,7 @@ impl ServiceClient {
             .done_fifo
             .ready(Interest::READABLE)
             .await
-            .map_err(|e| ServiceClientError::PipeWriteError {
+            .map_err(|e| ServiceClientError::PipeReadError {
                 pipe_name: DONE_FIFO_NAME.to_owned(),
                 message: e.to_string(),
             })?;
@@ -474,7 +495,7 @@ impl ServiceClient {
                             return Ok(v);
                         }
                         Err(err) => {
-                            return Err(ServiceClientError::PipeWriteError {
+                            return Err(ServiceClientError::PipeReadError {
                                 pipe_name: DONE_FIFO_NAME.to_owned(),
                                 message: format!("Unknown message format received from done fifo. Err: {}", err),
                             });
@@ -488,7 +509,7 @@ impl ServiceClient {
                     tokio::time::sleep(tokio::time::Duration::from_secs_f64(1.0)).await;
                 }
                 Err(err) => {
-                    return Err(ServiceClientError::PipeWriteError {
+                    return Err(ServiceClientError::PipeReadError {
                         pipe_name: DONE_FIFO_NAME.to_owned(),
                         message: err.to_string(),
                     });

@@ -30,7 +30,7 @@ use tokio::{
 use url::Url;
 
 use crate::{
-    constants::{RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE},
+    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE},
     service_client::ServiceClient,
     service_launcher::ServiceLauncher,
     task_fetcher::single_thread_task_fetcher::SingleThreadTaskFetcher,
@@ -48,6 +48,7 @@ use crate::{
 };
 
 pub const TESTING_PREFIX: &str = "test";
+pub const TEST_PIPE_READ_TIMEOUT: i32 = 10;
 
 #[derive(Clone, Debug)]
 pub struct RegisterServiceData {
@@ -244,6 +245,7 @@ async fn download_file(poem::web::Path(_sha256): poem::web::Path<String>) -> Res
 async fn make_run_service_data(base_folder: String, file_required: bool) -> (ServiceManifest, Service, Task) {
     let mut base_manifest: ServiceManifest = rand::rng().random();
     base_manifest.file_required = file_required;
+    base_manifest.service.timeout = TEST_PIPE_READ_TIMEOUT;
     let base_service = base_manifest.service.clone();
     let manifest_path = Path::new(&base_folder).join("service_manifest.yml");
 
@@ -410,7 +412,9 @@ async fn test_register_service_no_extra_data() {
     // after register with the service, the runtime manifest is updated.
     let _ = sc.register_service().await.expect("Register service should pass.");
 
-    let updated_runtime_manifest_data = read_to_string(&runtime_manifest_path).await.expect("Should be able to read runtime manifest data.");
+    let updated_runtime_manifest_data = read_to_string(&runtime_manifest_path)
+        .await
+        .expect("Should be able to read runtime manifest data.");
 
     let actual_manifest_data: serde_yaml::Value = serde_yaml::from_str(&updated_runtime_manifest_data).unwrap();
 
@@ -420,7 +424,6 @@ async fn test_register_service_no_extra_data() {
     assert!(actual_manifest_data.get("update_channel").is_some());
     assert!(actual_manifest_data.get("recursion_prevention").is_some());
     assert!(actual_manifest_data.get("timeout").is_some());
-
 }
 
 #[tokio::test]
@@ -686,6 +689,83 @@ async fn test_run_service_write_task_pipe() {
     let task_dir_iterator = task_dir_path.read_dir().expect("Should be able to read from tasking dir.");
     // everything should be deleted except for the test service manifest file
     assert_eq!(task_dir_iterator.count(), 1)
+}
+
+#[tokio::test]
+async fn test_read_done_pipe_timeout() {
+    init();
+    let tasking_dir = tempfile::tempdir().unwrap();
+    let tasking_dir_string = tasking_dir.path().to_string_lossy().to_string();
+
+    let (_, base_service, task) = make_run_service_data(tasking_dir_string.clone(), true).await;
+
+    let num_upload_called = Arc::new(Mutex::new(0));
+
+    let result_value = ErrorBody {
+        sha256: task.fileinfo.sha256.clone(),
+        error_type: UNKNOWN_SERVICE_ERROR_TYPE.to_string(),
+        response: ErrorResponse {
+            message: DEFAULT_SERVICE_ERROR_MESSAGE.to_string(),
+            service_name: base_service.name.clone(),
+            service_version: base_service.version.clone(),
+            service_tool_version: None,
+            status: RECOVERABLE_ERROR_STATUS.to_string(),
+        },
+    };
+
+    let (port, _) = MockServiceServer::launch_with_custom_endpoints(run_service_api(RunServiceData {
+        service: base_service.clone(),
+        task: Some(task.clone()),
+        num_get_task_called: Arc::new(Mutex::new(0)),
+        num_upload_called: num_upload_called.clone(),
+        upload_value: serde_json::to_value(&result_value).expect("Result should serialize."),
+        task_done_success: false,
+    }))
+    .await
+    .unwrap();
+    let service_api_address: String = format!("http://localhost:{}", port).to_string();
+
+    //  build a test core
+    let sc_running = Arc::new(Mutex::new(true));
+
+    let mut sc = make_test_service_client(sc_running.clone(), service_api_address, tasking_dir_string.clone(), None).await;
+
+    // different possible service client modes.
+    let mut task_fetcher = SingleThreadTaskFetcher {};
+    let task_uploader = TaskUploader {};
+    let service_launcher = DoNothingServiceLauncher {};
+
+    let handler = tokio::spawn(async move {
+        return sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
+    });
+
+    let task_fifo_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_task.fifo"))
+        .to_string_lossy()
+        .to_string();
+    let done_fifo_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_done.fifo"))
+        .to_string_lossy()
+        .to_string();
+    let service_ready_path = Path::new(&tasking_dir_string)
+        .join(format!("{TESTING_PREFIX}_ready"))
+        .to_string_lossy()
+        .to_string();
+
+    // start the task fifo setup process
+    let _fifo_pipes = MockService::setup_fifo(&task_fifo_path, &done_fifo_path)
+        .await
+        .expect("Setup FIFO pipe should pass.");
+    // create service ready file so that service handler can continue
+    let _ = tokio::fs::File::create(&service_ready_path).await;
+
+    // The service client should get a task at this point, write to the task pipe and is waiting to read done fifo pipe.
+
+    // wait till timeout and see if service client terminates.
+    tokio::time::sleep(tokio::time::Duration::from_secs_f64((TEST_PIPE_READ_TIMEOUT + 5) as f64)).await;
+    let _ = handler.await;
+
+    assert!(*num_upload_called.lock() == 1, "Service client should call upload task exactly 1 time.");
 }
 
 #[tokio::test]
