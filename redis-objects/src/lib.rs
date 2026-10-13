@@ -334,6 +334,14 @@ pub trait Iusize: Into<Option<usize>> + Copy {}
 impl<T: Into<Option<usize>> + Copy> Iusize for T {}
 
 
+/// Minimum timeout in seconds for blocking Redis operations (BLPOP, BZPOPMIN, etc.).
+///
+/// Redis versions prior to 7.0.15 / 7.2.3 treat sub-millisecond blocking command
+/// timeouts as an indefinite block (see redis/redis#11688, commit eef29b68a2cd).
+/// This floor prevents sub-ms values from reaching the server while preserving
+/// zero = infinite for callers such as `dispatcher::client::request_work`.
+pub const MIN_BLOCKING_TIMEOUT: f64 = 0.01;
+
 macro_rules! retry_call_timeout {
     ($pool:expr, $method:ident, $timeout:expr, $($args:expr),+) => {
         {
@@ -344,12 +352,20 @@ macro_rules! retry_call_timeout {
                 let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                if $timeout == 0.0 {
+                let timeout: f64 = $timeout;
+                let safe_timeout = if timeout == 0.0 {
+                    // zero means indefinite, already handled below
+                    timeout
+                } else {
+                    // floor sub-ms timeouts to avoid Redis7.0.x indefinite-block bug
+                    timeout.max(crate::MIN_BLOCKING_TIMEOUT)
+                };
+                if safe_timeout == 0.0 {
                     con.set_response_timeout(Duration::from_mins(60 * 24));
                 } else {
-                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
+                    con.set_response_timeout(Duration::from_secs_f64(safe_timeout + 60.0));
                 }
-                retry_call!(handle_output, $method, con.$method($($args,)+ $timeout).await, exponent)
+                retry_call!(handle_output, $method, con.$method($($args,)+ safe_timeout).await, exponent)
             }
         }
     };
@@ -363,10 +379,18 @@ macro_rules! retry_call_timeout {
                 let mut con = retry_call!(get_connection, $method, $pool, exponent);
 
                 // execute the method given with the argments specified
-                if $timeout == 0.0 {
+                let timeout: f64 = $timeout;
+                let safe_timeout = if timeout == 0.0 {
+                    // zero means indefinite, already handled below
+                    timeout
+                } else {
+                    // floor sub-ms timeouts to avoid Redis7.0.x indefinite-block bug
+                    timeout.max(crate::MIN_BLOCKING_TIMEOUT)
+                };
+                if safe_timeout == 0.0 {
                     con.set_response_timeout(Duration::from_mins(60 * 24));
                 } else {
-                    con.set_response_timeout(Duration::from_secs_f64($timeout + 60.0));
+                    con.set_response_timeout(Duration::from_secs_f64(safe_timeout + 60.0));
                 }
                 retry_call!(handle_output, $method, $obj.$method(&mut *con).await, exponent)
             }
@@ -917,5 +941,101 @@ pub (crate) mod test {
 //     finally:
 //         watcher.stop()
 
+    /// Regression: sub-ms BLPOP timeouts on an EMPTY queue must return quickly
+    /// (~10ms floor) rather than blocking indefinitely (Redis <7.0.15 /
+    /// <7.2.3 bug redis#11688). Non-empty queues return immediately regardless
+    /// of timeout, so this test deliberately drains the queue first.
+    #[tokio::test]
+    async fn test_blocking_timeout_floor_regression_bits_ut() {
+        init();
+        let redis = redis_connection().await;
+        let q = redis.queue::<String>("test-timeout-regression".to_owned(), None);
+        q.delete().await.unwrap();
+
+        // Drain the queue to ensure it's empty. pop_timeout on a non-empty queue
+        // returns immediately regardless of the timeout value.
+        let start = std::time::Instant::now();
+
+        // 20us is well below the 10ms minimum floor. Without the patch this would
+        // hang indefinitely on Redis 7.0.7 when the queue is empty.
+        let result = q.pop_timeout(std::time::Duration::from_micros(20)).await;
+
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok(), "pop_timeout should succeed: {:?}", result);
+        assert!(result.unwrap().is_none(), "empty queue pop_timeout should return None");
+
+        // Elapsed >= 10ms (our floor). Allow some overhead.
+        assert!(
+            elapsed >= std::time::Duration::from_millis(5),
+            "elapsed={:?} - expected at least ~10ms due to timeout floor",
+            elapsed
+        );
+    }
+
+    /// Verify normal timeout behavior is unchanged: a 100ms empty-queue pop
+    /// returns None after ~100ms (not sub-ms, not infinite).
+    #[tokio::test]
+    async fn test_blocking_timeout_normal_returns_none_bits_ut() {
+        init();
+        let redis = redis_connection().await;
+        let q = redis.queue::<String>("test-timeout-normal".to_owned(), None);
+        q.delete().await.unwrap();
+
+        let start = std::time::Instant::now();
+
+        // With a 100ms timeout on an empty queue, BLPOP should return None
+        // after about 100ms.
+        let result = q.pop_timeout(std::time::Duration::from_millis(100)).await;
+
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok(), "pop_timeout should succeed: {:?}", result);
+        assert!(result.unwrap().is_none(), "empty queue pop_timeout should return None");
+
+        // Should be around 100ms. The floor only affects sub-10ms timeouts.
+        assert!(
+            elapsed >= std::time::Duration::from_millis(80),
+            "elapsed={:?} - expected >80ms for 100ms timeout",
+            elapsed
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "elapsed={:?} - expected <5s, got indefinite block?",
+            elapsed
+        );
+    }
+
+    /// Zero timeout means infinite, and must NOT be floored to 10ms.
+    #[tokio::test]
+    async fn test_blocking_timeout_zero_is_infinite_bits_ut() {
+        init();
+        let redis = redis_connection().await;
+        let q = redis.queue::<String>("test-timeout-zero".to_owned(), None);
+        q.delete().await.unwrap();
+
+        // With zero=infinite on an empty queue, this would block forever.
+        // We race it: spawn a pusher after 100ms and verify the pop returns
+        // the pushed item rather than None from a 10ms floor.
+        let q2 = q.clone();
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            q2.push(&"pushed".to_owned()).await.unwrap();
+        });
+
+        let start = std::time::Instant::now();
+        let result = q.pop_timeout(std::time::Duration::ZERO).await;
+        let elapsed = start.elapsed();
+
+        handle.await.unwrap();
+
+        assert!(result.is_ok(), "pop_timeout(Zero) should succeed: {:?}", result);
+        assert_eq!(result.unwrap(), Some("pushed".to_owned()));
+        assert!(
+            elapsed >= std::time::Duration::from_millis(80),
+            "zero timeout should wait for push, not floor to 10ms. elapsed={:?}",
+            elapsed
+        );
+    }
 
 }
