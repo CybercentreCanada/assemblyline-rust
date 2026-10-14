@@ -5,10 +5,61 @@ use assemblyline_models::types::ServiceName;
 use reqwest::Method;
 use serde_json::json;
 
+use crate::elastic::Backend;
 use crate::elastic::request::Request;
 use crate::elastic::responses;
+use crate::plumber::{task_cleanup_startup, TaskCleanupStartup};
 use crate::plumber::Plumber;
 use crate::services::test::{dummy_service, setup_services_and_core};
+
+#[test]
+fn elasticsearch_task_cleanup_startup_behavior_is_unchanged() {
+    let configured = task_cleanup_startup(
+        Backend::Elasticsearch,
+        true,
+        Some("cleanup-user".to_owned()),
+        Some("cleanup-password".to_owned()),
+        Some("test-plumber"),
+    );
+    assert!(matches!(
+        configured,
+        TaskCleanupStartup::Configured { username, password }
+            if username == "cleanup-user" && password == "cleanup-password"
+    ));
+
+    let provisioned = task_cleanup_startup(
+        Backend::Elasticsearch,
+        true,
+        Some("incomplete-user".to_owned()),
+        None,
+        Some("test-plumber"),
+    );
+    assert!(matches!(
+        provisioned,
+        TaskCleanupStartup::Provision { username } if username == "test-plumber"
+    ));
+}
+
+#[test]
+fn opensearch_startup_skips_credentials_worker_and_security_plugin() {
+    let configured = task_cleanup_startup(
+        Backend::Opensearch,
+        true,
+        Some("cleanup-user".to_owned()),
+        Some("cleanup-password".to_owned()),
+        Some("test-plumber"),
+    );
+    assert!(matches!(configured, TaskCleanupStartup::Disabled));
+
+    let provisioning = task_cleanup_startup(
+        Backend::Opensearch,
+        true,
+        None,
+        None,
+        Some("test-plumber"),
+    );
+    assert!(matches!(provisioning, TaskCleanupStartup::Disabled));
+}
 
 
 #[tokio::test(flavor = "multi_thread")]

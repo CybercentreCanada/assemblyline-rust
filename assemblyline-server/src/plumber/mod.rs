@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use crate::constants::{NOTIFICATION_QUEUE_PREFIX, SERVICE_QUEUE_PREFIX, ServiceStage, service_queue_name};
 use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::elastic::collection::OperationBatch;
-use crate::elastic::Elastic;
+use crate::elastic::{Backend, Elastic};
 use crate::{Core, Flag};
 
 mod http;
@@ -35,6 +35,36 @@ mod tests;
 
 const DAY: TimeDelta = TimeDelta::days(1);
 const TASK_DELETE_CHUNK: u64 = 10000;
+
+enum TaskCleanupStartup {
+    Disabled,
+    Configured {
+        username: String,
+        password: String,
+    },
+    Provision {
+        username: String,
+    },
+}
+
+fn task_cleanup_startup(
+    backend: Backend,
+    enabled: bool,
+    username: Option<String>,
+    password: Option<String>,
+    provision_username: Option<&str>,
+) -> TaskCleanupStartup {
+    if !enabled || !backend.supports_task_index_cleanup() {
+        return TaskCleanupStartup::Disabled;
+    }
+
+    match (username, password) {
+        (Some(username), Some(password)) => TaskCleanupStartup::Configured { username, password },
+        _ => TaskCleanupStartup::Provision {
+            username: provision_username.unwrap_or("plumber").to_owned(),
+        },
+    }
+}
 
 pub async fn main(core: Core) -> Result<()> {
     let mut tasks = tokio::task::JoinSet::new();
@@ -127,19 +157,32 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
 
         // Start a task cleanup thread
         let config = self.core.config.core.plumber.clone();
-        if config.enable_task_cleanup {
+        match task_cleanup_startup(
+            self.datastore.backend(),
+            config.enable_task_cleanup,
+            config.task_cleanup_user,
+            config.task_cleanup_password,
+            self.task_user.as_deref(),
+        ) {
+            TaskCleanupStartup::Disabled => {},
+            startup => {
+                let connection = match startup {
+                    TaskCleanupStartup::Configured { username, password } => {
+                        self.core.datastore.switch_to_user(&username, &password).await?
+                    }
+                    TaskCleanupStartup::Provision { username } => {
+                        self.core.datastore.switch_to_new_user(&username).await?
+                    }
+                    TaskCleanupStartup::Disabled => unreachable!(),
+                };
 
-            let connection = match (config.task_cleanup_user, config.task_cleanup_password) {
-                (Some(username), Some(password)) => self.core.datastore.switch_to_user(&username, &password).await?,
-                _ => self.core.datastore.switch_to_new_user(self.task_user.as_deref().unwrap_or("plumber")).await?
-            };
-
-            let this = self.clone();
-            pool.spawn(async move {
-                while let Err(err) = this.cleanup_old_tasks(connection.clone()).await {
-                    error!("Error in datastore task cleanup: {err}");
-                }
-            });
+                let this = self.clone();
+                pool.spawn(async move {
+                    while let Err(err) = this.cleanup_old_tasks(connection.clone()).await {
+                        error!("Error in datastore task cleanup: {err}");
+                    }
+                });
+            }
         }
 
         // Start a notification queue cleanup thread
