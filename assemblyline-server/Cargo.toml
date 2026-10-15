@@ -96,3 +96,4 @@ features = ["auto-initialize"]
 
 [dev-dependencies]
 env_logger = "0"
+test-with = "0.8"
