@@ -713,6 +713,15 @@ impl Identify {
                     }
                 }
     
+                else if data.mime == Some("application/x-coff".to_string()) {
+                    // We recognize this as a COFF (Common Object File Format) executable for Linux
+                    if data.magic.starts_with("Intel i386") || data.magic.starts_with("Intel 80386") {
+                        // This indicates a 32-bit COFF executable for Linux
+                        data.file_type = "executable/linux/coff32".to_string();
+                        return Ok(data);
+                    }                    
+                }
+
                 if data.file_type == TEXT_PLAIN {
                     // Check if the file is a misidentified json first before running the yara rules
                     let body = std::fs::OpenOptions::new().read(true).open(&path)?;
