@@ -19,6 +19,7 @@ COPY ./assemblyline-models ./assemblyline-models
 COPY ./assemblyline-server ./assemblyline-server
 COPY ./environment_template ./environment_template
 COPY ./assemblyline-service-client ./assemblyline-service-client
+COPY ./assemblyline-utilities ./assemblyline-utilities
 COPY ./redis-objects ./redis-objects
 
 # copy in python packages we will want
