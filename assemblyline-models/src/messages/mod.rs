@@ -9,6 +9,8 @@ pub mod submission;
 pub mod ingest_heartbeat;
 pub mod service_heartbeat;
 pub mod dispatcher_heartbeat;
+pub mod service_api;
+
 
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]

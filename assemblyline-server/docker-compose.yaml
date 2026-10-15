@@ -49,7 +49,7 @@ services:
   cargo_test:
     build:
       context: ..
-      dockerfile: ./assemblyline-server/test.Dockerfile
+      dockerfile: test.Dockerfile
       target: setup
     volumes:
       - ../:/usr/src/

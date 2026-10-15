@@ -1,17 +1,23 @@
 use std::collections::HashMap;
 
-use serde::{Serialize, Deserialize};
-use serde_with::{SerializeDisplay, DeserializeFromStr};
+#[cfg(feature = "rand")]
+use rand::{Rng, RngExt as _};
+use serde::{Deserialize, Serialize};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
+#[cfg(feature = "rand")]
+use crate::random_word;
+use crate::types::classification::{
+    unrestricted_classification, unrestricted_classification_string,
+};
 use crate::types::{ClassificationString, JsonMap, NonZeroInteger, ServiceName, Text};
 use crate::{ElasticMeta, Readable};
 
 /// Environment Variable Model
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct EnvironmentVariable {
     /// Name of Environment Variable
     pub name: String,
@@ -19,11 +25,10 @@ pub struct EnvironmentVariable {
     pub value: String,
 }
 
-
 /// Docker Container Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct DockerConfig {
     /// Does the container have internet-access?
     #[serde(default)]
@@ -32,7 +37,7 @@ pub struct DockerConfig {
     #[serde(default)]
     pub command: Option<Vec<String>>,
     /// CPU allocation
-    #[serde(default="default_cpu_cores")]
+    #[serde(default = "default_cpu_cores")]
     pub cpu_cores: f32,
     /// Additional environemnt variables for the container
     #[serde(default)]
@@ -46,16 +51,16 @@ pub struct DockerConfig {
     #[serde(default)]
     pub registry_password: Option<String>,
     /// The type of container registry
-    #[serde(default="default_registry_type")]
+    #[serde(default = "default_registry_type")]
     pub registry_type: RegistryType,
     /// What ports of container to expose?
     #[serde(default)]
     pub ports: Vec<String>,
     /// Container RAM limit
-    #[serde(default="default_ram_mb")]
+    #[serde(default = "default_ram_mb")]
     pub ram_mb: i32,
     /// Container RAM request
-    #[serde(default="default_ram_mb_min")]
+    #[serde(default = "default_ram_mb_min")]
     pub ram_mb_min: i32,
     /// Service account to use for pods in kubernetes
     #[serde(default)]
@@ -65,12 +70,31 @@ pub struct DockerConfig {
     pub labels: Vec<EnvironmentVariable>,
 }
 
-fn default_cpu_cores() -> f32 { 1.0 }
-fn default_registry_type() -> RegistryType { RegistryType::Docker }
-fn default_ram_mb() -> i32 { 512 }
-fn default_ram_mb_min() -> i32 { 256 }
+fn default_cpu_cores() -> f32 {
+    1.0
+}
+fn default_registry_type() -> RegistryType {
+    RegistryType::Docker
+}
+fn default_ram_mb() -> i32 {
+    512
+}
+fn default_ram_mb_min() -> i32 {
+    256
+}
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(
+    SerializeDisplay,
+    DeserializeFromStr,
+    strum::Display,
+    strum::EnumString,
+    Described,
+    PartialEq,
+    Eq,
+    Debug,
+    Clone,
+    Copy,
+)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum RegistryType {
@@ -81,7 +105,7 @@ pub enum RegistryType {
 /// Container's Persistent Volume Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct PersistentVolume {
     /// Path into the container to mount volume
     pub mount_path: String,
@@ -90,22 +114,36 @@ pub struct PersistentVolume {
     /// Storage class used to create volume
     pub storage_class: String,
     /// Access mode for volume
-    #[serde(default="default_access_mode")]
+    #[serde(default = "default_access_mode")]
     pub access_mode: AccessMode,
 }
 
-fn default_access_mode() -> AccessMode { AccessMode::ReadWriteOnce }
+fn default_access_mode() -> AccessMode {
+    AccessMode::ReadWriteOnce
+}
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(
+    SerializeDisplay,
+    DeserializeFromStr,
+    strum::Display,
+    strum::EnumString,
+    Described,
+    PartialEq,
+    Eq,
+    Debug,
+    Clone,
+    Copy,
+)]
 #[metadata_type(ElasticMeta)]
 pub enum AccessMode {
-    ReadWriteOnce, ReadWriteMany
+    ReadWriteOnce,
+    ReadWriteMany,
 }
 
 /// Container's Dependency Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct DependencyConfig {
     /// Docker container configuration for dependency
     pub container: DockerConfig,
@@ -119,7 +157,7 @@ pub struct DependencyConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, Described)]
 #[metadata_type(ElasticMeta)]
-#[serde(rename_all="UPPERCASE")]
+#[serde(rename_all = "UPPERCASE")]
 pub enum FetchMethods {
     #[default]
     Get,
@@ -127,14 +165,13 @@ pub enum FetchMethods {
     Git,
 }
 
-
 /// Update Source Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct UpdateSource {
     /// Is this source active for periodic fetching?
-    #[serde(default="default_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// Name of source
     pub name: String,
@@ -165,7 +202,7 @@ pub struct UpdateSource {
     #[serde(default)]
     pub headers: Vec<EnvironmentVariable>,
     /// Default classification used in absence of one defined in files from source
-    #[serde(default="unrestricted_classification_string")]
+    #[serde(default = "unrestricted_classification_string")]
     pub default_classification: ClassificationString,
     /// Use managed identity for authentication with Azure DevOps
     #[serde(default)]
@@ -190,22 +227,24 @@ pub struct UpdateSource {
     pub data: Option<Text>,
     /// Update check interval, in seconds, for this source
     #[serde(default)]
-    #[metadata(mapping="integer")]
+    #[metadata(mapping = "integer")]
     pub update_interval: Option<NonZeroInteger>,
     /// Ignore source caching and forcefully fetch from source
     #[serde(default)]
     pub ignore_cache: bool,
 }
 
-fn default_enabled() -> bool { true }
+fn default_enabled() -> bool {
+    true
+}
 
 /// Update Configuration for Signatures
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct UpdateConfig {
     /// Does the updater produce signatures?
-    #[metadata(index=true)]
+    #[metadata(index = true)]
     #[serde(default)]
     pub generates_signatures: bool,
     /// List of external sources
@@ -217,20 +256,35 @@ pub struct UpdateConfig {
     #[serde(default)]
     pub wait_for_update: bool,
     /// Delimiter used when given a list of signatures
-    #[serde(default="default_signature_delimiter")]
+    #[serde(default = "default_signature_delimiter")]
     pub signature_delimiter: SignatureDelimiter,
     /// Custom delimiter definition
     #[serde(default)]
     pub custom_delimiter: Option<String>,
     /// Default pattern used for matching files
-    #[serde(default="default_default_pattern")]
+    #[serde(default = "default_default_pattern")]
     pub default_pattern: Text,
 }
 
-fn default_signature_delimiter() -> SignatureDelimiter { SignatureDelimiter::DoubleNewLine }
-fn default_default_pattern() -> Text { ".*".into() }
+fn default_signature_delimiter() -> SignatureDelimiter {
+    SignatureDelimiter::DoubleNewLine
+}
+fn default_default_pattern() -> Text {
+    ".*".into()
+}
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(
+    SerializeDisplay,
+    DeserializeFromStr,
+    strum::Display,
+    strum::EnumString,
+    Described,
+    PartialEq,
+    Eq,
+    Debug,
+    Clone,
+    Copy,
+)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
 pub enum SignatureDelimiter {
@@ -262,14 +316,14 @@ impl SignatureDelimiter {
 /// Submission Parameters for Service
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Eq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=false, store=false)]
+#[metadata(index = false, store = false)]
 pub struct SubmissionParams {
     /// Default value (must match value in `value` field)
     pub default: serde_json::Value,
     /// Name of parameter
     pub name: String,
     /// Type of parameter
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub param_type: ParamKinds,
     /// Default value (must match value in `default` field)
     pub value: serde_json::Value,
@@ -281,7 +335,18 @@ pub struct SubmissionParams {
     pub hide: bool,
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(
+    SerializeDisplay,
+    DeserializeFromStr,
+    strum::Display,
+    strum::EnumString,
+    Described,
+    PartialEq,
+    Eq,
+    Debug,
+    Clone,
+    Copy,
+)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum ParamKinds {
@@ -294,41 +359,41 @@ pub enum ParamKinds {
 /// Service Configuration
 #[derive(Serialize, Deserialize, Clone, Described, PartialEq, Debug)]
 #[metadata_type(ElasticMeta)]
-#[metadata(index=true, store=false)]
+#[metadata(index = true, store = false)]
 pub struct Service {
     /// Regex to accept files as identified by Assemblyline
     /// Regexes applied to assemblyline style file type string
-    #[metadata(store=true)]
-    #[serde(default="default_service_accepts")]
+    #[metadata(store = true)]
+    #[serde(default = "default_service_accepts")]
     pub accepts: String,
     /// Regex to reject files as identified by Assemblyline
     /// Regexes applied to assemblyline style file type string
-    #[metadata(store=true)]
-    #[serde(default="default_service_rejects")]
+    #[metadata(store = true)]
+    #[serde(default = "default_service_rejects")]
     pub rejects: Option<String>,
     /// Should the service be auto-updated?
     #[serde(default)]
     pub auto_update: Option<bool>,
     /// Which category does this service belong to?
-    #[metadata(store=true, copyto="__text__")]
-    #[serde(default="default_category")]
+    #[metadata(store = true, copyto = "__text__")]
+    #[serde(default = "default_category")]
     pub category: ServiceName,
     /// Classification of the service
-    #[serde(default="unrestricted_classification")]
+    #[serde(default = "unrestricted_classification")]
     pub classification: String,
     /// Service Configuration
-    #[metadata(index=false, store=false)]
+    #[metadata(index = false, store = false)]
     #[serde(default)]
     pub config: JsonMap,
     /// Description of service
-    #[metadata(store=true, copyto="__text__")]
-    #[serde(default="default_description")]
+    #[metadata(store = true, copyto = "__text__")]
+    #[serde(default = "default_description")]
     pub description: Text,
     /// Default classification assigned to service results
-    #[serde(default="unrestricted_classification")]
+    #[serde(default = "unrestricted_classification")]
     pub default_result_classification: String,
     /// Is the service enabled
-    #[metadata(store=true)]
+    #[metadata(store = true)]
     #[serde(default)]
     pub enabled: bool,
     /// Does this service perform analysis outside of Assemblyline?
@@ -336,15 +401,15 @@ pub struct Service {
     pub is_external: bool,
     /// How many licences is the service allowed to use?
     #[serde(default)]
-    #[metadata(mapping="integer")]
+    #[metadata(mapping = "integer")]
     pub licence_count: u32,
     /// The minimum number of service instances. Overrides Scaler's min_instances configuration.
     #[serde(default)]
-    #[metadata(mapping="integer")]
+    #[metadata(mapping = "integer")]
     pub min_instances: Option<u32>,
     /// If more than this many jobs are queued for this service drop those over this limit. 0 is unlimited.
     #[serde(default)]
-    #[metadata(mapping="integer")]
+    #[metadata(mapping = "integer")]
     pub max_queue_length: u32,
 
     /// Does this service use tags from other services for analysis?
@@ -364,10 +429,10 @@ pub struct Service {
     pub monitored_keys: Vec<String>,
 
     /// Name of service
-    #[metadata(store=true, copyto="__text__")]
+    #[metadata(store = true, copyto = "__text__")]
     pub name: ServiceName,
     /// Version of service
-    #[metadata(store=true)]
+    #[metadata(store = true)]
     pub version: String,
 
     /// Should the service be able to talk to core infrastructure or just service-server for tasking?
@@ -378,15 +443,15 @@ pub struct Service {
     pub disable_cache: bool,
 
     /// Which execution stage does this service run in?
-    #[metadata(store=true, copyto="__text__")]
-    #[serde(default="default_stage")]
+    #[metadata(store = true, copyto = "__text__")]
+    #[serde(default = "default_stage")]
     pub stage: String,
     /// Submission parameters of service
-    #[metadata(index=false)]
+    #[metadata(index = false)]
     #[serde(default)]
     pub submission_params: Vec<SubmissionParams>,
     /// Service task timeout, in seconds
-    #[serde(default="default_timeout")]
+    #[serde(default = "default_timeout")]
     pub timeout: i32,
 
     /// Docker configuration for service
@@ -396,7 +461,7 @@ pub struct Service {
     pub dependencies: HashMap<String, DependencyConfig>,
 
     /// What channel to watch for service updates?
-    #[serde(default="default_update_channel")]
+    #[serde(default = "default_update_channel")]
     pub update_channel: ChannelKinds,
     /// Update configuration for fetching external resources
     pub update_config: Option<UpdateConfig>,
@@ -406,11 +471,21 @@ pub struct Service {
     pub recursion_prevention: Vec<ServiceName>,
 }
 
-fn default_category() -> ServiceName { ServiceName::from_string("Static Analysis".to_owned()) }
-fn default_description() -> Text { Text("NA".to_owned()) }
-fn default_stage() -> String { "CORE".to_owned() }
-fn default_timeout() -> i32 { 60 }
-fn default_update_channel() -> ChannelKinds { ChannelKinds::Stable }
+fn default_category() -> ServiceName {
+    ServiceName::from_string("Static Analysis".to_owned())
+}
+fn default_description() -> Text {
+    Text("NA".to_owned())
+}
+fn default_stage() -> String {
+    "CORE".to_owned()
+}
+fn default_timeout() -> i32 {
+    60
+}
+fn default_update_channel() -> ChannelKinds {
+    ChannelKinds::Stable
+}
 
 impl Service {
     pub fn key(&self) -> String {
@@ -418,7 +493,18 @@ impl Service {
     }
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, PartialEq, Eq, Debug, Clone, Copy)]
+#[derive(
+    SerializeDisplay,
+    DeserializeFromStr,
+    strum::Display,
+    strum::EnumString,
+    Described,
+    PartialEq,
+    Eq,
+    Debug,
+    Clone,
+    Copy,
+)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "lowercase")]
 pub enum ChannelKinds {
@@ -428,9 +514,69 @@ pub enum ChannelKinds {
     Dev,
 }
 
-fn default_service_accepts() -> String { ".*".to_string() }
-fn default_service_rejects() -> Option<String> { Some("empty|metadata/.*".to_string()) }
+fn default_service_accepts() -> String {
+    ".*".to_string()
+}
+fn default_service_rejects() -> Option<String> {
+    Some("empty|metadata/.*".to_string())
+}
 
 impl Readable for Service {
     fn set_from_archive(&mut self, _from_archive: bool) {}
+}
+
+#[cfg(feature = "rand")]
+impl rand::distr::Distribution<Service> for rand::distr::StandardUniform {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Service {
+        let random_name = ServiceName::from_string(random_word(rng));
+        let random_version = format!("v{}_{}", rng.random_range(0..10), rng.random_range(0..10));
+
+        let docker_config = DockerConfig {
+            image: format!("{random_name}:{random_version}"),
+            allow_internet_access: Default::default(),
+            command: Default::default(),
+            cpu_cores: Default::default(),
+            environment: Default::default(),
+            registry_username: Default::default(),
+            registry_password: Default::default(),
+            registry_type: default_registry_type(),
+            ports: Default::default(),
+            ram_mb: Default::default(),
+            ram_mb_min: Default::default(),
+            service_account: Default::default(),
+            labels: Default::default(),
+        };
+        Service {
+            accepts: Default::default(),
+            rejects: Default::default(),
+            auto_update: Default::default(),
+            category: default_category(),
+            classification: Default::default(),
+            config: Default::default(),
+            description: Default::default(),
+            default_result_classification: Default::default(),
+            enabled: true,
+            is_external: Default::default(),
+            licence_count: Default::default(),
+            min_instances: Default::default(),
+            max_queue_length: Default::default(),
+            uses_tags: Default::default(),
+            uses_tag_scores: Default::default(),
+            uses_temp_submission_data: Default::default(),
+            uses_metadata: Default::default(),
+            monitored_keys: Default::default(),
+            name: random_name,
+            version: random_version.to_string(),
+            privileged: false,
+            disable_cache: Default::default(),
+            stage: Default::default(),
+            submission_params: Default::default(),
+            timeout: Default::default(),
+            docker_config: docker_config,
+            dependencies: Default::default(),
+            update_channel: default_update_channel(),
+            update_config: Default::default(),
+            recursion_prevention: Default::default(),
+        }
+    }
 }
