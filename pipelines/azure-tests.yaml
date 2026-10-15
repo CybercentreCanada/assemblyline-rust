@@ -6,10 +6,24 @@ pr: ["*"]
 pool:
   vmImage: "ubuntu-latest"
 
-# variables:
-#   # Try to checkout the matching branch, if the command fails, don't care.
-#   BRANCH_NAME: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''))]
+variables:
+  - group: unittest-samples
+  # Try to checkout the matching branch, if the command fails, don't care.
+  - name: "BRANCH_NAME"
+    value: $[coalesce(variables['System.PullRequest.SourceBranch'], variables['System.PullRequest.TargetBranch'], replace(variables['Build.SourceBranch'], 'refs/heads/', ''), 'main')]
 
+resources:
+  repositories:
+    - repository: unittest-samples
+      type: github
+      name: $(unittest_samples_repository)
+      ref: main
+      endpoint: github-repo-sa
+      trigger: ["*"]
+    - repository: assemblyline-base
+      type: github
+      endpoint: github-repo-sa
+      name: CybercentreCanada/assemblyline-base
 jobs:
   # - job: test_client
   #   dependsOn: []
@@ -29,6 +43,7 @@ jobs:
     displayName: Test Filestore
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -36,18 +51,19 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd assemblyline-filestore; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd assemblyline-filestore; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build cargo_test
         displayName: Test Filestore
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-filestore
   - job: test_markings
     dependsOn: []
     displayName: Test Markings
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -55,30 +71,56 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd assemblyline-markings; cargo test --target-dir /out'
+                     -w /usr/src/ \
+                     rust:1.96-trixie \
+                     bash -c 'cargo test --target-dir /out'
         displayName: Test Markings
-  # - job: test_models
-  #   dependsOn: []
-  #   displayName: Test Models
-  #   steps:
-  #     - checkout: self
-  #     - script: |
-  #         set -e
-  #         docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-  #         docker run -v ${PWD}:/usr/src/ \
-  #                    --network=host \
-  #                    cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-  #                    bash -c 'cd assemblyline-models; cargo test --target-dir /out'
-  #       displayName: Test Models
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-markings
+  - job: test_models
+    dependsOn: []
+    displayName: Test Models
+    steps:
+      - checkout: self
+        fetchDepth: 1
+      - checkout: assemblyline-base
+
+      - script: |
+          # Checkout the branch corresponding to the pull request or the current branch
+          set -xv
+          git checkout -b $BRANCH_NAME -t origin/$BRANCH_NAME || true
+          git status
+        displayName: Checkout branch
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-base
+
+      - script: |
+          set -e
+          # Build the test Docker image (requires the Assemblyline Python codebase + assemblyline-markings for tests)
+          docker build -t test -f test.Dockerfile --target setup .
+
+          docker run -w /usr/src/ \
+            -v ${PWD}:/usr/src/ \
+            -v $SYSTEM_DEFAULTWORKINGDIRECTORY/assemblyline-base:/opt/assemblyline-base \
+            test bash -c 'apt install -y python3-pip;
+              pip install --break-system-packages -e /opt/assemblyline-base;
+              cd assemblyline-models; cargo test --target-dir /out'
+        displayName: Test Models
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust
   - job: test_server
     dependsOn: []
     displayName: Test Server
     steps:
       - checkout: self
+        fetchDepth: 1
+      - checkout: unittest-samples
+      - script: |
+          # Checkout the branch corresponding to the pull request or the current branch
+          set -xv
+          git checkout -b $BRANCH_NAME -t origin/$BRANCH_NAME || true
+          git status
+        displayName: Checkout branch
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-unittest-samples
+
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -86,18 +128,19 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd assemblyline-server; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd assemblyline-server; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build -e SAMPLES_LOCATION=/tmp/samples -v $SYSTEM_DEFAULTWORKINGDIRECTORY/unittest-samples:/tmp/samples cargo_test
         displayName: Test Server
+        workingDirectory: $(System.DefaultWorkingDirectory)/assemblyline-rust/assemblyline-server
   - job: test_environment_template
     dependsOn: []
     displayName: Test Environment Template
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -105,17 +148,18 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd environment_template; cargo test --target-dir /out'
+                     -w /usr/src/ \
+                     rust:1.96-trixie \
+                     bash -c 'cargo test --target-dir /out'
         displayName: Test Environment Template
+        workingDirectory: $(System.DefaultWorkingDirectory)/environment_template
   - job: test_redis
     dependsOn: []
     displayName: Test Redis
     steps:
       - checkout: self
+        fetchDepth: 1
       - task: Docker@2
         displayName: Login to docker registry
         inputs:
@@ -123,13 +167,13 @@ jobs:
           containerRegistry: cccstemp
       - script: |
           set -e
-          docker pull cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          (cd redis-objects; docker compose up -d --wait)
-          docker run -v ${PWD}:/usr/src/ \
-                     --network=host \
-                     cccstemp.azurecr.io/assemblyline-rust-builder:latest \
-                     bash -c 'cd redis-objects; cargo test --target-dir /out'
+          # Start all services except cargo test
+          docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
+
+          # Run cargo tests
+          docker compose run --build cargo_test
         displayName: Test Redis
+        workingDirectory: $(System.DefaultWorkingDirectory)/redis-objects
   - job: test_service_client
     dependsOn: []
     displayName: Test Service Client
