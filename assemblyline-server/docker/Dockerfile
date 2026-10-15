@@ -28,7 +28,7 @@ RUN ls -lah /out
 #  - pyo3
 #  - the python image here
 #  - the python package installed with api below
-FROM python:3.14 AS pybuilder
+FROM python:3.13 AS pybuilder
 RUN pip install --target /packages msoffcrypto-tool
 
 
@@ -37,7 +37,7 @@ FROM debian:trixie-slim
 
 # Get required apt packages
 # libssl1.1 is already installed on this base image
-RUN apt-get update && apt-get install -yy ca-certificates libmagic1 libpython3.14 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -yy ca-certificates libmagic1 libpython3.13 && rm -rf /var/lib/apt/lists/*
 
 # copy in python packages from container that downloaded them
 COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/
