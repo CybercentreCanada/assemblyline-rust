@@ -119,7 +119,7 @@ impl ServiceHelper {
             return vec![]
         }
 
-        // load catagory information from behind lock
+        // load category information from behind lock
         let categories = self.categories();
 
         // do the actual expansion into this new list

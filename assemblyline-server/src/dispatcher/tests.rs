@@ -33,7 +33,7 @@ fn test_services() -> HashMap<ServiceName, Service> {
     bonus.enabled = false;
 
     let mut sandbox = dummy_service("sandbox", "core", Some("Dynamic Analysis"), None, Some("unknown"), Some(true));
-    sandbox.recursion_prevention.push(ServiceName::dynamic_analysis_catagory());
+    sandbox.recursion_prevention.push(ServiceName::dynamic_analysis_category());
     return [
         ("bonus", bonus),
         ("extract", dummy_service("extract", "pre", None, None, None, Some(true))),

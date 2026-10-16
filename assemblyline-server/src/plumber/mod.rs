@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use assemblyline_models::datastore::apikey::{Apikey, get_apikey_id};
-use assemblyline_models::datastore::user::{AclCatagory, UserRole, UserType, load_roles, load_roles_form_acls};
+use assemblyline_models::datastore::user::{AclCategory, UserRole, UserType, load_roles, load_roles_form_acls};
 use assemblyline_models::Readable;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
@@ -426,7 +426,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         #[derive(Deserialize, Debug)]
         pub struct LegacyApiKey {
             /// Access Control List for the API key
-            pub acl: Vec<AclCatagory>,
+            pub acl: Vec<AclCategory>,
             /// BCrypt hash of the password for the apikey
             pub password: String,
             /// List of roles tied to the API key
@@ -461,7 +461,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
                 let key_id = get_apikey_id(&key, &uname);
 
                 let mut roles = vec![];
-                if old_apikey.acl == vec![AclCatagory::C] {
+                if old_apikey.acl == vec![AclCategory::C] {
                     for r in old_apikey.roles {
                         if user_roles.contains(&r) {
                             roles.push(r);

@@ -16,7 +16,7 @@ use crate::types::net_static::TLDS_SPECIAL_BY_DOMAIN;
 use crate::{ElasticMeta, ModelError};
 
 
-/// A perminantly interned string that holds the name or catagory of a service.
+/// A perminantly interned string that holds the name or category of a service.
 /// Can be dereferenced to the underlying string.
 /// Here intern gives us fast comparison and copy with the cost of unreclaimable memory.
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -29,13 +29,13 @@ impl ServiceName {
         Self(internment::Intern::from_ref("Unknown"))
     }
 
-    /// Factory for the static analysis service catagory for places where it is used in code
-    pub fn static_analysis_catagory() -> Self {
+    /// Factory for the static analysis service category for places where it is used in code
+    pub fn static_analysis_category() -> Self {
         Self(internment::Intern::from_ref("Static Analysis"))
     }
 
-    /// Factory for the dynamic analysis service catagory for places where it is used in code
-    pub fn dynamic_analysis_catagory() -> Self {
+    /// Factory for the dynamic analysis service category for places where it is used in code
+    pub fn dynamic_analysis_category() -> Self {
         Self(internment::Intern::from_ref("Dynamic Analysis"))
     }
 }
@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for ServiceName {
             type Value = ServiceName;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "expected a string holding a service name or catagory")
+                write!(formatter, "expected a string holding a service name or category")
             }
 
             fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
@@ -127,7 +127,7 @@ impl rand::distr::Distribution<ServiceName> for rand::distr::StandardUniform {
 
 // MARK: ServiceVersion
 
-/// A perminantly interned string that holds the name or catagory of a service.
+/// A perminantly interned string that holds the name or category of a service.
 /// Can be dereferenced to the underlying string.
 /// Here intern gives us fast comparison and copy with the cost of unreclaimable memory.
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -171,7 +171,7 @@ impl<'de> Deserialize<'de> for ServiceVersion {
             type Value = ServiceVersion;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "expected a string holding a service name or catagory")
+                write!(formatter, "expected a string holding a service name or category")
             }
 
             fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>

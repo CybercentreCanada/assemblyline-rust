@@ -407,7 +407,7 @@ pub struct Service {
     pub recursion_prevention: Vec<ServiceName>,
 }
 
-fn default_category() -> ServiceName { ServiceName::static_analysis_catagory() }
+fn default_category() -> ServiceName { ServiceName::static_analysis_category() }
 fn default_description() -> Text { Text("NA".to_owned()) }
 fn default_stage() -> String { "CORE".to_owned() }
 fn default_timeout() -> i32 { 60 }
