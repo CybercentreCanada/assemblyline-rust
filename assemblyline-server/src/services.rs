@@ -186,7 +186,7 @@ impl ServiceHelper {
         //   - We're running submission with Deep Scanning
         //   - We want to Ignore Filtering (perform as much unfiltered analysis as possible)
         let use_safelist = self.config.safelist.enabled && !self.config.safelist.enforce_safelist_service;
-        let safelist = ServiceName::from("Safelist");
+        let safelist = "Safelist".parse()?;
         if selected.contains(&safelist) && file_depth > 0 && use_safelist && !(params.deep_scan || params.ignore_filtering) {
             // Alter schedule to remove Safelist, if scheduled to run
             selected.retain(|item| item != &safelist);
@@ -481,7 +481,7 @@ pub mod test {
                 None,
                 None
             ))
-        ].into_iter().map(|(key, value)|(key.into(), value)).collect()
+        ].into_iter().map(|(key, value)|(key.parse().unwrap(), value)).collect()
     }
 
     pub async fn setup_core_with_config(callback: impl Fn(&mut Config)) -> (Core, TestGuard) {
@@ -550,8 +550,8 @@ pub mod test {
 
     fn make_params(core: &Core, accept: &[&str], reject: &[&str]) -> SubmissionParams {
         let mut params = SubmissionParams::new(ClassificationString::new(core.classification_parser.unrestricted().to_owned(), &core.classification_parser).unwrap());
-        params.services.selected = accept.iter().map(|item|(*item).into()).collect();
-        params.services.excluded = reject.iter().map(|item|(*item).into()).collect();
+        params.services.selected = accept.iter().map(|item|(*item).parse().unwrap()).collect();
+        params.services.excluded = reject.iter().map(|item|(*item).parse().unwrap()).collect();
         params
     }
 
@@ -563,9 +563,9 @@ pub mod test {
             &["static", "av"], &["dynamic"]), "document/word", 0, None, None).unwrap();
 
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
-            vec!["AnAV".into()],
-            vec!["polish".into()]
+            vec!["Safelist".parse().unwrap()],
+            vec!["AnAV".parse().unwrap()],
+            vec!["polish".parse().unwrap()]
         ])
     }
 
@@ -576,9 +576,9 @@ pub mod test {
             &["static", "av", "dynamic"], &[]), "document/word", 0, None, None).unwrap();
 
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
-            vec!["AnAV".into(), "cuckoo".into()],
-            vec!["polish".into()]
+            vec!["Safelist".parse().unwrap()],
+            vec!["AnAV".parse().unwrap(), "cuckoo".parse().unwrap()],
+            vec!["polish".parse().unwrap()]
         ])
     }
 
@@ -589,9 +589,9 @@ pub mod test {
             &[], &[]), "document/word", 0, None, None).unwrap();
 
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
-            vec!["AnAV".into(), "cuckoo".into()],
-            vec!["polish".into()]
+            vec!["Safelist".parse().unwrap()],
+            vec!["AnAV".parse().unwrap(), "cuckoo".parse().unwrap()],
+            vec!["polish".parse().unwrap()]
         ])
     }
 
@@ -602,9 +602,9 @@ pub mod test {
             &[], &[]), "archive/zip", 0, None, None).unwrap();
 
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into(), "extract".into()],
-            vec!["AnAV".into()],
-            vec!["not_documents".into(), "polish".into()]
+            vec!["Safelist".parse().unwrap(), "extract".parse().unwrap()],
+            vec!["AnAV".parse().unwrap()],
+            vec!["not_documents".parse().unwrap(), "polish".parse().unwrap()]
         ])
     }
 
@@ -615,7 +615,7 @@ pub mod test {
         let mut params = make_params(&core, &["Safelist"], &[]);
         let schedule = core.services.build_schedule(&params, "archive/word", 0, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
+            vec!["Safelist".parse().unwrap()],
             vec![],
             vec![]
         ]);
@@ -636,7 +636,7 @@ pub mod test {
         params.ignore_filtering = false;
         let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
+            vec!["Safelist".parse().unwrap()],
             vec![],
             vec![]
         ]);
@@ -646,7 +646,7 @@ pub mod test {
         params.ignore_filtering = true;
         let schedule = core.services.build_schedule(&params, "archive/word", 1, None, None).unwrap();
         assert_eq!(get_schedule_names(&schedule), vec![
-            vec!["Safelist".into()],
+            vec!["Safelist".parse().unwrap()],
             vec![],
             vec![]
         ]);

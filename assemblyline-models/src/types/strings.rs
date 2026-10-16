@@ -22,6 +22,24 @@ use crate::{ElasticMeta, ModelError};
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ServiceName(internment::Intern<String>);
 
+impl ServiceName {
+    /// Create a ServiceName from a static string for contexts where
+    /// we need a substitute for a ServiceName object but don't have one
+    pub fn unknown() -> Self {
+        Self(internment::Intern::from_ref("Unknown"))
+    }
+
+    /// Factory for the static analysis service catagory for places where it is used in code
+    pub fn static_analysis_catagory() -> Self {
+        Self(internment::Intern::from_ref("Static Analysis"))
+    }
+
+    /// Factory for the dynamic analysis service catagory for places where it is used in code
+    pub fn dynamic_analysis_catagory() -> Self {
+        Self(internment::Intern::from_ref("Dynamic Analysis"))
+    }
+}
+
 impl std::fmt::Display for ServiceName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
@@ -55,7 +73,7 @@ impl<'de> Deserialize<'de> for ServiceName {
             where
                 E: serde::de::Error,
             {
-                Ok(ServiceName(internment::Intern::from_ref(s)))
+                ServiceName::from_str(s).map_err(serde::de::Error::custom)
             }
         }
         deserializer.deserialize_str(Visitor{})
@@ -68,17 +86,153 @@ impl Described<ElasticMeta> for ServiceName {
     }
 }
 
-impl ServiceName {
-    pub fn from_string(value: String) -> Self {
-        Self(internment::Intern::new(value))
+/// The set of characters currently allowed in a service name.
+/// These names should, when possible, also be valid kubernetes/docker resource names, or easy to convert into one.
+fn is_service_name_character(value: char) -> bool {
+    // Space is only here for handling service catagories, which also use
+    value.is_ascii_alphanumeric() || value == '_' || value == '-' || value == ' '
+}
+
+
+#[derive(Debug, thiserror::Error)]
+#[error("A service name must be a non-empty string using only alphanumeric characters, underscores, and hyphens.")]
+pub struct InvalidServiceName;
+
+impl FromStr for ServiceName {
+    type Err = InvalidServiceName;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() || s.chars().any(|c| !is_service_name_character(c)) {
+            return Err(InvalidServiceName)
+        }
+        return Ok(ServiceName(internment::Intern::from_ref(s)))
     }
 }
 
-impl From<&str> for ServiceName {
-    fn from(value: &str) -> Self {
-        Self(internment::Intern::from_ref(value))
+#[cfg(feature = "rand")]
+impl rand::distr::Distribution<ServiceName> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ServiceName {
+        // All of the possible random names should be valid, but in case one
+        // we can't use gets introduced loop and skip that name
+        loop {
+            use crate::random_word;
+
+            match ServiceName::from_str(&random_word(rng)) {
+                Ok(name) => break name,
+                Err(_) => continue
+            }
+        }
     }
 }
+
+// MARK: ServiceVersion
+
+/// A perminantly interned string that holds the name or catagory of a service.
+/// Can be dereferenced to the underlying string.
+/// Here intern gives us fast comparison and copy with the cost of unreclaimable memory.
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ServiceVersion(internment::Intern<String>);
+
+impl ServiceVersion {
+    /// Create a ServiceVersion equal to 0.0 for cases where
+    /// a valid version is required but not significant
+    pub fn zero() -> Self {
+        Self(internment::Intern::from_ref("0.0"))
+    }
+
+    pub fn remove_static(self) -> Result<Self, InvalidServiceVersion> {
+        Self::from_str(&self.0.replace("static", ""))
+    }
+}
+
+impl std::fmt::Display for ServiceVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::ops::Deref for ServiceVersion {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+
+impl<'de> Deserialize<'de> for ServiceVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>
+    {
+        struct Visitor {}
+
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ServiceVersion;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "expected a string holding a service name or catagory")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                ServiceVersion::from_str(s).map_err(serde::de::Error::custom)
+            }
+        }
+        deserializer.deserialize_str(Visitor{})
+    }
+}
+
+impl Described<ElasticMeta> for ServiceVersion {
+    fn metadata() -> struct_metadata::Descriptor<ElasticMeta> {
+        String::metadata()
+    }
+}
+
+/// Version string character check. We don't actually parse the version in the rust
+/// core for anything, so just having the right character set is good enough.
+fn is_service_version_character(value: char) -> bool {
+    value.is_ascii_alphanumeric() || value == '_' || value == '-' || value == '+'  || value == '.'
+}
+
+
+#[derive(Debug, thiserror::Error)]
+#[error("A service version should be a valid semver string.")]
+pub struct InvalidServiceVersion;
+
+impl FromStr for ServiceVersion {
+    type Err = InvalidServiceVersion;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() || s.chars().any(|c| !is_service_version_character(c)) {
+            return Err(InvalidServiceVersion)
+        }
+        return Ok(ServiceVersion(internment::Intern::from_ref(s)))
+    }
+}
+
+
+#[cfg(feature = "rand")]
+impl rand::distr::Distribution<ServiceVersion> for rand::distr::StandardUniform {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ServiceVersion {
+        // All of the possible random names should be valid, but in case one
+        // we can't use gets introduced loop and skip that name
+        loop {
+            use rand::RngExt;
+
+            let a = rng.random_range(0..100);
+            let b = rng.random_range(0..100);
+
+            match ServiceVersion::from_str(&format!("{a}.{b}")) {
+                Ok(name) => break name,
+                Err(_) => continue
+            }
+        }
+    }
+}
+
 
 /// A string that maps to a keyword field in elasticsearch.
 ///

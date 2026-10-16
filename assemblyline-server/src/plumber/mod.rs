@@ -16,6 +16,7 @@ use assemblyline_models::datastore::user::{AclCatagory, UserRole, UserType, load
 use assemblyline_models::Readable;
 use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::ServiceChange;
+use assemblyline_models::types::strings::ServiceVersion;
 use assemblyline_models::types::{JsonMap, ServiceName};
 use chrono::{TimeDelta, Utc};
 use log::{debug, error, info, warn};
@@ -166,7 +167,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         let mut service_queues: HashMap<ServiceName, Option<Service>> = Default::default();
         for queue_name in self.core.redis_volatile.keys(&service_queue_name("*")).await? {
             if let Some(name) = queue_name.strip_prefix(SERVICE_QUEUE_PREFIX) {
-                service_queues.insert(name.into(), None);
+                service_queues.insert(name.parse()?, None);
             }
         }
 
@@ -192,7 +193,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
                 if disabled || current_stage != ServiceStage::Running {
                     let mut proccessed_tasks = 0;
                     loop {
-                        let task = self.dispatch_client.request_work("plumber", *service_name, "0", None, false, None).await?;
+                        let task = self.dispatch_client.request_work("plumber", *service_name, ServiceVersion::zero(), None, false, None).await?;
                         let task = match task {
                             Some(task) => task,
                             None => break,
@@ -358,7 +359,7 @@ impl<Dispatch: DispatchCapable + Send + Sync> Plumber<Dispatch> {
         let service_queue = self.core.get_service_queue(&service_name);
         while self.core.is_running() && !stop_signal.read() {
             while service_queue.length().await? > limit.load(std::sync::atomic::Ordering::Relaxed) as usize {
-                let task = self.dispatch_client.request_work("plumber", service_name, "0", None, false, Some(true)).await?;
+                let task = self.dispatch_client.request_work("plumber", service_name, ServiceVersion::zero(), None, false, Some(true)).await?;
                 let task = match task {
                     Some(task) => task,
                     None => break

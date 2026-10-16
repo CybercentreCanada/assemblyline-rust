@@ -3,7 +3,7 @@
 #![warn(missing_docs, non_ascii_idents, trivial_numeric_casts,
     unused_crate_dependencies, noop_method_call, single_use_lifetimes, trivial_casts,
     unused_lifetimes, nonstandard_style, variant_size_differences)]
-#![deny(keyword_idents)]
+#![deny(keyword_idents, clippy::disallowed_methods)]
 // #![warn(clippy::missing_docs_in_private_items)]
 #![allow(
     // allow these as they sometimes improve clarity
@@ -139,9 +139,9 @@ async fn main() -> ExitCode {
                 println!("No mounted classification configuration found. Proceeding with default configuration...");
                 ClassificationConfig::default()
             }
-        };        
+        };
 
-        return crate::validate_classification::main(classification, c12n_config);       
+        return crate::validate_classification::main(classification, c12n_config);
     }
 
     // configure logging, the object returned here owns the log processing internals

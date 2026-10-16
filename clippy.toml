@@ -1,0 +1,8 @@
+
+disallowed-methods = [
+    # Urls should be joined using the much safer path_segments_mut().(push or extend) methods
+    "url::Url::join"
+
+    #"std::option::Option::unwrap",
+    #"std::result::Result::unwrap" expect
+]
