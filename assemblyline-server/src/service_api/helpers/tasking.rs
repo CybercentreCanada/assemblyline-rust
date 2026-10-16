@@ -280,7 +280,7 @@ impl TaskingClient {
         }
 
         // Fix service version, we don't need to see the stable label
-        service.version = match service.version.remove_static() {
+        service.version = match service.version.remove_stable() {
             Ok(version) => version,
             Err(_) => return Err(RegisterError::Formatting("Service version took unexpected form".to_string())),
         };

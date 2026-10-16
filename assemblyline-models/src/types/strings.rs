@@ -140,8 +140,8 @@ impl ServiceVersion {
         Self(internment::Intern::from_ref("0.0"))
     }
 
-    pub fn remove_static(self) -> Result<Self, InvalidServiceVersion> {
-        Self::from_str(&self.0.replace("static", ""))
+    pub fn remove_stable(self) -> Result<Self, InvalidServiceVersion> {
+        Self::from_str(&self.0.replace("stable", ""))
     }
 }
 
