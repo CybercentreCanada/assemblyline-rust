@@ -14,7 +14,7 @@ use assemblyline_models::datastore::Service;
 use assemblyline_models::messages::changes::{HeuristicChange, Operation, ServiceChange};
 use assemblyline_models::messages::service_heartbeat::Metrics;
 use assemblyline_models::messages::task::Task;
-use assemblyline_models::types::strings::Keyword;
+use assemblyline_models::types::strings::{Keyword, ServiceVersion};
 use assemblyline_models::types::{ExpandingClassification, JsonMap, ServiceName, Sha256};
 use assemblyline_filestore::FileStore;
 use chrono::{TimeDelta, Utc};
@@ -280,7 +280,10 @@ impl TaskingClient {
         }
 
         // Fix service version, we don't need to see the stable label
-        service.version = service.version.replace("stable", "");
+        service.version = match service.version.remove_stable() {
+            Ok(version) => version,
+            Err(_) => return Err(RegisterError::Formatting("Service version took unexpected form".to_string())),
+        };
 
         Ok((service, heuristics))
     }
@@ -535,7 +538,7 @@ impl From<redis_objects::ErrorTypes> for RegisterError {
 }
 
 impl TaskingClient {
-    pub async fn get_task(&self, client_id: &str, service_name: ServiceName, service_version: &str, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
+    pub async fn get_task(&self, client_id: &str, service_name: ServiceName, service_version: ServiceVersion, service_tool_version: Option<&str>, status_expiry: Option<f64>, timeout: Duration) -> Result<(Option<Task>, bool)> {
         let metric_factory = self.get_metrics_factory(service_name);
         let start_time = std::time::Instant::now();
 
@@ -583,7 +586,7 @@ impl TaskingClient {
         }
 
         // check for cache hits
-        match self.check_cache(&task, &service_name, service_version, service_tool_version).await {
+        match self.check_cache(&task, service_name, service_version, service_tool_version).await {
             // cache hit, report metrics and retry
             Ok(CacheResult::Hit {score }) => {
                 increment!(metric_factory, cache_hit);
@@ -611,7 +614,7 @@ impl TaskingClient {
         return Ok((Some(task), false))
     }
 
-    async fn check_cache(&self, task: &Task, service_name: &ServiceName, service_version: &str, service_tool_version: Option<&str>) -> Result<CacheResult>  {
+    async fn check_cache(&self, task: &Task, service_name: ServiceName, service_version: ServiceVersion, service_tool_version: Option<&str>) -> Result<CacheResult>  {
         // get the cache key for if a result exists for this task already
         let result_key = ResultKeyBuilder::new(&task.fileinfo.sha256, service_name, service_version)
             .service_tool_version(service_tool_version)
