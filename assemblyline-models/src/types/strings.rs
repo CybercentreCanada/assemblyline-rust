@@ -89,7 +89,7 @@ impl Described<ElasticMeta> for ServiceName {
 /// The set of characters currently allowed in a service name.
 /// These names should, when possible, also be valid kubernetes/docker resource names, or easy to convert into one.
 fn is_service_name_character(value: char) -> bool {
-    // Space is only here for handling service catagories, which also use
+    // Space is only here for handling service catagories, which also use this type
     value.is_ascii_alphanumeric() || value == '_' || value == '-' || value == ' '
 }
 
@@ -171,7 +171,7 @@ impl<'de> Deserialize<'de> for ServiceVersion {
             type Value = ServiceVersion;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "expected a string holding a service name or category")
+                write!(formatter, "expected a string holding a service version")
             }
 
             fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
