@@ -1,6 +1,15 @@
-#![warn(missing_docs, non_ascii_idents, trivial_numeric_casts,
-    unused_crate_dependencies, noop_method_call, single_use_lifetimes, trivial_casts,
-    unused_lifetimes, nonstandard_style, variant_size_differences)]
+#![warn(
+    missing_docs,
+    non_ascii_idents,
+    trivial_numeric_casts,
+    unused_crate_dependencies,
+    noop_method_call,
+    single_use_lifetimes,
+    trivial_casts,
+    unused_lifetimes,
+    nonstandard_style,
+    variant_size_differences
+)]
 #![deny(keyword_idents)]
 // #![warn(clippy::missing_docs_in_private_items)]
 #![allow(clippy::needless_return)]
@@ -9,28 +18,27 @@
 //! A library to help access the Assemblyline API from rust
 
 mod types;
-mod connection;
+// mod connection;
 mod modules;
 
 use std::sync::Arc;
 
-use modules::file::File;
-use modules::help::Help;
+use assemblyline_utilities::{connection::{self, Connection, ServerType}, types::{authentication::Authentication, errors::ApiClientError}};
 use modules::alert::Alert;
 use modules::bundle::Bundle;
 use modules::error::Error;
-use modules::search::Search;
+use modules::file::File;
+use modules::help::Help;
 use modules::ingest::Ingest;
+use modules::search::Search;
 use modules::submit::Submit;
-pub use types::{Authentication, JsonMap};
-pub use connection::{Connection, TLSSettings};
-
+pub use types::{ JsonMap};
+// pub use connection::{Connection, TLSSettings};
 
 /// A client to communicate with the Assemblyline API
 pub struct Client {
     // Connection handler
     // _connection: Arc<Connection>,
-
     /// alert specific API endpoints
     pub alert: Alert,
     /// bundle specific API endpoints
@@ -65,8 +73,8 @@ pub struct Client {
 
 impl Client {
     /// Connect to an assemblyline system
-    pub async fn connect(server: String, auth: Authentication) -> Result<Self, types::Error> {
-        let connection = Arc::new(Connection::connect(server, auth, None, connection::TLSSettings::Native, Default::default(), None).await?);
+    pub async fn connect(server: String, auth: Authentication) -> Result<Self, ApiClientError> {
+        let connection = Arc::new(Connection::connect(server, ServerType::AssemblylineUiServer, true, auth, None, connection::TLSSettings::Native, Default::default(), None).await?);
         Ok(Self {
             alert: Alert::new(connection.clone()),
             bundle: Bundle::new(connection.clone()),
@@ -75,8 +83,7 @@ impl Client {
             help: Help::new(connection.clone()),
             ingest: Ingest::new(connection.clone()),
             search: Search::new(connection.clone()),
-            submit: Submit::new(connection)
-            // _connection,
+            submit: Submit::new(connection), // _connection,
         })
     }
 
@@ -90,29 +97,29 @@ impl Client {
             help: Help::new(connection.clone()),
             ingest: Ingest::new(connection.clone()),
             search: Search::new(connection.clone()),
-            submit: Submit::new(connection)
-            // _connection,
+            submit: Submit::new(connection), // _connection,
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {
 
     use std::sync::Arc;
 
-    use assemblyline_models::datastore::submission::{SubmissionParams, SubmissionState, ServiceSelection};
+    use assemblyline_models::datastore::submission::{ServiceSelection, SubmissionParams, SubmissionState};
     use assemblyline_models::types::ClassificationString;
+    use assemblyline_utilities::connection::{Connection, ServerType, TLSSettings};
+    use assemblyline_utilities::types::authentication::Authentication;
     use rand::RngExt;
 
-    use crate::{Authentication, Client, Connection};
+    use crate::Client;
 
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
-    pub (crate) async fn prepare_client() -> Client {
+    pub(crate) async fn prepare_client() -> Client {
         init();
         let url = std::env::var("ASSEMBLYLINE_URL").unwrap();
         let username = std::env::var("ASSEMBLYLINE_USER").unwrap();
@@ -120,13 +127,18 @@ mod tests {
 
         let connection = Connection::connect(
             url,
+            ServerType::AssemblylineUiServer,
+            true,
             Authentication::ApiKey { username, key },
             Some(2),
-            crate::TLSSettings::Native,
+            TLSSettings::Native,
             Default::default(),
-            Some(30.0)
-        ).await.unwrap();
+            Some(30.0),
+        )
+        .await
+        .unwrap();
         Client::from_connection(Arc::new(connection)).await.unwrap()
+
         // Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
     }
 
@@ -145,15 +157,21 @@ mod tests {
         let client = prepare_client().await;
         assemblyline_models::disable_global_classification();
 
-        let result = client.submit.single()
+        let result = client
+            .submit
+            .single()
             .metadata_item("testbatch".to_owned(), "0".to_owned())
-            .params(SubmissionParams{ ttl: 1, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_string()))})
+            .params(SubmissionParams {
+                ttl: 1,
+                ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_string()))
+            })
             .fname("test-file".to_owned())
-            .content(random_body()).await.unwrap();
+            .content(random_body())
+            .await
+            .unwrap();
 
         assert_eq!(result.state, SubmissionState::Submitted);
     }
-
 
     #[tokio::test]
     async fn search_single_page() {
@@ -162,36 +180,46 @@ mod tests {
         let batch: u64 = rand::rng().random();
         let batch: String = batch.to_string();
 
-        let _result = client.ingest.single()
+        let _result = client
+            .ingest
+            .single()
             .metadata_item("testbatch".to_owned(), batch.clone())
             .notification_queue(batch.clone())
-            .params(SubmissionParams{ priority: 300, ttl: 1, services: ServiceSelection{ selected: vec!["Characterize".into()], ..Default::default()}, ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))})
+            .params(SubmissionParams {
+                priority: 300,
+                ttl: 1,
+                services: ServiceSelection {
+                    selected: vec!["Characterize".into()],
+                    ..Default::default()
+                },
+                ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))
+            })
             .fname("test-file".to_owned())
-            .content(random_body()).await.unwrap();
+            .content(random_body())
+            .await
+            .unwrap();
 
         for _ in 0..100 {
             match client.ingest.get_message(&batch).await.unwrap() {
                 Some(message) => {
                     assert_eq!(message.submission.metadata.get("testbatch").unwrap(), &batch);
                     break;
-                },
-                None => { tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; },
+                }
+                None => {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
             }
         }
 
         for _ in 0..10 {
-            let result = client.search.submission(format!("metadata.testbatch: {batch}"))
-                .search().await.unwrap();
+            let result = client.search.submission(format!("metadata.testbatch: {batch}")).search().await.unwrap();
 
             if result.items.len() == 1 {
-                return
+                return;
             }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
         panic!()
     }
-
-
-
 }
