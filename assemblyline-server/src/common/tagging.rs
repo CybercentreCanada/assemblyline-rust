@@ -155,7 +155,7 @@ impl TagSafelister {
                     let mut regexes = vec![];
                     for exp in v {
                         let valid = Regex::new(&exp)?;
-                        let normalized = Regex::new(&format!("^(:?{valid})$"))?;
+                        let normalized = Regex::new(&format!("^(?:{valid})$"))?;
                         regexes.push(normalized);
                     }
                     new.regex.insert(k, regexes);
