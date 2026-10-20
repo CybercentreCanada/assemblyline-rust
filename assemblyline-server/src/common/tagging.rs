@@ -262,3 +262,50 @@ pub async fn tag_safelist_watcher(config: Arc<Config>, ds: Arc<Elastic>, config_
     });
     Ok(data)
 }
+
+#[cfg(test)]
+mod tests {
+    use regex::Regex;
+    use super::SafelistFile;
+
+    /// Unanchored, start-anchored and fully anchored matching must all agree.
+    fn default_safelist_matches(tag: &str, value: &str) -> [bool; 3] {
+        let data: SafelistFile = serde_yaml::from_str(include_str!("tag_safelist.yml")).unwrap();
+        let patterns = data.regex.get(tag).unwrap();
+        ["{p}", "^(?:{p})", "^(?:{p})$"].map(|wrapper| {
+            patterns.iter().any(|p| Regex::new(&wrapper.replace("{p}", p)).unwrap().is_match(value))
+        })
+    }
+
+    #[test]
+    fn default_safelist_pattern_boundaries() {
+        let cases = [
+            ("network.static.uri", "http://schemas.openxmlformats.org/officeDocument/2006/relationships", true),
+            ("network.static.uri", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", true),
+            ("network.static.uri", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject", true),
+            ("network.static.uri", "http://schemas.openxmlformats.org/officeDocument/2006/math", true),
+            ("network.static.uri", "http://schemas.openxmlformats.org/package/2006/relationships", true),
+            ("network.static.uri", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", true),
+            ("network.static.uri", "https://schemas.openxmlformats.org.evil.ru/package/2006/relationships/x", false),
+            ("network.dynamic.uri", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", true),
+            ("network.dynamic.uri", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", true),
+            ("network.dynamic.uri", "https://www.google.com", true),
+            ("network.dynamic.uri", "https://www.google.ca/", true),
+            ("network.dynamic.uri", "https://www.google.com.evil.ru/x", false),
+            ("network.dynamic.uri", "https://files.acrobat.com", true),
+            ("network.dynamic.uri", "https://files.acrobat.com:443", true),
+            ("network.dynamic.uri", "files.acrobat.com/", true),
+            ("network.dynamic.uri", "https://files.acrobat.com:443.evil.ru/x", false),
+            ("network.dynamic.uri", "https://files.acrobat.com.evil.ru/", false),
+            ("network.dynamic.domain", "foo.blob.core.windows.net", true),
+            ("network.dynamic.domain", "foo.table.core.windows.net", true),
+            ("network.dynamic.domain", "foo.opinsights.azure.com", true),
+            ("network.dynamic.domain", "foo.blob.core.windows.net.evil.com", false),
+            ("network.dynamic.domain", "foo.table.core.windows.net.evil.com", false),
+            ("network.dynamic.domain", "foo.opinsights.azure.com.evil.com", false),
+        ];
+        for (tag, value, safelisted) in cases {
+            assert_eq!(default_safelist_matches(tag, value), [safelisted; 3], "{tag} {value}");
+        }
+    }
+}
