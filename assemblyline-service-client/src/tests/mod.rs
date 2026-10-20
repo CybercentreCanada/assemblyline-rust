@@ -13,8 +13,7 @@ pub mod test_task_uploader;
 pub(crate) mod mock_service_api;
 
 use assemblyline_models::{
-    messages::service_api::{self, result::Result as ServiceResult},
-    types::{ClassificationString, ServiceName, Sha256},
+    messages::service_api::{self, result::Result as ServiceResult}, types::{ClassificationString, ServiceName, Sha256, strings::ServiceVersion},
 };
 
 use nom::AsBytes;
@@ -36,7 +35,7 @@ pub fn test_sha_file() -> (String, Vec<u8>) {
 pub fn create_random_service_result(
     sha256: Sha256,
     service_name: ServiceName,
-    service_version: String,
+    service_version: ServiceVersion,
     service_tool_version: Option<String>,
 ) -> ServiceResult {
     let response = service_api::result::ResponseBody {

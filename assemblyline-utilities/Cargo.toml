@@ -11,7 +11,7 @@ description = """Utility library for functionalities shared between different as
 [dependencies]
 
 # Data managing
-assemblyline-models = { version = "0.8", path = "../assemblyline-models", features = ["rand"] }
+assemblyline-models = { version = "1.0", path = "../assemblyline-models", features = ["rand"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 serde_yaml = "0.9"

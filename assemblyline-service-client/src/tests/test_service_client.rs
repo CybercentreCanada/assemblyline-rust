@@ -356,7 +356,7 @@ async fn test_register_service_no_extra_data() {
     // the service client should send the raw data, without adding any default value
     // (the service server will fill in other unspecified data based on the system default)
 
-    let test_service_name = ServiceName::from_string("TEST_SERVICE_NAME".to_owned());
+    let test_service_name = ServiceName::from_str("TEST_SERVICE_NAME").unwrap();
     let test_service_version = "v0.0.-0".to_owned();
 
     let minimal_service_manifest = json!({
@@ -404,7 +404,7 @@ async fn test_register_service_no_extra_data() {
     // service should load service name and version from manifest file.
     // runtime service manifest file created
     assert_eq!(sc.service_info.name, test_service_name);
-    assert_eq!(sc.service_info.version, test_service_version);
+    assert_eq!(sc.service_info.version.to_string(), test_service_version);
     assert!(runtime_manifest_path.exists());
 
     // after register with the service, the runtime manifest is updated.
@@ -444,7 +444,7 @@ async fn test_service_client_connection() {
         ("container-id".to_string(), "test_container_id".to_string()),
         ("service-name".to_string(), test_manifest.service.name.to_string()),
         ("service-tool-version".to_string(), test_manifest.tool_version.unwrap_or("".to_string())),
-        ("service-version".to_string(), test_manifest.service.version),
+        ("service-version".to_string(), test_manifest.service.version.to_string()),
     ]);
 
     let sc_running = Arc::new(Mutex::new(true));

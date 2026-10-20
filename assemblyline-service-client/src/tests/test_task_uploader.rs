@@ -68,7 +68,7 @@ fn initialize_upload_error_test_data() -> (ServiceManifest, ServiceInfo, Task) {
     let service_name = test_manifest.service.name.clone();
     let service_info = ServiceInfo {
         name: test_manifest.service.name.clone(),
-        version: test_manifest.service.version.clone()
+        version: test_manifest.service.version
     };
 
     initial_task.service_name = service_name.clone();

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::datastore;
 use crate::datastore::error::ErrorTypes;
 use crate::datastore::result::{default_file_parent_relation, BodyFormat, Milestone, PromoteTo};
+use crate::types::strings::ServiceVersion;
 use crate::types::{ClassificationString, JsonMap, ServiceName, Sha256, Text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -100,7 +101,7 @@ pub struct ResponseBody {
     #[serde(default)]
     pub milestones: Milestone,
     /// Version of the service
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     /// Name of the service that scanned the file
     pub service_name: ServiceName,
     /// Tool version of the service

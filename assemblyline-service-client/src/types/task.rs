@@ -1,6 +1,5 @@
 use assemblyline_models::{
-    messages::task::Task,
-    types::{ServiceName, Sha256},
+    messages::task::Task, types::{ServiceName, Sha256, strings::ServiceVersion},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,7 +8,7 @@ use serde_json::Value;
 pub struct ErrorResponse {
     pub message: String,
     pub service_name: ServiceName,
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     #[serde(default)]
     pub service_tool_version: Option<String>,
     pub status: String,

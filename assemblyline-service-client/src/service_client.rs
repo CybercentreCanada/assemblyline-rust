@@ -143,8 +143,8 @@ impl ServiceClient {
         let mut service_manifest: SimplifiedServiceManifest = serde_yaml::from_reader(&runtime_manifest_file)?;
 
         // update service manifest version tag if it is the placeholder value
-        if service_manifest.service.version == PLACEHOLDER_VERSION_TAG {
-            service_manifest.service.version = get_version().clone();
+        if *service_manifest.service.version == *PLACEHOLDER_VERSION_TAG {
+            service_manifest.service.version = get_version().parse()?;
             warn!(
                 "Replacing placeholder version tag {PLACEHOLDER_VERSION_TAG} with {}",
                 &service_manifest.service.version
@@ -177,7 +177,7 @@ impl ServiceClient {
         headers.insert("X-APIKey".to_string(), service_api_key.clone());
         headers.insert("Container-ID".to_string(), container_id.clone());
         headers.insert("Service-Name".to_string(), service_manifest.service.name.to_string());
-        headers.insert("Service-Version".to_string(), service_manifest.service.version.clone());
+        headers.insert("Service-Version".to_string(), service_manifest.service.version.to_string());
         headers.insert(
             "Service-Tool-Version".to_string(),
             service_manifest.tool_version.clone().unwrap_or("".to_string()),
@@ -229,7 +229,7 @@ impl ServiceClient {
         headers.insert("X-APIKey".to_string(), self.service_api_key.clone());
         headers.insert("Container-ID".to_string(), self.container_id.clone());
         headers.insert("Service-Name".to_string(), self.service_info.name.to_string());
-        headers.insert("Service-Version".to_string(), self.service_info.version.clone());
+        headers.insert("Service-Version".to_string(), self.service_info.version.to_string());
         headers.insert("Service-Tool-Version".to_string(), self.tool_version.clone().unwrap_or("".to_string()));
 
         let _ = self.connection.update_client_default_headers(headers).await.map_err(|e| anyhow!(e));

@@ -224,8 +224,8 @@ impl MockService {
                     } else if self.task_done_success {
                         let service_result = create_random_service_result(
                             task.fileinfo.sha256.clone(),
-                            self.service.name.clone(),
-                            self.service.version.clone(),
+                            self.service.name,
+                            self.service.version,
                             None,
                         );
 
