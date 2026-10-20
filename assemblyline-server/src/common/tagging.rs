@@ -143,7 +143,7 @@ impl TagSafelister {
         };
 
         let valid_tags = flat_fields(Tagging::metadata())?;
-        
+
         // Validate matches and regex
         for (section, item) in [("match", data.match_), ("regex", data.regex)] {
             for (k, v) in item {
@@ -154,7 +154,9 @@ impl TagSafelister {
                 if section == "regex" {
                     let mut regexes = vec![];
                     for exp in v {
-                        regexes.push(Regex::new(&exp)?);
+                        let valid = Regex::new(&exp)?;
+                        let normalized = Regex::new(&format!("^(?:{valid})$"))?;
+                        regexes.push(normalized);
                     }
                     new.regex.insert(k, regexes);
                 } else {
