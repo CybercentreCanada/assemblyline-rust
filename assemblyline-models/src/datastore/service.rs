@@ -6,11 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
 
-#[cfg(feature = "rand")]
-use crate::random_word;
-use crate::types::classification::{
-    unrestricted_classification, unrestricted_classification_string,
-};
+use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
+use crate::types::strings::ServiceVersion;
 use crate::types::{ClassificationString, JsonMap, NonZeroInteger, ServiceName, Text};
 use crate::{ElasticMeta, Readable};
 
@@ -432,8 +429,8 @@ pub struct Service {
     #[metadata(store = true, copyto = "__text__")]
     pub name: ServiceName,
     /// Version of service
-    #[metadata(store = true)]
-    pub version: String,
+    #[metadata(store=true)]
+    pub version: ServiceVersion,
 
     /// Should the service be able to talk to core infrastructure or just service-server for tasking?
     #[serde(default)]
@@ -472,7 +469,7 @@ pub struct Service {
 }
 
 fn default_category() -> ServiceName {
-    ServiceName::from_string("Static Analysis".to_owned())
+    ServiceName::static_analysis_category()
 }
 fn default_description() -> Text {
     Text("NA".to_owned())

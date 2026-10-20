@@ -185,11 +185,11 @@ mod tests {
             .single()
             .metadata_item("testbatch".to_owned(), batch.clone())
             .notification_queue(batch.clone())
-            .params(SubmissionParams {
+            .params(SubmissionParams{
                 priority: 300,
                 ttl: 1,
-                services: ServiceSelection {
-                    selected: vec!["Characterize".into()],
+                services: ServiceSelection{
+                    selected: vec!["Characterize".parse().unwrap()],
                     ..Default::default()
                 },
                 ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))

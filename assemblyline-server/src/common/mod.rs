@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use md5::Digest;
 
 pub mod heuristics;
