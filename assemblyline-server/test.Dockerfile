@@ -25,7 +25,6 @@ COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/
 ENV PYTHONPATH=/usr/local/lib/python3/dist-packages/
 
 # Build the executable
-RUN cargo build --target-dir /out
 RUN cargo build --release --target-dir /out
 
 # Remove the code so we don't accidentally use it again
