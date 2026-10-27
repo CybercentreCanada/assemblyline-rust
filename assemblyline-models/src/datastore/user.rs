@@ -7,7 +7,7 @@ use struct_metadata::Described;
 use strum::IntoEnumIterator;
 
 use crate::{ElasticMeta, Readable, };
-use crate::types::{Email, UpperString, ExpandingClassification};
+use crate::types::{Email, UpperString, ExpandingClassification, Text};
 
 
 
@@ -372,6 +372,9 @@ pub struct User {
     /// Full name of the user
     #[metadata(copyto="__text__")]
     pub name: String,
+    /// Organization the user belongs to
+    #[serde(default)]
+    pub organization: Option<Text>,
     /// Secret key to generate one time passwords
     #[metadata(index=false, store=false)]    
     #[serde(default)]
@@ -429,6 +432,7 @@ impl User {
             identity_id: None,
             is_active: default_user_is_active(),
             name: "User".to_owned(),
+            organization: None,
             otp_sk: None,
             password: Default::default(),
             submission_quota: None,
