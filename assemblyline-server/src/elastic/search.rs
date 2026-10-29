@@ -13,7 +13,7 @@ use crate::elastic::DEFAULT_SEARCH_FIELD;
 
 use super::pit::PitGuard;
 use super::collection::{Collection, DEFAULT_ROW_SIZE, DEFAULT_SORT};
-use super::{parse_sort, responses, Index, Request, Result};
+use super::{parse_sort, responses, Backend, Index, Request, Result};
 
 
 
@@ -104,7 +104,13 @@ impl<'a, T: Serialize + Readable + Described<ElasticMeta> + Debug> SearchBuilder
         };
 
         let sort = parse_sort(&self.sort)?;
-        let sort = sort.iter().map(|(name, direction)|format!("{name}:{direction}")).collect_vec();
+        let mut sort = sort.iter().map(|(name, direction)|format!("{name}:{direction}")).collect_vec();
+        if matches!(self.target, Target::Pit { .. })
+            && self.collection.database.backend == Backend::Opensearch
+            && !sort.iter().any(|item| item.starts_with("_shard_doc:"))
+        {
+            sort.push("_shard_doc:asc".to_owned());
+        }
 
         let mut params: Vec<(&str, Cow<str>)> = vec![];
         params.push(("size", self.rows.to_string().into()));
