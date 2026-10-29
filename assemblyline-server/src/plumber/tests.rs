@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::time::Duration;
 
 use assemblyline_models::messages::task::Task;
@@ -65,7 +66,7 @@ fn opensearch_startup_skips_credentials_worker_and_security_plugin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_expire_missing_service() {
     // Setup so that service 'a' is the only one
-    let name = ServiceName::from("a");
+    let name = ServiceName::from_str("a").unwrap();
     let services = [
         (name, dummy_service("a", "core", None, None, None, None))
     ].into();
@@ -91,7 +92,7 @@ async fn test_expire_missing_service() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_flush_paused_queues() {
     // Setup so that service 'a' is the only one
-    let name = ServiceName::from("a");
+    let name = ServiceName::from_str("a").unwrap();
     let services = [
         (name, dummy_service("a", "core", None, None, None, None))
     ].into();
@@ -124,7 +125,7 @@ async fn test_flush_paused_queues() {
 // Newer versions of elastic block writing to the .tasks index
 #[tokio::test(flavor = "multi_thread")]
 async fn test_cleanup_old_tasks() {
-    let name = ServiceName::from("a");
+    let name = ServiceName::from_str("a").unwrap();
     let services = [
         (name, dummy_service("a", "core", None, None, None, None))
     ].into();
@@ -156,7 +157,8 @@ async fn test_cleanup_old_tasks() {
                 }
             });
 
-            let mut url = connection.host.join(".tasks/_doc/").unwrap();
+            let mut url = connection.host.clone();
+            url.path_segments_mut().unwrap().pop_if_empty().extend(&[".tasks", "_doc"]);
             url.set_query(Some("refresh=true"));
             let request = Request::new_on_document(Method::POST, url, ".tasks".to_string(), "".to_string());
             connection.make_request_json(&mut 0, &request, &body).await.unwrap();

@@ -8,7 +8,7 @@ use crate::{ElasticMeta, types::{Sha256, ClassificationString, Text, ExpandingCl
 #[derive(SerializeDisplay, DeserializeFromStr, Debug, PartialEq, Eq, strum::Display, strum::EnumString, Described, Clone, Copy)]
 #[metadata_type(ElasticMeta)]
 #[strum(serialize_all = "snake_case")]
-pub enum IndexCatagory {
+pub enum IndexCategory {
     Hot = 1,
     Archive = 2,
     HotAndArchive = 3,
@@ -20,7 +20,7 @@ pub enum IndexCatagory {
 #[metadata(index=true, store=true)]
 pub struct Retrohunt {
     /// Which archive catagories do we run on
-    pub indices: IndexCatagory,
+    pub indices: IndexCategory,
     /// Classification for the retrohunt job
     #[serde(flatten)]
     pub classification: ExpandingClassification,

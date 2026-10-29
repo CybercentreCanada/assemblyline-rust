@@ -10,6 +10,7 @@ use anyhow::{bail, Result};
 use assemblyline_models::datastore::{result, EmptyResult, Error};
 use assemblyline_models::messages::dispatching::{SubmissionDispatchMessage, WatchQueueMessage};
 use assemblyline_models::messages::task::{ResultSummary, ServiceError, ServiceResult, Task as ServiceTask};
+use assemblyline_models::types::strings::ServiceVersion;
 use assemblyline_models::types::{JsonMap, ServiceName, Sid};
 use log::{debug, error, info, warn};
 use reqwest::StatusCode;
@@ -28,7 +29,7 @@ const UPDATE_INTERVAL: chrono::TimeDelta = chrono::TimeDelta::seconds(120);
 //     pass
 
 pub trait DispatchCapable: 'static + Send + Sync {
-    fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> impl Future<Output=Result<Option<ServiceTask>>> + Send;
+    fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: ServiceVersion, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> impl Future<Output=Result<Option<ServiceTask>>> + Send;
     fn service_finished(&self, task: &ServiceTask, result_key: String, result: result::Result, temporary_data: Option<JsonMap>, version: Option<Version>, errors: Vec<Error>) -> impl Future<Output=Result<()>> + Send;
     fn service_failed(&self, task: ServiceTask, error_key: &str, error: Error) -> impl Future<Output=Result<()>> + Send;
 }
@@ -65,7 +66,7 @@ impl DispatchCapable for DispatchClient {
     // :param blocking: Whether to wait for jobs to enter the queue, or if false, return immediately
     // :return: The job found, and a boolean value indicating if this is the first time this task has
     //         been returned by request_work.
-    async fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: &str, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
+    async fn request_work(&self, worker_id: &str, service_name: ServiceName, service_version: ServiceVersion, timeout: Option<Duration>, blocking: bool, low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
         let timeout = timeout.unwrap_or_else(|| Duration::from_secs(120));
         let low_priority = low_priority.unwrap_or_default();
         let start = std::time::Instant::now();
@@ -298,13 +299,16 @@ impl DispatchClient {
 //         self.service_data = cast(dict[str, Service], CachedObject(self._get_services))
 //         self.dead_dispatchers = []
 
-        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
-        match crate::config::get_cluster_ca_cert().await? {
+        // This http client for communicating with the dispatchers shouldn't validate hostnames as a the disptachers
+        // won't have certificates that are attached to their address.
+        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5))
+            .tls_danger_accept_invalid_hostnames(true);
+        match crate::config::get_dispatcher_ca().await? {
             Some(cert) => {
                 let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
                 http_client = http_client.add_root_certificate(cert);
             }
-            None => http_client = http_client.danger_accept_invalid_certs(true),
+            None => http_client = http_client.tls_danger_accept_invalid_certs(true),
         }
 
         Ok(Self {
@@ -416,7 +420,7 @@ impl DispatchClient {
 //             return queue.pop(timeout=5)
 //         return {}
 
-    async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: &str,
+    async fn _request_work(&self, worker_id: &str, service_name: ServiceName, _service_version: ServiceVersion,
                            timeout: Duration, blocking: bool, low_priority: bool) -> Result<Option<ServiceTask>>
     {
         let start_time = std::time::Instant::now();
@@ -571,7 +575,7 @@ impl MockDispatchClient {
 
 #[cfg(test)]
 impl DispatchCapable for MockDispatchClient {
-    async fn request_work(&self, _worker_id: &str, service_name: ServiceName, _service_version: &str, timeout: Option<Duration>, blocking: bool, _low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
+    async fn request_work(&self, _worker_id: &str, service_name: ServiceName, _service_version: ServiceVersion, timeout: Option<Duration>, blocking: bool, _low_priority: Option<bool>) -> Result<Option<ServiceTask>> {
         let queue = self.core.get_service_queue(&service_name);
         if blocking {
             let timeout = timeout.unwrap_or(Duration::from_secs(1));

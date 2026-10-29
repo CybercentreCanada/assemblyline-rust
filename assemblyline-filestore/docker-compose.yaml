@@ -1,13 +1,19 @@
 
 services:
   minio:
-    image: minio/minio
+    image: cccs/minio
     environment:
       MINIO_ROOT_USER: al_storage_key
       MINIO_ROOT_PASSWORD: Ch@ngeTh!sPa33w0rd
     ports:
       - "9000:9000"
     command: server /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   azure:
     image: mcr.microsoft.com/azure-storage/azurite
@@ -18,8 +24,19 @@ services:
     command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck --disableProductStyleUrl
 
   floci:
-    image: floci/floci
+    image: floci/floci:2.0.0
     environment:
       - FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED=true
     ports:
       - "4566:4566"
+
+  cargo_test:
+    image: rust:1.96-trixie
+    volumes:
+      - ../:/usr/src/
+    working_dir: /usr/src/assemblyline-filestore
+    command: "cargo test --target-dir /out"
+    network_mode: "host"
+    depends_on:
+      minio:
+        condition: service_healthy

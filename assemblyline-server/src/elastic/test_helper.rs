@@ -5,6 +5,7 @@ use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::ready_classification;
 use assemblyline_models::datastore::result::ResultKeyBuilder;
 use assemblyline_models::datastore::{File, Service};
+use assemblyline_models::types::strings::ServiceVersion;
 use assemblyline_models::types::{JsonMap, ServiceName, Sha256};
 use log::debug;
 use serde_json::json;
@@ -59,7 +60,7 @@ async fn list_services() {
     }
 
     // change one of the services
-    aa.category = "DOGHOUSE".into();
+    aa.category = "DOGHOUSE".parse().unwrap();
     aa.enabled = false;
     {
         debug!("update delta");
@@ -466,12 +467,12 @@ async fn test_create_empty_result() {
 
     // Set expected values
     let classification = cl_engine.unrestricted();
-    let svc_name: ServiceName = "TEST".into();
-    let svc_version = "4";
+    let svc_name: ServiceName = "TEST".parse().unwrap();
+    let svc_version: ServiceVersion = "4".parse().unwrap();
     let sha256: Sha256 = "a123".repeat(16).parse().unwrap();
 
     // Build result key
-    let result_key = ResultKeyBuilder::new(&sha256, &svc_name, svc_version)
+    let result_key = ResultKeyBuilder::new(&sha256, svc_name, svc_version)
         .is_empty(true)
         .build().unwrap();
 

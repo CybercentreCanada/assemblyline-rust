@@ -20,8 +20,10 @@ use assemblyline_models::messages::task::{DataItem, FileInfo, ResultSummary, Ser
 use assemblyline_models::messages::KillContainerCommand;
 use assemblyline_models::messages::service_heartbeat::Metrics as ServiceMetrics;
 use assemblyline_models::messages::dispatcher_heartbeat::Metrics;
+use assemblyline_models::types::strings::ServiceVersion;
 use assemblyline_models::types::{Wildcard, ExpandingClassification, JsonMap, Sha256, Sid, ServiceName};
 use assemblyline_models::Readable;
+use assemblyline_utilities::logging::FormattedList;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
@@ -39,7 +41,6 @@ use crate::common::metrics::CPUTracker;
 use crate::constants::{make_watcher_list_name, COMPLETE_QUEUE_NAME, DISPATCH_TASK_HASH, METRICS_CHANNEL, SCALER_TIMEOUT_QUEUE, SUBMISSION_QUEUE};
 use crate::elastic::Elastic;
 use crate::http::TlsAcceptor;
-use crate::logging::FormattedList;
 use crate::postprocessing::ActionWorker;
 use crate::services::{get_schedule_names, ServiceHelper};
 use crate::{Core, Flag};
@@ -350,7 +351,13 @@ impl SubmissionTask {
                         Err(_) => continue,
                     };
 
-                    let service = ServiceName::from(service);
+                    let service = match service.parse() {
+                        Ok(service) => service,
+                        Err(err) => {
+                            error!("Refused service name {service} {err}");
+                            continue
+                        },
+                    };
                     let service = match scheduler.get(service) {
                         Some(service) => service,
                         None => continue,
@@ -392,7 +399,13 @@ impl SubmissionTask {
                     }
 
                     // stored all the child - parent file information from service results if the file is not getting rescanned by the service
-                    let service = ServiceName::from_string(service.to_owned());
+                    let service = match service.parse() {
+                        Ok(service) => service,
+                        Err(err) => {
+                            error!("Refused service name {service} {err}");
+                            continue
+                        }
+                    };
 
                     if !rescan.contains(&service) {
                         let extracted = result.response.extracted.to_owned();
@@ -415,7 +428,13 @@ impl SubmissionTask {
         for e in args.errors {
             if let [sha256, service, ..] = e.splitn(3, ".").collect_vec()[..] {
                 if let Ok(sha256) = sha256.parse() {
-                    let service = ServiceName::from(service);
+                    let service = match service.parse() {
+                        Ok(service) => service,
+                        Err(err) => {
+                            error!("Refused service name {service} {err}");
+                            continue
+                        },
+                    };
                     out.service_errors.insert((sha256, service), e);
                 }
             }
@@ -2033,7 +2052,7 @@ impl Dispatcher {
                 task.dropped_files.insert(sha256.clone());
 
                 let error = error::Error::from_submission(&task.submission)
-                    .service("Dispatcher".into(), "4.7".to_owned())
+                    .service("Dispatcher".parse()?, "4.7".parse()?)
                     .sha256(sha256.clone())
                     .error_type(error::ErrorTypes::Unknown)
                     .message(format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid));
@@ -2207,8 +2226,7 @@ impl Dispatcher {
             trace_event!(task, "submission_check", "Finished");
             debug!("[{sid}] Finalizing submission.");
             // accumulate the score, submissions with no results have no score
-            // max_score = max(file_scores.values()) if file_scores else 0
-            let max_score = file_scores.values().fold(0, |a, b| a.max(*b));
+            let max_score = file_scores.values().copied().max().unwrap_or(0);
             self.finalize_submission(task, max_score, checked).await?;
             return Ok(true)
         }
@@ -2353,7 +2371,7 @@ impl Dispatcher {
         }
 
         let error = error::Error::from_submission(&task.submission)
-            .service(service_name, "0".to_string())
+            .service(service_name, ServiceVersion::zero())
             .sha256(sha256.clone())
             .error_type(error::ErrorTypes::TaskPreempted)
             .message(error_details);

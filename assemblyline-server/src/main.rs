@@ -3,7 +3,7 @@
 #![warn(missing_docs, non_ascii_idents, trivial_numeric_casts,
     unused_crate_dependencies, noop_method_call, single_use_lifetimes, trivial_casts,
     unused_lifetimes, nonstandard_style, variant_size_differences)]
-#![deny(keyword_idents)]
+#![deny(keyword_idents, clippy::disallowed_methods)]
 // #![warn(clippy::missing_docs_in_private_items)]
 #![allow(
     // allow these as they sometimes improve clarity
@@ -16,53 +16,52 @@
 use std::{path::PathBuf, process::ExitCode, sync::Arc, fs};
 
 use anyhow::{Context, Result};
+use assemblyline_filestore::FileStore;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_markings::config::{ready_classification, ClassificationConfig};
-use assemblyline_filestore::FileStore;
 use assemblyline_models::config::Config;
+use assemblyline_utilities::logging::configure_logging;
 use cachestore::CacheStore;
 use clap::{Parser, Subcommand};
 use common::flag::Flag;
 use elastic::Elastic;
 use identify::Identify;
-use redis_objects::RedisObjects;
 use log::{error, info};
+use ort as _;
+use redis_objects::RedisObjects;
 use services::ServiceHelper;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use ort as _;
 
-use crate::logging::configure_logging;
-
-mod ingester;
-mod submit;
-mod http;
+mod archive;
+mod cachestore;
+mod config;
+mod constants;
 mod core_dispatcher;
 mod core_metrics;
 mod core_util;
-mod archive;
-mod services;
 mod dispatcher;
-mod postprocessing;
 mod elastic;
-mod logging;
 mod error;
-mod constants;
-mod config;
+mod http;
 mod identify;
-mod cachestore;
-mod string_utils;
+mod ingester;
 mod plumber;
+mod postprocessing;
 mod service_api;
+mod services;
+mod string_utils;
+mod submit;
+mod validate_classification;
 mod common;
+
 
 #[cfg(test)]
 mod tests;
 
-
 #[derive(Debug, Parser)]
-#[command(name="assemblyline")]
-#[command(bin_name="assemblyline")]
+#[command(name = "assemblyline")]
+#[command(bin_name = "assemblyline")]
 struct Args {
     /// Path to the assemblyline configuration file
     #[arg(short, long)]
@@ -77,30 +76,23 @@ struct Args {
     enable_apm: bool,
 
     #[command(subcommand)]
-    pub command: Commands
+    pub command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Ingester {
-
-    },
-    Dispatcher {
-
-    },
-    Plumber {
-
-    },
+    Ingester {},
+    Dispatcher {},
+    Plumber {},
     ServiceAPI {
         /// If set and no tls configuration is provided revert to http rather than using a self signed certificate
         #[arg(long, default_value_t=false)]
         allow_http_mode: bool
     },
-    ClassificationValidate {
+    ValidateClassification {
         // This command should accept a classification string that the parser will attempt to load and validate relative to the current definition
         #[arg(last = true)]
         classification: String,
-
     }
 }
 
@@ -111,11 +103,10 @@ impl Commands {
             Commands::Dispatcher { .. } => "dispatcher",
             Commands::Plumber { .. } => "plumber",
             Commands::ServiceAPI { .. } => "service_server",
-            Commands::ClassificationValidate { .. } => "classification_validate",
+            Commands::ValidateClassification { .. } => "validate_classification",
         }
     }
 }
-
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -125,51 +116,33 @@ async fn main() -> ExitCode {
     // Load configuration
     let (config, config_path) = load_configuration(args.config).await.expect("Could not load configuration");
 
-    // configure logging, the object returned here owns the log processing internals
-    // and needs to be held until the program ends
-    let _log_manager = configure_logging(&config).expect("Could not configure logging");
-    info!("Configuration loaded from: {}", config_path.to_string_lossy());
-
     // This utility command runs before initializing the core
-    if let Commands::ClassificationValidate { classification } = args.command {
+    if let Commands::ValidateClassification { classification } = args.command {
+
         // For troubleshooting ensure it's understood what the parser is using when performing validation
         let c12n_config = match &config.classification.path {
             Some(config_path) => {
-                info!("Testing against mounted classification configuration: {config_path:?}");
+                println!("Testing against mounted classification configuration: {config_path:?}");
                 ready_classification(Some(&fs::read_to_string(config_path).expect("Could not read classification config from file"))).expect("Could not load classification config from file")
             },
             None => {
-                info!("No mounted classification configuration found. Proceeding with default configuration...");
+                println!("No mounted classification configuration found. Proceeding with default configuration...");
                 ClassificationConfig::default()
             }
         };
 
-        // Validate the classification string and print the normalized result or an error
-        match ClassificationParser::new(c12n_config) {
-            Ok(parser) => {
-                match parser.normalize_classification(&classification) {
-                            Ok(norm_c12n) => {
-                                println!("Classification is valid: {norm_c12n:#?}");
-                                return ExitCode::SUCCESS;
-                            },
-                            Err(err) => {
-                                println!("Classification is invalid: {err:?}");
-                                return ExitCode::FAILURE;
-                            }
-                        }
-            },
-            Err(err) => {
-                println!("Classification configuration is invalid: {err:?}");
-                return ExitCode::FAILURE;
-            }
-        };        
+        return crate::validate_classification::main(classification, c12n_config);
     }
+
+    // configure logging, the object returned here owns the log processing internals
+    // and needs to be held until the program ends
+    let _log_manager: flexi_logger::LoggerHandle = configure_logging(&config).expect("Could not configure logging");
+    info!("Configuration loaded from: {}", config_path.to_string_lossy());
 
     // Configure APM
     if let Some(url) = &config.core.metrics.apm_server.server_url {
         if args.enable_apm {
-            let config = tracing_elastic_apm::config::Config::new(url.to_string())
-                .allow_invalid_certificates(true);
+            let config = tracing_elastic_apm::config::Config::new(url.to_string()).allow_invalid_certificates(true);
 
             let layer = tracing_elastic_apm::new_layer(args.command.label().to_string(), config).expect("Could not initialize APM");
 
@@ -217,10 +190,9 @@ async fn main() -> ExitCode {
         Err(err) => {
             error!("Module error: {err:?}");
             return ExitCode::FAILURE;
-        },
+        }
     }
 }
-
 
 async fn load_configuration(path: Option<PathBuf>) -> Result<(Arc<Config>, PathBuf)> {
     // figure out which file path to use
@@ -229,8 +201,8 @@ async fn load_configuration(path: Option<PathBuf>) -> Result<(Arc<Config>, PathB
         None => match std::env::var("ASSEMBLYLINE_CONFIG_PATH") {
             Ok(path) => PathBuf::from(path),
             Err(std::env::VarError::NotPresent) => PathBuf::from("/etc/assemblyline/config.yml"),
-            Err(err) => return Err(err.into())
-        }
+            Err(err) => return Err(err.into()),
+        },
     };
 
     // load environment variables into config
@@ -294,7 +266,7 @@ impl Core {
 
         // connect to elastic
         let datastore_ca = get_datastore_ca().await?;
-        let datastore_ca = datastore_ca.as_ref().map(|val|&val[..]);
+        let datastore_ca = datastore_ca.as_ref().map(|val| &val[..]);
         let datastore_verify = get_datastore_verify()?;
         let datastore = Elastic::connect_with_backend(
             &config.datastore.hosts[0],
@@ -311,7 +283,9 @@ impl Core {
         //
         let file_cache = FileStore::open(&config.filestore.cache).await.context("initializing cache filestore")?;
         let cachestore = CacheStore::new("system".to_owned(), datastore.clone(), file_cache).context("initializing cachestore")?;
-        let identify = Identify::new_with_cache(cachestore, redis_volatile.clone()).await.context("initializing identify")?;
+        let identify = Identify::new_with_cache(cachestore, redis_volatile.clone())
+            .await
+            .context("initializing identify")?;
 
         // load classification from given config blob or file
         let mut classification_config = config.classification.config.clone();
@@ -328,7 +302,7 @@ impl Core {
             None => {
                 info!("Loading hardcoded default classification configuration.");
                 ClassificationConfig::default()
-            },
+            }
         };
         let classification_parser = Arc::new(ClassificationParser::new(classification_config)?);
         assemblyline_models::types::classification::set_global_classification(classification_parser.clone());
@@ -367,7 +341,6 @@ impl Core {
         println!("Redis wipe");
         redis.wipe().await.unwrap();
 
-
         let filestore = tempfile::TempDir::new().unwrap();
 
         let mut config: Config = Default::default();
@@ -395,7 +368,12 @@ impl Core {
 
         println!("test settings");
         elastic.apply_test_settings().await.unwrap();
-        let guard = TestGuard { elastic, _filestore: filestore, running: core.running.clone(), cleaned: false };
+        let guard = TestGuard {
+            elastic,
+            _filestore: filestore,
+            running: core.running.clone(),
+            cleaned: false,
+        };
         (core, guard)
     }
 
@@ -434,10 +412,10 @@ async fn get_datastore_ca() -> Result<Option<Vec<u8>>> {
             if tokio::fs::try_exists(&DEFAULT_DATASTORE_ROOT_CA_PATH).await? {
                 DEFAULT_DATASTORE_ROOT_CA_PATH.to_string()
             } else {
-                return Ok(None)
+                return Ok(None);
             }
-        },
-        Err(err) => return Err(err.into())
+        }
+        Err(err) => return Err(err.into()),
     };
 
     Ok(Some(tokio::fs::read(path).await?))
@@ -447,10 +425,9 @@ fn get_datastore_verify() -> Result<bool> {
     match std::env::var("DATASTORE_VERIFY_CERTS") {
         Ok(value) => Ok(value.to_lowercase() == "true"),
         Err(std::env::VarError::NotPresent) => Ok(true),
-        Err(err) => Err(err.into())
+        Err(err) => Err(err.into()),
     }
 }
-
 
 // async fn get_redis_cert(kind: &str) -> Result<Option<Vec<u8>>> {
 //     let path = match std::env::var(format!("REDIS_{name}_CERT_PATH")) {
@@ -462,14 +439,13 @@ fn get_datastore_verify() -> Result<bool> {
 //     Ok(Some(tokio::fs::read(path).await?))
 // }
 
-
 /// While this struct is held prevent temporary core resources from being collected
 #[cfg(test)]
 struct TestGuard {
     running: Arc<Flag>,
     elastic: Arc<Elastic>,
     _filestore: tempfile::TempDir,
-    cleaned: bool
+    cleaned: bool,
 }
 
 // #[cfg(test)]

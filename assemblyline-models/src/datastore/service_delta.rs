@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
 use crate::datastore::service::SubmissionParams;
+use crate::types::strings::ServiceVersion;
 use crate::types::{NonZeroInteger, ServiceName};
 use crate::{ElasticMeta, Readable, types::{ClassificationString, JsonMap, Text}};
 
@@ -248,7 +249,7 @@ pub struct ServiceDelta {
     pub name: Option<ServiceName>,
     /// REF_SERVICE
     #[metadata(store=true)]
-    pub version: String,
+    pub version: Option<ServiceVersion>,
 
     /// REF_SERVICE
     pub privileged: Option<bool>,
