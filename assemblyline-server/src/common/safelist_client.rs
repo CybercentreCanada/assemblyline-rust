@@ -174,7 +174,7 @@ impl SafelistClient {
         };
 
         let mut tag_safelist_data = get_tag_safelist_data(&self.config, self.datastore.clone(), None).await?;
-        
+
         if !tag_types.is_empty() {
             tag_safelist_data.match_.retain(|key, _|tag_types.contains(&key.as_str()));
             tag_safelist_data.regex.retain(|key, _|tag_types.contains(&key.as_str()));
@@ -274,4 +274,65 @@ impl SafelistClient {
 //             return old
 //         except Exception as e:
 //             raise InvalidSafehash(f"Invalid data provided: {str(e)}")
+}
+
+
+
+
+// @pytest.fixture(scope="module")
+// def client(datastore_connection):
+//     try:
+//         create_users(datastore_connection)
+//         create_safelists(datastore_connection)
+//         yield SafelistClient(datastore_connection)
+//     finally:
+//         wipe_users(datastore_connection)
+//         wipe_safelist(datastore_connection)
+
+
+#[cfg(test)]
+#[ignore]
+async fn test_safelist_tag_normalization() {
+    use itertools::Itertools;
+    use crate::Core;
+    use crate::common::sha256_data;
+
+    // initalize the environment and our safelist client
+    let (core, _guard) = Core::test_setup().await;
+    let client = SafelistClient::new(core.config, core.datastore);
+
+    const tag_type: &str = "network.static.uri";
+    const tag_value: &str = "https://gOOd.com/About";
+
+    const normalized_value: &str = "https://good.com/About";
+    let hashed_value = format!("{tag_type}: {normalized_value}").bytes().collect_vec();
+    let expected_qhash = sha256_data(&hashed_value);
+
+    todo!("add_update methods have not been ported to rust, but get_safelisted_tags is retired in python")
+    // Generate a safelist item
+    // sl_data = {
+    //     'attribution': {
+    //         'actor': ["SOMEONE!"],
+    //         'campaign': None,
+    //         'category': None,
+    //         'exploit': None,
+    //         'implant': None,
+    //         'family': None,
+    //         'network': None
+    //     },
+    //     'dtl': 15,
+    //     'tag': {'type': tag_type,
+    //             'value': tag_value},
+    //     'sources': [NSRL_SOURCE, ADMIN_SOURCE],
+    //     'type': 'tag'
+    // }
+
+    // client.add_update(sl_data)
+
+    // # Assert that item got created with the expected ID from the normalized tag value
+    // assert client.datastore.safelist.exists(expected_qhash)
+    // time.sleep(1)
+
+    // # Assert that the tag exists in either format (within reason)
+    // assert client.get_safelisted_tags([tag_type])['match'][tag_type] == [normalized_value]
 }
