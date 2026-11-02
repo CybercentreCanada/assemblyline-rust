@@ -14,6 +14,11 @@
     keyword_idents,
     clippy::disallowed_methods
 )]
+#![allow(
+    // allow these as they sometimes improve clarity
+    clippy::needless_return,
+    clippy::collapsible_else_if
+)]
 
 
 pub mod connection;
