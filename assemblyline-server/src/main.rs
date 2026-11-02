@@ -12,7 +12,10 @@
     nonstandard_style,
     variant_size_differences
 )]
-#![deny(keyword_idents)]
+#![deny(
+    keyword_idents,
+    clippy::disallowed_methods
+)]
 // #![warn(clippy::missing_docs_in_private_items)]
 #![allow(
     // allow these as they sometimes improve clarity

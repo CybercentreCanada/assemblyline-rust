@@ -1,8 +1,21 @@
 //! A library that provides adaptors to blob storage for the assemblyline platform.
-#![warn(missing_docs, non_ascii_idents, trivial_numeric_casts,
-    unused_crate_dependencies, noop_method_call, single_use_lifetimes, trivial_casts,
-    unused_lifetimes, nonstandard_style, variant_size_differences)]
-#![deny(keyword_idents)]
+#![warn(
+    missing_docs,
+    non_ascii_idents,
+    trivial_numeric_casts,
+    unused_crate_dependencies,
+    noop_method_call,
+    single_use_lifetimes,
+    trivial_casts,
+    unused_lifetimes,
+    nonstandard_style,
+    variant_size_differences
+)]
+#![deny(
+    keyword_idents,
+    clippy::disallowed_methods
+)]
+
 // #![warn(clippy::missing_docs_in_private_items)]
 #![allow(
     // allow these as they sometimes improve clarity
