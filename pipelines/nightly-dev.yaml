@@ -1,0 +1,28 @@
+
+# Don't run this on pull requests, just on a schedule
+pr: none
+trigger: none
+schedules:
+- cron: '0 0 * * *'
+  displayName: Daily rust build (dev)
+  branches:
+    include:
+    - dev
+  always: true
+
+jobs:
+  - job: build_nightly
+    dependsOn: []
+    displayName: Build Nightly
+    steps:
+      - checkout: self
+      - task: Docker@2
+        displayName: Login to docker registry
+        inputs:
+          command: login
+          containerRegistry: cccstemp
+      - script: |
+          set -e
+          docker build . -f test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker push cccstemp.azurecr.io/assemblyline-rust-builder:latest
+        displayName: Build and push container
