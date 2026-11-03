@@ -298,13 +298,16 @@ impl DispatchClient {
 //         self.service_data = cast(dict[str, Service], CachedObject(self._get_services))
 //         self.dead_dispatchers = []
 
-        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5));
-        match crate::config::get_cluster_ca_cert().await? {
+        // This http client for communicating with the dispatchers shouldn't validate hostnames as a the disptachers
+        // won't have certificates that are attached to their address.
+        let mut http_client = reqwest::Client::builder().timeout(Duration::from_secs(5))
+            .tls_danger_accept_invalid_hostnames(true);
+        match crate::config::get_dispatcher_ca().await? {
             Some(cert) => {
                 let cert = reqwest::Certificate::from_pem(cert.as_bytes())?;
                 http_client = http_client.add_root_certificate(cert);
             }
-            None => http_client = http_client.danger_accept_invalid_certs(true),
+            None => http_client = http_client.tls_danger_accept_invalid_certs(true),
         }
 
         Ok(Self {

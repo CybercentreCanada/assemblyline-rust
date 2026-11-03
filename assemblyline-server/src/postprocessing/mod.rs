@@ -22,6 +22,7 @@ use assemblyline_models::config::{default_postprocess_actions, Config, Postproce
 use assemblyline_models::messages::submission::Submission as MessageSubmission;
 
 use crate::archive::ArchiveManager;
+use crate::config::get_cluster_ca_cert;
 use crate::constants::{ALERT_QUEUE_NAME, CONFIG_HASH, INGEST_INTERNAL_QUEUE_NAME, POST_PROCESS_CONFIG_KEY};
 use crate::Core;
 // use crate::datastore::Datastore;
@@ -87,6 +88,7 @@ pub struct ActionWorker {
     config: Arc<Config>,
     running_cache_tasks: bool,
     pub actions: RwLock<Arc<HashMap<String, (SubmissionFilter, PostprocessAction)>>>,
+    cluster_ca: Option<String>,
 
     // Redis information
     config_data: Hashmap<serde_json::Value>,
@@ -102,6 +104,7 @@ impl ActionWorker {
             config: core.config.clone(),
             running_cache_tasks: cache,
             actions: Default::default(),
+            cluster_ca: get_cluster_ca_cert().await?,
             unique_queue: core.redis_persistant.priority_queue(INGEST_INTERNAL_QUEUE_NAME.to_owned()),
             alert_queue: core.redis_persistant.queue(ALERT_QUEUE_NAME.to_owned(), None),
             config_data: core.redis_persistant.hashmap(CONFIG_HASH.to_owned(), None),
@@ -380,6 +383,10 @@ impl ActionWorker {
             builder = builder.danger_accept_invalid_hostnames(true);
         }
         if let Some(ca) = &hook.ca_cert {
+            let cert = reqwest::Certificate::from_pem(ca.as_bytes())?;
+            builder = builder.add_root_certificate(cert);
+        }
+        if let Some(ca) = &self.cluster_ca {
             let cert = reqwest::Certificate::from_pem(ca.as_bytes())?;
             builder = builder.add_root_certificate(cert);
         }
