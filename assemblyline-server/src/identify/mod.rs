@@ -790,13 +790,8 @@ impl Identify {
             //  - Check for encryption
             //  - Check for PDF collection (portfolio)
             if data.file_type == "document/pdf" {
-                // Password protected documents typically contain '/Encrypt'
-                let pdf_content = std::fs::read(&path)?;
-                if this.pdf_encrypted.find(&pdf_content).is_some() {
-                    data.file_type = "document/pdf/passwordprotected".to_string();
-                // Portfolios typically contain '/Type/Catalog/Collection
-                } else if this.pdf_portfolio.find(&pdf_content).is_some() {
-                    data.file_type = "document/pdf/portfolio".to_string();
+                if let Some(refined_type) = pdf_ident(&path, &this.pdf_encrypted, &this.pdf_portfolio)? {
+                    data.file_type = refined_type.to_string();
                 }
             }
 
@@ -1042,6 +1037,55 @@ fn uri_ident(path: &Path, info: &mut FileIdentity) -> Result<String> {
     //     info["uri_info"]["port"] = u.port
 
     Ok(format!("uri/{scheme}"))
+}
+
+fn pdf_ident(path: &Path, encrypted: &regex::bytes::Regex, portfolio: &regex::bytes::Regex) -> Result<Option<&'static str>> {
+    /// The file is scanned in fixed-size blocks (with a small overlap carried between blocks so
+    /// markers straddling a block boundary are still found) to keep memory usage flat no matter
+    /// the file size.
+    const BLOCK_SIZE: usize = 1 << 20;
+    const OVERLAP: usize = 23; // longest marker ("/Type/Catalog/Collection", 24 bytes) minus one
+
+    let mut file = std::fs::File::open(path)?;
+    // Size the buffer to the file (up to one block) so small files don't pay for
+    // zero-initializing a full block. If the file grows after this stat the scan
+    // still covers it, just over more loop iterations.
+    let block_size = (file.metadata()?.len() as usize).clamp(1, BLOCK_SIZE);
+    let mut buffer = vec![0u8; OVERLAP + block_size];
+    let mut carry = 0;
+    let mut saw_portfolio = false;
+
+    loop {
+        // fill the buffer after the overlap bytes carried from the previous block
+        let mut filled = carry;
+        while filled < buffer.len() {
+            let read = file.read(&mut buffer[filled..])?;
+            if read == 0 {
+                break;
+            }
+            filled += read;
+        }
+        if filled == carry {
+            break;
+        }
+
+        let window = &buffer[..filled];
+
+        // Password protected documents typically contain '/Encrypt'
+        // '/Encrypt' anywhere in the file takes precedence over the portfolio marker.
+        if encrypted.find(window).is_some() {
+            return Ok(Some("document/pdf/passwordprotected"));
+        }
+        // Portfolios typically contain '/Type/Catalog/Collection'
+        if !saw_portfolio && portfolio.find(window).is_some() {
+            saw_portfolio = true;
+        }
+
+        carry = filled.min(OVERLAP);
+        buffer.copy_within(filled - carry..filled, 0);
+    }
+
+    Ok(if saw_portfolio { Some("document/pdf/portfolio") } else { None })
 }
 
 
