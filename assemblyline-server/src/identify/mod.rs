@@ -1,5 +1,5 @@
 //! Tools for identifying files
-//! 
+//!
 //! TODO. Right now it uses tokio fs, probably faster if the entire thing is in a blocking thread
 
 use std::borrow::Cow;
@@ -157,7 +157,7 @@ impl Identify {
     pub async fn new_with_cache(cache: CacheStore, redis_volatile: Arc<RedisObjects>) -> Result<Arc<Self>> {
         Self::new(Some(cache), Some(redis_volatile)).await
     }
-    
+
     pub async fn new_without_cache() -> Result<Arc<Self>> {
         Self::new(None, None).await
     }
@@ -271,7 +271,7 @@ impl Identify {
         *self.compiled_magic_patterns.lock() = Self::_load_magic_patterns(&self.cache).await?;
         Ok(())
     }
-    
+
     async fn _load_trusted_mimes(cache: &Option<CacheStore>) -> Result<Arc<HashMap<String, String>>> {
         if let Some(cache) = cache {
             info!("Checking for custom trusted mimes...");
@@ -289,7 +289,7 @@ impl Identify {
 
         Ok(Arc::new(TRUSTED_MIMES.iter().map(|(a, b)|(a.to_string(), b.to_string())).collect()))
     }
-                    
+
     async fn load_trusted_mimes(&self) -> Result<()> {
         *self.trusted_mimes.lock() = Self::_load_trusted_mimes(&self.cache).await?;
         Ok(())
@@ -333,7 +333,7 @@ impl Identify {
     }
 
     async fn load_magic_file(&self) -> Result<()> {
-        let (file_type, mime_type) = Self::_load_magic_file(&self.cache).await?;    
+        let (file_type, mime_type) = Self::_load_magic_file(&self.cache).await?;
         *self.file_type.lock() = file_type;
         *self.mime_type.lock() = mime_type;
         Ok(())
@@ -409,15 +409,15 @@ impl Identify {
         let mut mime = None;
 
         if buf.is_empty() {
-            return Ok(FileIdentity { 
-                ascii: "".to_string(), entropy: None, hex: "".to_string(), md5: None, magic: "".to_string(), 
-                mime: None, sha1: None, sha256: None, size: 0, ssdeep: None, file_type: UNKNOWN.to_string(), tlsh: None, uri_info: None 
+            return Ok(FileIdentity {
+                ascii: "".to_string(), entropy: None, hex: "".to_string(), md5: None, magic: "".to_string(),
+                mime: None, sha1: None, sha256: None, size: 0, ssdeep: None, file_type: UNKNOWN.to_string(), tlsh: None, uri_info: None
             })
         }
 
         let header = &buf[0..64.min(buf.len())];
         let ascii = dotdump_bytes(header);
-        
+
         // Loop over the labels returned by libmagic, ...
         let mut labels: Vec<String> = match self.file_type.lock().0.file(path) {
             Ok(output) => {
@@ -514,7 +514,7 @@ impl Identify {
                     if let Some(new_type) = trusted_mimes.get(mime) {
                         file_type = new_type.to_owned();
                         break
-                    }    
+                    }
                 }
             }
         }
@@ -712,7 +712,7 @@ impl Identify {
                         return Ok(data);
                     }
                 }
-    
+
                 if data.file_type == TEXT_PLAIN {
                     // Check if the file is a misidentified json first before running the yara rules
                     let body = std::fs::OpenOptions::new().read(true).open(&path)?;
@@ -720,24 +720,24 @@ impl Identify {
                         data.file_type = "text/json".to_string();
                         // Final type identified, shortcut further processing
                         return Ok(data)
-                    } 
+                    }
                 }
-    
+
                 // Only if the file was not identified as a csv or a json
                 if let Some(new_type) = this.yara_ident(&path, &data)? {
                     data.file_type = new_type;
                 }
-    
-                if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN { 
+
+                if data.file_type.contains(UNKNOWN) || data.file_type == TEXT_PLAIN {
                     let mut untrusted_magicka_type = None;
                     if data.size >= 200 {
                         let magika_mime = this.magika.lock().identify_file_sync(&path).unwrap().info().mime_type;
                         let trusted_mimes = this.trusted_mimes.lock().clone();
 
-                        untrusted_magicka_type = untrusted_mimes(magika_mime);                        
+                        untrusted_magicka_type = untrusted_mimes(magika_mime);
 
                         if trusted_mimes.contains_key(magika_mime) && untrusted_magicka_type.is_none(){
-                            data.file_type = trusted_mimes.get(magika_mime).unwrap().to_string();                    
+                            data.file_type = trusted_mimes.get(magika_mime).unwrap().to_string();
                             return Ok(data);
                         }
                     }
@@ -763,7 +763,7 @@ impl Identify {
                 let output = pyo3::Python::attach(|py| {
                     let locals = [("path", &path)].into_py_dict(py)?;
                     py.run(MSOFFCRYPTO_SRC, None, Some(&locals))?;
-                    let value = locals.get_item(intern!(py, "file_type"))?;       
+                    let value = locals.get_item(intern!(py, "file_type"))?;
                     value.extract::<Option<String>>()
                 });
 
@@ -921,7 +921,7 @@ fn cart_ident(path: &Path) -> Result<String> {
                         }
                     }
                 }
-            } 
+            }
             Ok("archive/cart".to_string())
         }
         Err(_) => Ok("corrupted/cart".to_string())
@@ -941,14 +941,14 @@ fn dos_ident(path: &Path) -> Result<String> {
 
 fn _dos_ident(path: &Path) -> Result<Option<String>, std::io::Error> {
     let mut fh = std::io::BufReader::new(std::fs::File::open(path)?);
-    
+
     // file_header = fh.read(0x40)
     let mut file_header = vec![0u8; 0x40];
     fh.read_exact(&mut file_header)?;
     if &file_header[0..2] != b"MZ" {
         return Ok(None)
     }
-    
+
     let header_pos_array: [u8; 4] = file_header[file_header.len() - 4 .. ].try_into().unwrap();
     let header_pos = u32::from_le_bytes(header_pos_array);
     fh.seek(SeekFrom::Start(header_pos as u64))?;
@@ -1092,4 +1092,3 @@ fn uri_ident(path: &Path, info: &mut FileIdentity) -> Result<String> {
 //                 )
 //             )
 //             name = sys.stdin.readline().strip()
-
