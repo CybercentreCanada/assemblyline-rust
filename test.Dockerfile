@@ -1,4 +1,4 @@
-FROM python:3.14 AS pybuilder
+FROM python:3.13 AS pybuilder
 
 RUN pip install --target /packages msoffcrypto-tool
 
