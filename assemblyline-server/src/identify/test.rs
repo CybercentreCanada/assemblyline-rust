@@ -63,7 +63,7 @@ fn get_samples_location() -> String {
 
 
 #[tokio::test]
-#[ignore]
+#[test_with::env(SAMPLES_LOCATION)]
 async fn sample_identification() {
     let _ = env_logger::builder().filter_level(log::LevelFilter::Debug).is_test(true).try_init();
     let identify = super::Identify::new_without_cache().await.unwrap();
@@ -121,4 +121,3 @@ async fn sample_identification() {
 //             assert identify.fileinfo(sample[0], generate_hashes=False)["type"] == sample[1]
 
 }
-
