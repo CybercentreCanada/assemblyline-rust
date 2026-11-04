@@ -96,7 +96,7 @@ jobs:
       - script: |
           set -e
           # Build the test Docker image (requires the Assemblyline Python codebase + assemblyline-markings for tests)
-          docker build -t test -f assemblyline-server/test.Dockerfile --target setup .
+          docker build -t test -f test.Dockerfile --target setup .
 
           docker run -w /usr/src/ \
             -v ${PWD}:/usr/src/ \
