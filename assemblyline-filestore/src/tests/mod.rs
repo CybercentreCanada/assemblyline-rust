@@ -3,7 +3,10 @@ use std::io::{BufWriter, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
 use bytes::Bytes;
+use rcgen::generate_simple_self_signed;
 
 mod ftp_server;
 mod sftp_server;
@@ -11,6 +14,7 @@ mod sftp_server;
 use crate::FileStore;
 use crate::tests::ftp_server::{random_tls_certificate, start_temp_ftp_server};
 use crate::tests::sftp_server::start_temp_sftp_server;
+use crate::transport::s3::{CertificateMissingError, CertificateParseError, CertificateReadError};
 
 const TEMP_BODY_A: &[u8] = b"temporary file string";
 
@@ -113,6 +117,67 @@ async fn test_file() {
     big_file(fs).await;
     read_only(url).await;
 }
+
+#[tokio::test]
+async fn test_s3_cert_loading() {
+    let url = "s3://al_storage_key:Ch@ngeTh!sPa33w0rd@localhost:9000/?s3_bucket=test&use_ssl=False&";
+
+    {
+        // fail when a path to a non existant file is given
+        let dir = tempfile::tempdir().unwrap();
+        let url = format!("{url}&certificate_path={}/not-a-file", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.unwrap_err().downcast::<CertificateReadError>().is_ok());
+    }
+
+    {
+        // fail when a path to an empty file is given
+        let dir = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.unwrap_err().downcast::<CertificateMissingError>().is_ok());
+    }
+
+    {
+        // fail when a path to a corrupt file is given
+        let mut dir = tempfile::NamedTempFile::new().unwrap();
+        for _ in 0..128 {
+            dir.write_all(&[rand::random()]).unwrap();
+        }
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.unwrap_err().downcast::<CertificateParseError>().is_ok());
+    }
+
+    {
+        // okay when a pem actually has a cert
+        let mut dir = tempfile::NamedTempFile::new().unwrap();
+        dir.write_all(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem().as_bytes()).unwrap();
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.is_ok());
+    }
+
+    {
+        // Okay when a file has raw der data
+        let mut dir = tempfile::NamedTempFile::new().unwrap();
+        dir.write_all(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.der()).unwrap();
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.is_ok());
+    }
+
+    {
+        // fail when a file has base64 der data (the fordidden middle ground)
+        let mut dir = tempfile::NamedTempFile::new().unwrap();
+        let data = BASE64_STANDARD.encode(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.der());
+        dir.write_all(data.as_bytes()).unwrap();
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.unwrap_err().downcast::<CertificateParseError>().is_ok());
+    }
+}
+
 
 /// Test S3 FileStore using Minio by pushing and fetching back content from it.
 #[tokio::test(flavor = "multi_thread")]
