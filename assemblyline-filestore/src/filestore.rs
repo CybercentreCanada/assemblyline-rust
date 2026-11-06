@@ -123,6 +123,7 @@ impl FileStore {
                         "verify" => parameters.verify = read_bool(&value),
                         "boto_defaults" => parameters.boto_defaults = read_bool(&value),
                         "aws_region" => parameters.aws_region = Some(value.to_string()),
+                        "certificate_path" => parameters.certificate_path = Some(value.to_string()),
                         "s3_bucket" => parameters.s3_bucket = value.to_string(),
                         "compatability" => parameters.compatability = read_bool(&value),
                         "debug" => parameters.debug = read_bool(&value),
