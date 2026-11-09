@@ -723,8 +723,8 @@ impl Identify {
 
                 if data.file_type == TEXT_PLAIN {
                     // Check if the file is a misidentified json first before running the yara rules
-                    let body = std::fs::OpenOptions::new().read(true).open(&path)?;
-                    if serde_json::from_reader::<_, serde_json::Value>(&body).is_ok() {
+                    let body = std::io::BufReader::new(std::fs::OpenOptions::new().read(true).open(&path)?);
+                    if serde_json::from_reader::<_, serde::de::IgnoredAny>(body).is_ok() {
                         data.file_type = "text/json".to_string();
                         // Final type identified, shortcut further processing
                         return Ok(data)
