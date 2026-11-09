@@ -1,11 +1,11 @@
+pub mod alert;
+pub mod bundle;
+pub mod error;
 pub mod file;
 pub mod help;
+pub mod ingest;
 pub mod search;
 pub mod submit;
-pub mod ingest;
-pub mod alert;
-pub mod error;
-pub mod bundle;
 
 macro_rules! api_path {
     ($component:expr) => {
@@ -36,4 +36,4 @@ macro_rules! api_path {
     };
 }
 
-pub (crate) use api_path;
+pub(crate) use api_path;

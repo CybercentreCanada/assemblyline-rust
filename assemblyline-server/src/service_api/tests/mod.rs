@@ -33,9 +33,9 @@ pub async fn launch(core: Arc<Core>) -> (u16, JoinHandle<()>) {
         info!("Starting test server on {:?}", acceptor.local_addr());
         let result = Server::new_with_acceptor(acceptor)
             // .run(
-            //     app, 
+            //     app,
             .run_with_graceful_shutdown(
-                app, 
+                app,
                 async move {
                     core.running.wait_for(false).await
                 }, None
@@ -78,7 +78,7 @@ fn build_service() -> Service {
     Service {
         accepts: Default::default(),
         rejects: Some("empty|metadata/.*".to_owned()),
-        category: "core".into(),
+        category: "core".parse().unwrap(),
         classification: Default::default(),
         config: Default::default(),
         description: "A service".into(),
@@ -93,8 +93,8 @@ fn build_service() -> Service {
         uses_temp_submission_data: Default::default(),
         uses_metadata: Default::default(),
         monitored_keys: Default::default(),
-        name: "TestSvice".into(),
-        version: "100".to_string(),
+        name: "TestSvice".parse().unwrap(),
+        version: "100".parse().unwrap(),
         privileged: Default::default(),
         disable_cache: Default::default(),
         stage: Default::default(),
