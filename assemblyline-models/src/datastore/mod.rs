@@ -90,7 +90,7 @@ mod python {
     use pretty_assertions::assert_eq;
 
     fn load_mapping(module: &str, name: &str) -> Mappings {
-        let output = std::process::Command::new("python").arg("-c").arg("from assemblyline.datastore.support.build import build_mapping; from assemblyline.odm.models. ".to_owned() + module + " import " + name + "; import json; print(json.dumps(build_mapping(" + name + ".fields().values())))").output().unwrap();
+        let output = std::process::Command::new("python3").arg("-c").arg("from assemblyline.datastore.support.build import build_mapping; from assemblyline.odm.models. ".to_owned() + module + " import " + name + "; import json; print(json.dumps(build_mapping(" + name + ".fields().values())))").output().unwrap();
         let stderr = String::from_utf8(output.stderr).unwrap();
         let stdout = String::from_utf8(output.stdout).unwrap();
         if !output.status.success() || !stderr.is_empty() {

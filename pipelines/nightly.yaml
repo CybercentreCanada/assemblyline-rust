@@ -4,7 +4,7 @@ pr: none
 trigger: none
 schedules:
 - cron: '0 0 * * *'
-  displayName: Daily midnight build
+  displayName: Daily rust build (main)
   branches:
     include:
     - main
@@ -22,7 +22,11 @@ jobs:
           command: login
           containerRegistry: cccstemp
       - script: |
+          echo "Cleaning up disk..."
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+        displayName: Free agent disk space
+      - script: |
           set -e
-          docker build . -f assemblyline-server/test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
-          docker push cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker build . -f test.Dockerfile --build-arg release='--release' -t cccstemp.azurecr.io/assemblyline-rust-builder:stable
+          docker push cccstemp.azurecr.io/assemblyline-rust-builder:stable
         displayName: Build and push container
