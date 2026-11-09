@@ -50,6 +50,10 @@ jobs:
           command: login
           containerRegistry: cccstemp
       - script: |
+          echo "Cleaning up disk..."
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+        displayName: Free agent disk space
+      - script: |
           set -e
           # Start all services except cargo test
           docker compose up -d --wait $(docker compose config --services | grep -v cargo_test)
@@ -126,6 +130,10 @@ jobs:
         inputs:
           command: login
           containerRegistry: cccstemp
+      - script: |
+          echo "Cleaning up disk..."
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+        displayName: Free agent disk space
       - script: |
           set -e
           # Start all services except cargo test
