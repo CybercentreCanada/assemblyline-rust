@@ -693,3 +693,110 @@
 //     # But it should only work once
 //     with pytest.raises(VersionConflictException):
 //         es_connection.save(unique_id, data, version=version)
+
+
+use std::str::FromStr;
+use std::sync::Arc;
+
+use assemblyline_models::config::Config;
+use assemblyline_models::datastore::apikey::Apikey;
+use assemblyline_models::datastore::result::ResultKeyBuilder;
+use assemblyline_models::datastore::EmptyResult;
+use assemblyline_models::messages::task::generate_conf_key;
+use assemblyline_models::types::Sha256;
+use serde_json::json;
+
+use crate::elastic::collection::Collection;
+use crate::{get_datastore_ca, get_datastore_verify};
+
+use super::ElasticHelper;
+
+async fn build_elastic_helper() -> ElasticHelper {
+    // connect to elastic
+    let config = Config::default();
+    let datastore_ca = get_datastore_ca().await.unwrap();
+    let datastore_ca = datastore_ca.as_ref().map(|val|&val[..]);
+    let datastore_verify = get_datastore_verify().unwrap();
+    ElasticHelper::connect(&config.datastore.hosts[0], false, datastore_ca, !datastore_verify).await.unwrap()
+}
+
+/// Document keys are interpolated into the elasticsearch request URL when a
+/// document is saved. A key must never be able to change which collection
+/// (index alias) a write lands in, no matter what characters it contains.
+///
+/// The keys built for service results embed the service supplied
+/// `response.service_version` string verbatim except for a '.' -> '_'
+/// rewrite (ResultKeyBuilder::build), and the service API accepts that string
+/// from the service without validation (service_api/helpers/tasking.rs ->
+/// Result::build_key). This test expresses the required invariant using the
+/// exact write the dispatch client performs for an empty service result
+/// (dispatcher/client.rs -> datastore.emptyresult.save).
+#[tokio::test]
+async fn hostile_result_key_cannot_redirect_saves_across_collections() {
+    let connection = Arc::new(build_elastic_helper().await);
+
+    // Build an apikey/emptyresult collection pair the same way Elastic::setup
+    // does, under a test prefix so other collections are untouched.
+    let prefix = "test_key_escape_";
+    let apikey: Collection<Apikey> = Collection::new(connection.clone(), "apikey".to_owned(), None, prefix.to_owned(), true).await.unwrap();
+    let emptyresult: Collection<EmptyResult> = Collection::new(connection.clone(), "emptyresult".to_owned(), None, prefix.to_owned(), true).await.unwrap();
+
+    // Clean out any leftovers from a previous run of this test
+    let victim_id = "mykey+admin";
+    apikey.delete(victim_id, None).await.unwrap();
+
+    // Create the victim credential record
+    let victim: Apikey = serde_json::from_value(json!({
+        "acl": ["R"],
+        "password": "$2b$12$0123456789012345678901u0000000000000000000000000000000",
+        "uname": "admin",
+        "key_name": "mykey",
+    })).unwrap();
+    apikey.save(victim_id, &victim, None, None).await.unwrap();
+
+    // A malicious service completes a task with a response.service_version
+    // that smuggles URL syntax: '.' is the only character the key builder
+    // rewrites, so percent-encoded dot segments, slashes and a fragment
+    // delimiter all pass through into the document key.
+    let sha256 = Sha256::from_str(&"0".repeat(64)).unwrap();
+    let hostile_version = format!("1/%2e%2e/%2e%2e/%2e%2e/{prefix}apikey/_doc/{victim_id}#");
+
+    let key_list = [
+        sha256.to_string(),
+        "BadService".to_owned(),
+        format!("v{}", hostile_version.replace('.', "_")),
+        format!("c{}", generate_conf_key(None, None, None, false).unwrap()),
+    ];
+
+    let result_key = key_list.join(".");
+    // let result_key = ResultKeyBuilder::new(&sha256, "BadService".parse().unwrap(), &hostile_version)
+    //     .is_empty(true)
+    //     .build()
+    //     .unwrap();
+
+    // This is the exact save performed for an empty result completion.
+    let expiry_ts = chrono::Utc::now() + chrono::TimeDelta::days(1);
+    let save_result = emptyresult.save(&result_key, &EmptyResult { expiry_ts }, None, None).await;
+
+    // Secure behaviour: a hostile key is either rejected outright, or stored
+    // inertly inside the emptyresult collection under its own key. It must
+    // never be accepted while writing outside its collection.
+    if save_result.is_ok() {
+        assert!(
+            emptyresult.exists(&result_key, None).await.unwrap(),
+            "save reported success but the document is not in the emptyresult collection",
+        );
+    }
+
+    // In every case the victim document in the other collection is untouched.
+    let stored = apikey.get_json(victim_id, None).await
+        .expect("victim api key document must remain readable")
+        .expect("victim api key document must still exist");
+    assert_eq!(stored.get("uname"), Some(&json!("admin")), "victim api key was overwritten: {stored:?}");
+    assert_eq!(stored.get("key_name"), Some(&json!("mykey")), "victim api key was overwritten: {stored:?}");
+    assert!(stored.contains_key("password"), "victim api key lost its credential fields: {stored:?}");
+
+    // Clean up the collections created by this test
+    apikey.wipe(false, None).await.unwrap();
+    emptyresult.wipe(false, None).await.unwrap();
+}

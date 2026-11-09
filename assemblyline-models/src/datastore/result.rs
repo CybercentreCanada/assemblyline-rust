@@ -10,8 +10,8 @@ use rand::RngExt;
 
 use crate::datastore::tagging::LayoutError;
 use crate::messages::task::{generate_conf_key, TagEntry, Task};
-use crate::types::strings::Keyword;
-use crate::{random_word, ElasticMeta, Readable};
+use crate::types::strings::{Keyword, ServiceVersion};
+use crate::{ElasticMeta, Readable};
 use crate::types::{ClassificationString, ExpandingClassification, ServiceName, Sha256, Text};
 
 use super::tagging::Tagging;
@@ -225,7 +225,7 @@ impl File {
     }
 }
 
-fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
+pub fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
 
 /// Response Body of Result
 #[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]
@@ -237,7 +237,7 @@ pub struct ResponseBody {
     pub milestones: Milestone,
     /// Version of the service
     #[metadata(store=false)]
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     /// Name of the service that scanned the file
     #[metadata(copyto="__text__")]
     pub service_name: ServiceName,
@@ -267,8 +267,8 @@ impl rand::distr::Distribution<ResponseBody> for rand::distr::StandardUniform {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ResponseBody {
         ResponseBody {
             milestones: rng.random(),
-            service_version: random_word(rng),
-            service_name: ServiceName::from_string(random_word(rng)),
+            service_version: rng.random(),
+            service_name: rng.random(),
             service_tool_version: None,
             supplementary: Default::default(),
             extracted: Default::default(),
@@ -348,8 +348,8 @@ impl Readable for Result {
 
 pub struct ResultKeyBuilder<'a> {
     hash: &'a Sha256,
-    service_name: &'a str,
-    service_version: &'a str,
+    service_name: ServiceName,
+    service_version: ServiceVersion,
     service_tool_version: Option<&'a str>,
     task: Option<&'a Task>,
     partial: bool,
@@ -359,7 +359,7 @@ pub struct ResultKeyBuilder<'a> {
 
 impl<'a> ResultKeyBuilder<'a> {
 
-    pub fn new(hash: &'a Sha256, service_name: &'a str, service_version: &'a str) -> Self {
+    pub fn new(hash: &'a Sha256, service_name: ServiceName, service_version: ServiceVersion) -> Self {
         Self {
             hash,
             service_name,
@@ -408,7 +408,7 @@ impl<'a> ResultKeyBuilder<'a> {
 impl Result {
 
     pub fn start_build_key<'a>(&'a self, task: Option<&'a Task>) -> ResultKeyBuilder<'a> {
-        ResultKeyBuilder::new(&self.sha256, &self.response.service_name, &self.response.service_version)
+        ResultKeyBuilder::new(&self.sha256, self.response.service_name, self.response.service_version)
         .is_empty(self.is_empty())
         .partial(self.partial)
         .service_tool_version(self.response.service_tool_version.as_deref())

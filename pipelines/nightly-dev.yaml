@@ -27,6 +27,6 @@ jobs:
         displayName: Free agent disk space
       - script: |
           set -e
-          docker build . -f test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
+          docker build . -f test.Dockerfile --no-cache -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
           docker push cccstemp.azurecr.io/assemblyline-rust-builder:latest
         displayName: Build and push container

@@ -106,13 +106,14 @@ async fn test_register_existing_service() {
 async fn test_register_bad_service() {
     let (client, _core, _guard, address) = setup(headers()).await;
 
-    let mut service = build_service();
+    let service = build_service();
 
     let mut headers = headers();
     headers.insert("Service-Name", HeaderValue::from_str(&service.name).unwrap());
     headers.insert("Service-Version", HeaderValue::from_str(&service.version).unwrap());
 
-    service.name = "".into();
+    let mut service = serde_json::to_value(service).unwrap();
+    service.as_object_mut().unwrap().insert("name".to_string(), serde_json::json!(""));
 
     let result = client.post(format!("{address}/api/v1/service/register/")).headers(headers).json(&service).send().await.unwrap();
     assert_eq!(result.status().as_u16(), 400);
@@ -170,7 +171,7 @@ async fn test_register_new_service_version() {
     core.datastore.service_delta.save(&service.name, &service_delta, None, None).await.unwrap();
 
     let old_service = service.clone();
-    service.version = "101".to_string();
+    service.version = "101".parse().unwrap();
 
     let mut headers = headers();
     headers.insert("X-Apikey", HeaderValue::from_str(&key).unwrap());

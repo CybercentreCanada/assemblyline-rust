@@ -109,9 +109,9 @@ impl PostprocessAction {
         self.raise_alert = true; self
     }
 
-    pub fn resubmit(mut self, services: &[&str]) -> Self {
+    pub fn resubmit(mut self, services: &[ServiceName]) -> Self {
         self.resubmit = Some(ResubmitOptions {
-            additional_services: services.iter().map(|x|ServiceName::from_string(x.to_string())).collect(),
+            additional_services: services.to_vec(),
             random_below: None
         }); self
     }

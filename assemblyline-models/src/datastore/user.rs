@@ -152,12 +152,12 @@ const USER_ROLES_BASIC: [UserRole; 31] = [
 ];
 
 // USER_ROLES = USER_ROLES_BASIC.union({
-//     ROLES.administration,      # 
-//     ROLES.file_purge,          # 
-//     ROLES.replay_system,       # 
-//     ROLES.signature_import,    # 
-//     ROLES.signature_manage,    # 
-//     ROLES.assistant_use,       # 
+//     ROLES.administration,      #
+//     ROLES.file_purge,          #
+//     ROLES.replay_system,       #
+//     ROLES.signature_import,    #
+//     ROLES.signature_manage,    #
+//     ROLES.assistant_use,       #
 // })
 
 impl UserType {
@@ -209,13 +209,13 @@ impl UserType {
 
 #[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, Described, Clone, Copy, Debug, PartialEq, Eq)]
 #[metadata_type(ElasticMeta)]
-pub enum AclCatagory {R, W, E, C}
+pub enum AclCategory {R, W, E, C}
 
-impl AclCatagory {
+impl AclCategory {
     #[must_use]
     pub fn roles(&self) -> &[UserRole] {
         match self {
-            AclCatagory::R => &[
+            AclCategory::R => &[
                 UserRole::AlertView,
                 UserRole::ArchiveView,
                 UserRole::ArchiveDownload,
@@ -232,7 +232,7 @@ impl AclCatagory {
                 UserRole::WorkflowView,
                 UserRole::RetrohuntView,
             ],
-            AclCatagory::W => &[
+            AclCategory::W => &[
                 UserRole::AlertManage,
                 UserRole::ArchiveTrigger,
                 UserRole::ArchiveManage,
@@ -245,7 +245,7 @@ impl AclCatagory {
                 UserRole::RetrohuntRun,
                 UserRole::SubmissionCustomize,
             ],
-            AclCatagory::E => &[
+            AclCategory::E => &[
                 UserRole::Administration,
                 UserRole::ApikeyAccess,
                 UserRole::FilePurge,
@@ -256,13 +256,13 @@ impl AclCatagory {
                 UserRole::SignatureManage,
                 UserRole::WorkflowManage
             ],
-            AclCatagory::C => &[],
+            AclCategory::C => &[],
         }
     }
 }
 
 
-pub fn load_roles_form_acls(acls: &[AclCatagory], current_roles: &[UserRole]) -> Vec<UserRole> {
+pub fn load_roles_form_acls(acls: &[AclCategory], current_roles: &[UserRole]) -> Vec<UserRole> {
     // Check if we have current roles first
     if !current_roles.is_empty() {
         return current_roles.to_vec()
@@ -376,7 +376,7 @@ pub struct User {
     #[serde(default)]
     pub organization: Option<Text>,
     /// Secret key to generate one time passwords
-    #[metadata(index=false, store=false)]    
+    #[metadata(index=false, store=false)]
     #[serde(default)]
     pub otp_sk: Option<String>,
     /// BCrypt hash of the user's password
@@ -449,27 +449,27 @@ impl User {
 // #[test]
 // fn sample_admin_user() {
 //     let data = r#"{
-//         "agrees_with_tos": "2025-01-30T19:24:57.559049Z", 
-//         "api_quota": null, 
-//         "api_daily_quota": null, 
-//         "apikeys": {}, 
-//         "apps": {}, 
-//         "can_impersonate": false, 
-//         "classification": "", 
-//         "dn": null, 
-//         "email": null, 
-//         "groups": [], 
-//         "identity_id": null, 
-//         "is_active": true, 
-//         "name": "Administrator", 
-//         "otp_sk": null, 
-//         "password": "password", 
-//         "submission_quota": null, 
-//         "submission_async_quota": null, 
-//         "submission_daily_quota": null, 
-//         "type": ["admin", "user", "signature_importer"], 
-//         "roles": [], 
-//         "security_tokens": {}, 
+//         "agrees_with_tos": "2025-01-30T19:24:57.559049Z",
+//         "api_quota": null,
+//         "api_daily_quota": null,
+//         "apikeys": {},
+//         "apps": {},
+//         "can_impersonate": false,
+//         "classification": "",
+//         "dn": null,
+//         "email": null,
+//         "groups": [],
+//         "identity_id": null,
+//         "is_active": true,
+//         "name": "Administrator",
+//         "otp_sk": null,
+//         "password": "password",
+//         "submission_quota": null,
+//         "submission_async_quota": null,
+//         "submission_daily_quota": null,
+//         "type": ["admin", "user", "signature_importer"],
+//         "roles": [],
+//         "security_tokens": {},
 //         "uname": "admin"
 //     }"#;
 //     let _user: User = serde_json::from_str(&data).unwrap();

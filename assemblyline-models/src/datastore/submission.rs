@@ -277,8 +277,8 @@ impl SubmissionParams {
         self.ignore_cache = value; self
     }
 
-    pub fn set_services_selected(mut self, selected: &[&str]) -> Self {
-        self.services.selected = selected.iter().map(|s|ServiceName::from_string(s.to_string())).collect(); self
+    pub fn set_services_selected(mut self, selected: &[ServiceName]) -> Self {
+        self.services.selected = selected.to_vec(); self
     }
 
     pub fn set_submitter(mut self, submitter: &str) -> Self {

@@ -9,6 +9,7 @@ use rand::RngExt;
 
 use crate::datastore::tagging::TagValue;
 use crate::random_word;
+use crate::types::strings::ServiceVersion;
 use crate::types::{ClassificationString, JsonMap, MD5, SSDeepHash, ServiceName, Sha1, Sha256, Sid, Wildcard};
 use crate::{datastore::file::URIInfo, config::ServiceSafelist};
 
@@ -150,7 +151,7 @@ impl rand::distr::Distribution<Task> for rand::distr::StandardUniform {
             min_classification: ClassificationString::default_unrestricted(),
             fileinfo: rng.random(),
             filename: random_word(rng),
-            service_name: ServiceName::from_string(random_word(rng)),
+            service_name: rng.random(),
             service_config: Default::default(),
             depth: rng.random(),
             max_files: rng.random(),
@@ -316,7 +317,7 @@ pub struct ServiceResult {
     pub sid: Sid,
     pub sha256: Sha256,
     pub service_name: ServiceName,
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     pub service_tool_version: Option<String>,
     pub expiry_ts: Option<chrono::DateTime<chrono::Utc>>,
     pub result_summary: ResultSummary,
