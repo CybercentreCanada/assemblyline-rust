@@ -121,3 +121,58 @@ async fn sample_identification() {
 //             assert identify.fileinfo(sample[0], generate_hashes=False)["type"] == sample[1]
 
 }
+/// Build the pdf marker regexes the same way Identify::new does.
+fn pdf_regexes() -> (regex::bytes::Regex, regex::bytes::Regex) {
+    (
+        regex::bytes::Regex::new("/Encrypt").unwrap(),
+        regex::bytes::Regex::new("/Type/Catalog/Collection").unwrap(),
+    )
+}
+
+fn pdf_ident_on(pieces: &[&[u8]]) -> Option<&'static str> {
+    let temp = NamedTempFile::new().unwrap();
+    {
+        use std::io::Write;
+        let mut file = temp.as_file();
+        for piece in pieces {
+            file.write_all(piece).unwrap();
+        }
+        file.flush().unwrap();
+    }
+    let (encrypted, portfolio) = pdf_regexes();
+    super::pdf_ident(temp.path(), &encrypted, &portfolio).unwrap()
+}
+
+#[test]
+fn test_pdf_ident() {
+    const BLOCK_SIZE: usize = 1 << 20; // must match pdf_ident's block size
+    let filler = vec![b'x'; 200 * 1024];
+
+    // typical small files
+    assert_eq!(pdf_ident_on(&[b"%PDF-1.7 ", &filler]), None);
+    assert_eq!(pdf_ident_on(&[&filler, b"/Encrypt", &filler]), Some("document/pdf/passwordprotected"));
+    assert_eq!(pdf_ident_on(&[&filler, b"/Type/Catalog/Collection", &filler]), Some("document/pdf/portfolio"));
+
+    // '/Encrypt' must win even when the portfolio marker comes first in the file
+    assert_eq!(
+        pdf_ident_on(&[b"/Type/Catalog/Collection", &filler, b"/Encrypt"]),
+        Some("document/pdf/passwordprotected")
+    );
+
+    // markers straddling the block boundary (split in the middle of the pattern)
+    let near_boundary = vec![b'y'; BLOCK_SIZE - 4];
+    assert_eq!(pdf_ident_on(&[&near_boundary, b"/Encrypt", &filler]), Some("document/pdf/passwordprotected"));
+    let near_boundary = vec![b'y'; BLOCK_SIZE - 12];
+    assert_eq!(pdf_ident_on(&[&near_boundary, b"/Type/Catalog/Collection", &filler]), Some("document/pdf/portfolio"));
+
+    // marker exactly at a block start / at EOF
+    let full_block = vec![b'y'; BLOCK_SIZE];
+    assert_eq!(pdf_ident_on(&[&full_block, b"/Encrypt"]), Some("document/pdf/passwordprotected"));
+    let three_blocks = vec![b'y'; 3 * BLOCK_SIZE];
+    assert_eq!(pdf_ident_on(&[&three_blocks, b"/Encrypt"]), Some("document/pdf/passwordprotected"));
+
+    // tiny, empty, and near-miss files
+    assert_eq!(pdf_ident_on(&[b"%P"]), None);
+    assert_eq!(pdf_ident_on(&[b""]), None);
+    assert_eq!(pdf_ident_on(&[b"/Encrypq", &filler, b"/Type/Catalog/Collectioq"]), None);
+}
