@@ -28,7 +28,7 @@ FROM setup as builder
 
 # Build the executable
 ARG release=
-RUN cargo build $release --target-dir /out
+RUN CARGO_INCREMENTAL=0 cargo build $release --target-dir /out
 
 # Remove the code so we don't accidentally use it again
 RUN rm Cargo.toml Cargo.lock
