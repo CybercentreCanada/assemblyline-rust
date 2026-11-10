@@ -320,7 +320,7 @@ fn test_services() -> HashMap<ServiceName, Service> {
         ("core-a", dummy_service("core-a", "core", None, None, None, None)),
         ("core-b", dummy_service("core-b", "core", None, None, None, Some(true))),
         ("finish", dummy_service("finish", "post", None, None, None, None)),
-    ].into_iter().map(|(key, value)|(key.into(), value)).collect()
+    ].into_iter().map(|(key, value)|(key.parse().unwrap(), value)).collect()
 }
 
 struct TestContext {
@@ -392,8 +392,8 @@ async fn _setup_inner(ingest_op: impl FnOnce(Ingester) -> Ingester) -> TestConte
     // Configure the services
     let mut service_configurations = test_services();
 
-    service_configurations.get_mut(&"core-a".into()).unwrap().timeout = 100;
-    service_configurations.get_mut(&"core-b".into()).unwrap().timeout = 100;
+    service_configurations.get_mut(&"core-a".parse().unwrap()).unwrap().timeout = 100;
+    service_configurations.get_mut(&"core-b".parse().unwrap()).unwrap().timeout = 100;
     let (core, guard) = setup_services_and_core(service_configurations).await;
 
 
@@ -1361,7 +1361,7 @@ async fn test_plumber_clearing() {
     // context.core.services.get_service_stage_hash().set("core-b", )
     context.core.datastore.service_delta.commit(None).await.unwrap();
     context.core.redis_volatile.publish("changes.services.core-b", &serde_json::to_vec(&ServiceChange {
-        name: ServiceName::from_string("core-b".to_owned()),
+        name: "core-b".parse().unwrap(),
         operation: assemblyline_models::messages::changes::Operation::Modified,
         reason: Some("test_plumber_clearing invocation message".to_owned()),
     }).unwrap()).await.unwrap();
@@ -1645,7 +1645,7 @@ async fn test_final_partial() {
         chrono::Utc::now(),
         SubmissionParams::new(ClassificationString::unrestricted(&context.core.classification_parser))
             .set_description("file abc123")
-            .set_services_selected(&["core-a", "core-b"])
+            .set_services_selected(&["core-a".parse().unwrap(), "core-b".parse().unwrap()])
             .set_submitter("user")
             .set_groups(&["user"])
         )
@@ -1875,7 +1875,7 @@ async fn test_resubmit() {
         let mut actions: HashMap<String, (_, _)> = Default::default();
         actions.insert("test_process".to_string(), (
             SubmissionFilter::new(filter_string).unwrap(),
-            PostprocessAction::new(filter_string.to_string()).enable().alert().resubmit(&["core-a", "core-b"]).on_completed()
+            PostprocessAction::new(filter_string.to_string()).enable().alert().resubmit(&["core-a".parse().unwrap(), "core-b".parse().unwrap()]).on_completed()
         ));
 
         *context.dispatcher.postprocess_worker.actions.write().await = Arc::new(actions);
@@ -1889,7 +1889,7 @@ async fn test_resubmit() {
             .set_description("file abc123")
             .set_services_selected(&[])
             .set_submitter("user")
-            .set_services_selected(&["pre"])
+            .set_services_selected(&["pre".parse().unwrap()])
             .set_groups(&["user"])
             .set_generate_alert(true))
         .set_files(vec![File {

@@ -722,12 +722,10 @@ impl<T: CollectionType> Collection<T> {
 
         let index_list = self.get_index_list(Some(index_type))?;
         for index in index_list {
-            // build the url for the operation type
-            let mut url = if operation == "index" {
-                self.database.host.join(&format!("{index}/_doc/{key}"))?
-            } else {
-                self.database.host.join(&format!("{index}/_create/{key}"))?
-            };
+            // build the url for the operation type, keeping the key confined
+            // to a single path segment so it cannot redirect the write
+            let endpoint = if operation == "index" { "_doc" } else { "_create" };
+            let mut url = Request::build_url(&self.database.host, &[&index, endpoint, key])?;
 
             url.query_pairs_mut()
                 .append_pair("op_type", operation)

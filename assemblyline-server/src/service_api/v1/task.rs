@@ -84,7 +84,7 @@ async fn get_task(
         let result = tasking.get_task(
             client_id,
             *service_name,
-            service_version,
+            *service_version,
             service_tool_version.as_deref(),
             Some(status_expiry),
             remaining

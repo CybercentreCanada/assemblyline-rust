@@ -5,6 +5,7 @@ use serde_with::{SerializeDisplay, DeserializeFromStr};
 use struct_metadata::Described;
 
 use crate::types::classification::{unrestricted_classification, unrestricted_classification_string};
+use crate::types::strings::ServiceVersion;
 use crate::types::{ClassificationString, JsonMap, NonZeroInteger, ServiceName, Text};
 use crate::{ElasticMeta, Readable};
 
@@ -368,7 +369,7 @@ pub struct Service {
     pub name: ServiceName,
     /// Version of service
     #[metadata(store=true)]
-    pub version: String,
+    pub version: ServiceVersion,
 
     /// Should the service be able to talk to core infrastructure or just service-server for tasking?
     #[serde(default)]
@@ -406,7 +407,7 @@ pub struct Service {
     pub recursion_prevention: Vec<ServiceName>,
 }
 
-fn default_category() -> ServiceName { ServiceName::from_string("Static Analysis".to_owned()) }
+fn default_category() -> ServiceName { ServiceName::static_analysis_category() }
 fn default_description() -> Text { Text("NA".to_owned()) }
 fn default_stage() -> String { "CORE".to_owned() }
 fn default_timeout() -> i32 { 60 }

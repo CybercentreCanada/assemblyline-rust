@@ -205,7 +205,7 @@ async fn test_task_ignored_then_timeout() {
     queue.push(0.0, &task).await.unwrap();
 
     // add an empty result for that task to cache hit on
-    let result_key = ResultKeyBuilder::new(&task.fileinfo.sha256, &service.name, &service.version)
+    let result_key = ResultKeyBuilder::new(&task.fileinfo.sha256, service.name, service.version)
         .is_empty(true)
         .service_tool_version(Some(TOOL_VERSION))
         .task(Some(&task))
