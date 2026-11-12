@@ -14,7 +14,7 @@ tokio-stream = "0.1"
 
 # System utilities
 async-trait = "0.1"
-bytes = "1.9"
+bytes = "1.11"
 safe-path = "0.1"
 log = "0.4"
 url = "2.5"
