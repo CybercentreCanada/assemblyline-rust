@@ -30,9 +30,7 @@ FROM setup as builder
 
 # Build the executable
 ARG release=
-RUN CARGO_INCREMENTAL=0 cargo build $release --target-dir /out && \
-    rm -rf /usr/local/cargo/registry && \
-    rm -rf /root/.cache
+RUN CARGO_INCREMENTAL=0 cargo build $release --target-dir /out
 
 # Remove the code so we don't accidentally use it again
 RUN rm Cargo.toml Cargo.lock
