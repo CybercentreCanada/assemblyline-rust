@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use assemblyline_models::datastore::apikey::Apikey;
+use assemblyline_models::config::DatastoreType;
 use assemblyline_models::datastore::badlist::Badlist;
 use assemblyline_models::datastore::heuristic::Heuristic;
 use assemblyline_models::datastore::safelist::Safelist;
@@ -25,6 +26,8 @@ mod test_datastore;
 mod test_mapping;
 #[cfg(test)]
 mod test_helper;
+#[cfg(test)]
+mod test_backend;
 
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
@@ -54,6 +57,19 @@ pub enum Index {
 pub enum Version {
     Create,
     Expected{primary_term: i64, sequence_number: i64},
+}
+
+/// A resolved datastore backend. `auto` is deliberately not represented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Elasticsearch,
+    Opensearch,
+}
+
+impl Backend {
+    pub(crate) fn supports_task_index_cleanup(self) -> bool {
+        self == Self::Elasticsearch
+    }
 }
 
 const ALT_ELASTICSEARCH_USERS: &[&str] = &["plumber"];
@@ -99,6 +115,33 @@ fn strip_nulls(d: serde_json::Value) -> serde_json::Value {
             json!(out)
         },
         value => value
+    }
+}
+
+fn mapping_for_backend<T: Serialize>(mapping: &T, backend: Backend) -> Result<serde_json::Value> {
+    let mut value = serde_json::to_value(mapping)?;
+    if backend == Backend::Opensearch {
+        convert_wildcards_to_keywords(&mut value);
+    }
+    Ok(value)
+}
+
+fn convert_wildcards_to_keywords(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(values) => {
+            for value in values {
+                convert_wildcards_to_keywords(value);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            if values.get("type").and_then(serde_json::Value::as_str) == Some("wildcard") {
+                values.insert("type".to_owned(), json!("keyword"));
+            }
+            for value in values.values_mut() {
+                convert_wildcards_to_keywords(value);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -438,6 +481,7 @@ pub struct ElasticHelper {
     // pub es: tokio::sync::RwLock<elasticsearch::Elasticsearch>,
     pub host: url::Url,
     pub archive_access: bool,
+    pub backend: Backend,
 }
 
 impl std::fmt::Debug for ElasticHelper {
@@ -448,6 +492,16 @@ impl std::fmt::Debug for ElasticHelper {
 
 impl ElasticHelper {
     async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool) -> Result<Self> {
+        Self::connect_with_backend(
+            url,
+            archive_access,
+            ca_cert,
+            connect_unsafe,
+            DatastoreType::Elasticsearch,
+        ).await
+    }
+
+    async fn connect_with_backend(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool, configured_backend: DatastoreType) -> Result<Self> {
         let host: url::Url = url.parse()?;
         let mut builder = reqwest::Client::builder()
             .timeout(get_transport_timeout());
@@ -463,12 +517,61 @@ impl ElasticHelper {
             builder = builder.danger_accept_invalid_certs(true);
         }
 
+        let client = builder.build().map_err(ElasticError::fatal)?;
+        let backend = match configured_backend {
+            DatastoreType::Elasticsearch => Backend::Elasticsearch,
+            DatastoreType::Opensearch => Backend::Opensearch,
+            DatastoreType::Auto => Self::detect_backend(&client, &host).await?,
+        };
+
         Ok(ElasticHelper{
             // es: tokio::sync::RwLock::new(Self::_create_connection(host.clone())?),
-            client: builder.build().map_err(ElasticError::fatal)?,
+            client,
             host,
             archive_access,
+            backend,
         })
+    }
+
+    async fn detect_backend(client: &reqwest::Client, host: &url::Url) -> Result<Backend> {
+        let response = client.get(host.clone()).send().await.map_err(|err| {
+            if err.is_connect() || err.is_timeout() {
+                ElasticError::fatal("Datastore backend detection connection failure")
+            } else {
+                ElasticError::fatal("Datastore backend detection request failure")
+            }
+        })?;
+
+        if response.status() == StatusCode::UNAUTHORIZED || response.status() == StatusCode::FORBIDDEN {
+            return Err(ElasticError::fatal(format!(
+                "Datastore backend detection authentication failure (HTTP {})",
+                response.status()
+            )))
+        }
+        if !response.status().is_success() {
+            return Err(ElasticError::fatal(format!(
+                "Datastore backend detection failed with HTTP {}",
+                response.status()
+            )))
+        }
+
+        let elasticsearch_header = response.headers()
+            .get("x-elastic-product")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.eq_ignore_ascii_case("Elasticsearch"));
+        let body: serde_json::Value = response.json().await
+            .map_err(|err| ElasticError::fatal(format!("Malformed datastore backend detection response: {err}")))?;
+        let opensearch_metadata = body.pointer("/version/distribution")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.eq_ignore_ascii_case("opensearch"));
+
+        match (elasticsearch_header, opensearch_metadata) {
+            (true, false) => Ok(Backend::Elasticsearch),
+            (false, true) => Ok(Backend::Opensearch),
+            _ => Err(ElasticError::fatal(
+                "Unsupported or ambiguous datastore backend response"
+            )),
+        }
     }
 
     fn change_host(&self, url: url::Url) -> Self {
@@ -476,6 +579,7 @@ impl ElasticHelper {
             client: self.client.clone(),
             host: url,
             archive_access: self.archive_access,
+            backend: self.backend,
         }
     }
 
@@ -1010,7 +1114,11 @@ impl std::fmt::Debug for Elastic {
 
 impl Elastic {
     pub async fn connect(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool, prefix: &str) -> Result<Arc<Self>> {
-        let helper = Arc::new(ElasticHelper::connect(url, archive_access, ca_cert, connect_unsafe).await?);
+        Self::connect_with_backend(url, archive_access, ca_cert, connect_unsafe, prefix, DatastoreType::Elasticsearch).await
+    }
+
+    pub async fn connect_with_backend(url: &str, archive_access: bool, ca_cert: Option<&[u8]>, connect_unsafe: bool, prefix: &str, backend: DatastoreType) -> Result<Arc<Self>> {
+        let helper = Arc::new(ElasticHelper::connect_with_backend(url, archive_access, ca_cert, connect_unsafe, backend).await?);
         Self::setup(helper, prefix).await
     }
 
@@ -1110,6 +1218,10 @@ impl Elastic {
     }
 
     pub async fn task_cleanup(&self, deleteable_task_age: Option<chrono::TimeDelta>, max_tasks: Option<u64>) -> Result<u64> {
+        // OpenSearch does not expose task history as a writable `.tasks` system index.
+        if !self.es.backend.supports_task_index_cleanup() {
+            return Ok(0)
+        }
         let deleteable_task_age = deleteable_task_age.unwrap_or(chrono::TimeDelta::zero());
 
         // Create the query to delete the tasks
@@ -1127,6 +1239,10 @@ impl Elastic {
 
         // return the number of deleted items
         return Ok(res._status.deleted)
+    }
+
+    pub(crate) fn backend(&self) -> Backend {
+        self.es.backend
     }
 
     // pub async fn update_service_delta(&self, name: &str, delta: &JsonMap) -> Result<()> {
@@ -1419,4 +1535,3 @@ fn extract_number(container: &JsonMap, name: &str) -> u64 {
         None => 0,
     }
 }
-
