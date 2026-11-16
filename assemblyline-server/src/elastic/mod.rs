@@ -29,7 +29,7 @@ mod test_helper;
 use assemblyline_markings::classification::ClassificationParser;
 use assemblyline_models::datastore::filescore::FileScore;
 use assemblyline_models::datastore::user::User;
-use assemblyline_models::types::{ExpandingClassification, JsonMap, ServiceName, Sha256};
+use assemblyline_models::types::{ExpandingClassification, JsonMap, Sha256};
 use assemblyline_models::datastore::{EmptyResult, Error as ErrorModel, Result as ResultModel, File, Service, ServiceDelta, Submission};
 use chrono::{DateTime, TimeDelta, Utc};
 use collection::{Collection, OperationBatch};
@@ -118,8 +118,8 @@ pub fn create_empty_result_from_key(key: &str, dtl: i64, cl_engine: &Classificat
         expiry_ts: Some(Utc::now() + TimeDelta::days(dtl)),
         classification: ExpandingClassification::new(cl_engine.unrestricted().to_owned(), cl_engine)?,
         response: assemblyline_models::datastore::result::ResponseBody {
-            service_name: ServiceName::from(svc_name),
-            service_version: svc_version.to_owned(),
+            service_name: svc_name.parse()?,
+            service_version: svc_version.parse()?,
             milestones: Default::default(),
             service_tool_version: Default::default(),
             supplementary: Default::default(),
@@ -515,7 +515,7 @@ impl ElasticHelper {
     /// Wait for an index responds with a given status level
     async fn wait_for_status(&self, index: &str, min_status: Option<&str>) -> Result<()> {
         let min_status = min_status.unwrap_or("yellow");
-        let mut url = self.host.join("_cluster/health/")?.join(index)?;
+        let mut url = Request::build_url(&self.host, &["_cluster", "health", index])?;
         url.query_pairs_mut().append_pair("timeout", "5s").append_pair("wait_for_status", min_status);
 
         loop {
@@ -1397,7 +1397,7 @@ impl Elastic {
                 "cluster.max_shards_per_node": 1000000
             }
         });
-        self.es.client.put(self.es.host.join("/_cluster/settings")?).json(&body).send().await?.error_for_status()?;
+        self.es.client.put(Request::build_url(&self.es.host, &["_cluster", "settings"])?).json(&body).send().await?.error_for_status()?;
         Ok(())
     }
 

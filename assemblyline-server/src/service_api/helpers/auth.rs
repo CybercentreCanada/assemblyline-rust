@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use assemblyline_models::types::ServiceName;
+use assemblyline_models::types::strings::ServiceVersion;
 use itertools::Itertools;
 use log::{debug, error, warn};
 use parking_lot::Mutex;
@@ -189,7 +190,7 @@ impl<E: Endpoint> Endpoint for ServiceAuthImpl<E> {
 pub struct ClientInfo {
     pub client_id: String,
     pub service_name: ServiceName,
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     pub service_tool_version: Option<String>,
 }
 
@@ -202,8 +203,11 @@ impl ClientInfo {
 
         Ok(ClientInfo {
             client_id: read_required_header(req, "CONTAINER-ID")?.to_owned(),
-            service_name: read_required_header(req, "SERVICE-NAME")?.to_owned().as_str().into(),
-            service_version: read_required_header(req, "SERVICE-VERSION")?.replace("stable", ""),
+            service_name: read_required_header(req, "SERVICE-NAME")?
+                .parse().map_err(|_| "SERVICE-NAME")?,
+            service_version: read_required_header(req, "SERVICE-VERSION")?
+                .replace("stable", "")
+                .parse().map_err(|_| "SERVICE-VERSION")?,
             service_tool_version,
         })
     }

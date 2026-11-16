@@ -1,9 +1,9 @@
-FROM python:3.11 AS pybuilder
+FROM python:3.13 AS pybuilder
 
 RUN pip install --target /packages msoffcrypto-tool
 
 
-FROM rust:1.96-bookworm AS builder
+FROM rust:1.96-trixie AS setup
 
 # Add more build tools
 RUN apt-get update && apt-get install -yy libclang-dev libmagic-dev libpython3-dev
@@ -25,9 +25,11 @@ COPY ./redis-objects ./redis-objects
 COPY --from=pybuilder /packages /usr/local/lib/python3/dist-packages/
 ENV PYTHONPATH=/usr/local/lib/python3/dist-packages/
 
+FROM setup as builder
+
 # Build the executable
 ARG release=
-RUN cargo build $release --target-dir /out
+RUN CARGO_INCREMENTAL=0 cargo build $release --target-dir /out
 
 # Remove the code so we don't accidentally use it again
 RUN rm Cargo.toml Cargo.lock

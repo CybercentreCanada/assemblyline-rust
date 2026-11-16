@@ -1,20 +1,7 @@
 
-// import hashlib
-// import logging
-
-// from assemblyline.common import forge
-// from assemblyline.common.chunk import chunk
-// from assemblyline.common.isotime import now_as_iso
-// from assemblyline.datastore.helper import AssemblylineDatastore
-// from assemblyline.odm.models.user import ROLES
-// from assemblyline.remote.datatypes.lock import Lock
-
-
 const CHUNK_SIZE: u64 = 1000;
-// CLASSIFICATION = forge.get_classification()
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::Arc;
 
 use assemblyline_markings::classification::ClassificationParser;

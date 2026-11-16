@@ -9,7 +9,8 @@ use rand::{RngExt, seq::IteratorRandom};
 
 use crate::datastore::Submission;
 use crate::messages::task::{generate_conf_key, Task};
-use crate::{random_word, random_words, ElasticMeta, Readable};
+use crate::types::strings::ServiceVersion;
+use crate::{random_words, ElasticMeta, Readable};
 use crate::types::{ServiceName, Sha256, Text};
 
 
@@ -115,7 +116,7 @@ pub struct Response {
     #[metadata(copyto="__text__")]
     pub service_tool_version: Option<String>,
     /// Service Version
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     /// Status of error produced by service
     pub status: Status,
 }
@@ -127,9 +128,9 @@ impl rand::distr::Distribution<Response> for rand::distr::StandardUniform {
         Response {
             message: Text(random_words(rng, word_count).join(" ")),
             service_debug_info: None,
-            service_name: ServiceName::from_string(random_word(rng)),
+            service_name: rng.random(),
             service_tool_version: None,
-            service_version: "0.0".to_string(),
+            service_version: rng.random(),
             status: rng.random(),
         }
     }
@@ -203,9 +204,9 @@ impl Error {
             response: Response {
                 message: Text("".to_owned()),
                 service_debug_info: None,
-                service_name: "".into(),
+                service_name: ServiceName::unknown(),
                 service_tool_version: None,
-                service_version: "".to_owned(),
+                service_version: ServiceVersion::zero(),
                 status: Status::FailNonrecoverable
             },
             sha256: context.files[0].sha256.clone(),
@@ -224,7 +225,7 @@ impl Error {
                 service_debug_info: None,
                 service_name: context.service_name,
                 service_tool_version: None,
-                service_version: "0".to_owned(),
+                service_version: ServiceVersion::zero(),
                 status: Status::FailNonrecoverable
             },
             sha256: context.fileinfo.sha256.clone(),
@@ -262,7 +263,8 @@ impl Readable for Error {
 pub mod builder {
     use super::ErrorTypes;
     use crate::datastore::error::{ErrorSeverity, Status};
-    use crate::types::{ServiceName, Sha256, Text};
+    use crate::types::strings::ServiceVersion;
+use crate::types::{ServiceName, Sha256, Text};
 
 
     pub struct NeedsService {
@@ -270,7 +272,7 @@ pub mod builder {
     }
 
     impl NeedsService {
-        pub fn service(mut self, name: ServiceName, version: String) -> NeedsMessage {
+        pub fn service(mut self, name: ServiceName, version: ServiceVersion) -> NeedsMessage {
             self.error.response.service_name = name;
             self.error.response.service_version = version;
             NeedsMessage { error: self.error }

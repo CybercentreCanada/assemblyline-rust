@@ -18,7 +18,6 @@ use crate::constants::ServiceApiKeyConfig;
 use crate::service_api::helpers::auth::{ClientInfo, ServiceAuth};
 use crate::service_api::helpers::{make_api_response, make_empty_api_error};
 use crate::service_api::helpers::tasking::TaskingClient;
-use crate::Core;
 
 // SUB_API = 'service'
 // service_api = make_subapi_blueprint(SUB_API, api_version=1)

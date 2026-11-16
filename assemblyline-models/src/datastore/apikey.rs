@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use struct_metadata::Described;
 
 use crate::{ElasticMeta, Readable};
-use crate::datastore::user::{UserRole, AclCatagory};
+use crate::datastore::user::{UserRole, AclCategory};
 
 const APIKEY_ID_DELIMETER: &str = "+";
 pub const FORBIDDEN_APIKEY_CHARACTERS: &str = r"[+@!#$%^&*()<>?/\|}{~:]";
@@ -15,7 +15,7 @@ pub const FORBIDDEN_APIKEY_CHARACTERS: &str = r"[+@!#$%^&*()<>?/\|}{~:]";
 #[metadata(index=true, store=true)]
 pub struct Apikey {
     /// Access Control List for the API key
-    pub acl: Vec<AclCatagory>,
+    pub acl: Vec<AclCategory>,
     /// BCrypt hash of the password for the apikey
     pub password: String,
     /// List of roles tied to the API key
