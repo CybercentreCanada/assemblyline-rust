@@ -2052,7 +2052,7 @@ impl Dispatcher {
                 task.dropped_files.insert(sha256.clone());
 
                 let error = error::Error::from_submission(&task.submission)
-                    .service("Dispatcher".parse()?, "4.7".parse()?)
+                    .service("Dispatcher".parse()?, "4.8".parse()?)
                     .sha256(sha256.clone())
                     .error_type(error::ErrorTypes::Unknown)
                     .message(format!("Couldn't find file info for {sha256} in submission {}", task.submission.sid));
