@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 #[cfg(feature = "rand")]
 use rand::{Rng, RngExt as _};
-#[cfg(feature = "rand")]
-use crate::random_word;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use struct_metadata::Described;
@@ -522,8 +520,8 @@ impl Readable for Service {
 #[cfg(feature = "rand")]
 impl rand::distr::Distribution<Service> for rand::distr::StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Service {
-        let random_name = ServiceName::from_string(random_word(rng));
-        let random_version = format!("v{}_{}", rng.random_range(0..10), rng.random_range(0..10));
+        let random_name: ServiceName = rng.random();
+        let random_version: ServiceVersion = rng.random();
 
         let docker_config = DockerConfig {
             image: format!("{random_name}:{random_version}"),
@@ -560,13 +558,13 @@ impl rand::distr::Distribution<Service> for rand::distr::StandardUniform {
             uses_metadata: Default::default(),
             monitored_keys: Default::default(),
             name: random_name,
-            version: random_version.to_string(),
+            version: random_version,
             privileged: false,
             disable_cache: Default::default(),
             stage: Default::default(),
             submission_params: Default::default(),
             timeout: Default::default(),
-            docker_config: docker_config,
+            docker_config,
             dependencies: Default::default(),
             update_channel: default_update_channel(),
             update_config: Default::default(),
