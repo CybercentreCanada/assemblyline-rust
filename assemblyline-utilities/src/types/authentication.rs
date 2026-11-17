@@ -1,4 +1,7 @@
+//! This module contains methods and structs for authentications with the server.
+
 /// A value that contains one of the ways to authenticate to Assemblyline
+#[derive(Clone, Default)]
 pub enum Authentication {
     /// Authenticate with a password
     Password {
@@ -21,14 +24,14 @@ pub enum Authentication {
         /// Oauth token
         token: String,
     },
+    /// No authentication
+    #[default]
     None,
 }
 
 impl Authentication {
+    /// Whether the given authentication method requires logging in
     pub fn need_login(&self) -> bool {
-        match self {
-            Authentication::None => false,
-            _ => true,
-        }
+        !matches!(self, Authentication::None)
     }
 }

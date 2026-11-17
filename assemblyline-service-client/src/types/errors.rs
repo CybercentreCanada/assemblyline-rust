@@ -1,4 +1,4 @@
-use assemblyline_models::{messages::task::Task, types::Sha256, ModelError};
+use assemblyline_models::{ModelError, types::{Sha256, Sid}};
 use assemblyline_utilities::types::errors::ApiClientError;
 
 use std::fmt::Display;
@@ -23,7 +23,8 @@ pub enum ServiceClientError {
     TaskFileMissingError {
         message: String,
         file_sha: Sha256,
-        task: Task,
+        task_id: u64,
+        sid: Sid
     },
     PipeReadError {
         pipe_name: String,
@@ -55,8 +56,8 @@ impl Display for ServiceClientError {
                 "Error: Sha256 of content {content_sha} does not match the requested sha256 {requested_sha}"
             )),
             ServiceClientError::Default(message) => f.write_fmt(format_args!("Error: {message}")),
-            ServiceClientError::TaskFileMissingError { message, file_sha, task } => {
-                f.write_fmt(format_args!("File Missing Error [{}] - [{}]: {}", task.sid, file_sha, message))
+            ServiceClientError::TaskFileMissingError { message, file_sha, task_id, sid } => {
+                f.write_fmt(format_args!("File Missing Error [{}-sid{}] - [{}]: {}", task_id, sid, file_sha, message))
             }
             ServiceClientError::PipeReadError { pipe_name, message } => f.write_fmt(format_args!("Error reading pipe({}): {} ", pipe_name, message)),
             ServiceClientError::PipeWriteError { pipe_name, message } => f.write_fmt(format_args!("Error writing pipe({}): {} ", pipe_name, message)),
@@ -69,7 +70,7 @@ impl Display for ServiceClientError {
 impl From<reqwest::Error> for ServiceClientError {
     fn from(value: reqwest::Error) -> Self {
         ServiceClientError::ApiConnection {
-            status_code: value.status().and_then(|c| Some(c.as_u16())),
+            status_code: value.status().map(|c| c.as_u16()),
             message: format!("{}", value),
             server_version: None,
         }

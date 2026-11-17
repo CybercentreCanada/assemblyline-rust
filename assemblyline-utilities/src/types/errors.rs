@@ -1,14 +1,25 @@
+//! Define Errors struct for this library
+
 use std::fmt::Display;
 
+
+/// Errors from Communication with API servers
 #[derive(Debug, Clone)]
 pub enum ApiClientError {
+    /// Error response from the API server
     ClientError {
+        /// Error message from HTTP response
         message: String,
+        /// Status code of HTTP response
         status_code: Option<u16>,
+        /// Server version
         server_version: Option<String>,
     },
+    /// Transport error when making HTTP request
     Transport(String),
+    /// Error configuring connections to API server
     Configuration(String),
+    /// IO error
     IO(String),
     /// The server's response was truncated, corrupted, or malformed
     MalformedResponse,
@@ -16,6 +27,7 @@ pub enum ApiClientError {
     InvalidHeader,
     /// An error caused by failing to serialize or deserialize a message
     Serialization(String),
+    /// Error parsing URLs
     UrlParseError(String),
 }
 

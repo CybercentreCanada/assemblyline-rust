@@ -44,19 +44,15 @@ impl Status {
     }
 }
 
-#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy)]
+#[derive(SerializeDisplay, DeserializeFromStr, strum::Display, strum::EnumString, strum::EnumIter, Described, Clone, Copy, Default)]
 #[strum(serialize_all="lowercase")]
 #[metadata_type(ElasticMeta)]
 pub enum ErrorSeverity {
+    #[default]
     Error,
     Warning,
 }
 
-impl Default for ErrorSeverity {
-    fn default() -> Self {
-        Self::Error
-    }
-}
 
 #[cfg(feature = "rand")]
 impl rand::distr::Distribution<ErrorSeverity> for rand::distr::StandardUniform {
@@ -244,7 +240,7 @@ impl Error {
                 service_debug_info: context.response.service_debug_info.clone(),
                 service_name: context.response.service_name,
                 service_tool_version: context.response.service_tool_version.clone(),
-                service_version: context.response.service_version.clone(),
+                service_version: context.response.service_version,
                 status: Status::FailNonrecoverable
             },
             sha256: context.sha256.clone(),

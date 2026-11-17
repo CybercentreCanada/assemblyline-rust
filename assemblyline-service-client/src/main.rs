@@ -1,3 +1,5 @@
+//! Assemblyline service client that facilitates the communication between service server and service processes.
+
 #![warn(
     missing_docs,
     non_ascii_idents,
@@ -28,15 +30,20 @@ use parking_lot::Mutex;
 use signal_hook::iterator::Signals;
 use std::{path::PathBuf, sync::Arc};
 
+use itertools as _;
+use nom as _;
+use poem as _;
+use rand as _;
+use reqwest_retry as _;
+use urlencoding as _;
+use bytes as _;
+
 use crate::{
-    constants::{
-        DEFAULT_API_HOST, DEFAULT_ASSEMBLYLINE_CONFIG_PATH, DEFAULT_CONTAINER_ID, DEFAULT_ROOT_CA_PATH, DEFAULT_RUNTIME_PREFIX,
-        DEFAULT_SERVICE_API_KEY,
-    },
-    service_client::ServiceClient,
+    constants::DEFAULT_ASSEMBLYLINE_CONFIG_PATH,
+    service_client::{ServiceClientBuilder},
     service_launcher::DefaultServiceLauncher,
     task_fetcher::single_thread_task_fetcher::SingleThreadTaskFetcher,
-    task_uploader::task_uploader::TaskUploader,
+    task_uploader::TaskUploader,
 };
 
 pub mod constants;
@@ -46,6 +53,7 @@ pub mod task_fetcher;
 pub mod task_uploader;
 pub mod types;
 
+
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -54,69 +62,75 @@ async fn main() {
     // Service handler is a messenger between the service process and the service API, it doesn't need to validate classification
     assemblyline_models::disable_global_classification();
 
-    // load environment variables to configure service client.
-    let default_tmp_folder = std::env::temp_dir().as_os_str().to_string_lossy().to_string();
+    let mut sc_builder = ServiceClientBuilder::new();
 
-    let runtime_prefix = std::env::var("RUNTIME_PREFIX").unwrap_or(DEFAULT_RUNTIME_PREFIX.to_owned());
-    let tasking_dir = std::env::var("TASKING_DIR").unwrap_or(default_tmp_folder.clone());
+    if let Ok(runtime_prefix) = std::env::var("RUNTIME_PREFIX") {
+        sc_builder.set_runtime_prefix(runtime_prefix);
+    }
 
-    let server_host_string = std::env::var("SERVICE_API_HOST").unwrap_or(DEFAULT_API_HOST.to_string());
-    let service_api_key = std::env::var("SERVICE_API_KEY").unwrap_or(DEFAULT_SERVICE_API_KEY.to_owned());
-    let container_id = std::env::var("HOSTNAME").unwrap_or(DEFAULT_CONTAINER_ID.to_owned());
-    let root_ca_path = std::env::var("SERVICE_SERVER_ROOT_CA_PATH").unwrap_or(DEFAULT_ROOT_CA_PATH.to_owned());
+    if let Ok(tasking_dir) = std::env::var("TASKING_DIR") {
+        sc_builder.set_tasking_dir(tasking_dir);
+    }
 
-    let container_mode = std::env::var("CONTAINER_MODE").map_or(false, |m| match &m.to_lowercase().as_str() {
-        &"true" => true,
-        _ => false,
-    });
+    if let Ok(server_host_string) = std::env::var("SERVICE_API_HOST") {
+        sc_builder.set_server_host_string(server_host_string);
+    }
 
-    let register_only = std::env::var("REGISTER_ONLY").map_or(false, |m| match &m.to_lowercase().as_str() {
-        &"true" => true,
-        _ => false,
-    });
+    if let Ok(service_api_key) = std::env::var("SERVICE_API_KEY") {
+        sc_builder.set_service_api_key(service_api_key);
+    }
 
-    let service_dir = std::env::var("SERVICE_DIR").map_or(None, |dir| Some(dir));
+    if let Ok(container_id) = std::env::var("HOSTNAME") {
+        sc_builder.set_container_id(container_id);
+    }
 
-    let manifest_folder = std::env::var("MANIFEST_FOLDER").unwrap_or(
-        std::env::current_dir()
-            .expect("Failed to load current directory.")
-            .to_string_lossy()
-            .to_string(),
-    );
+    if let Ok(root_ca_path) = std::env::var("SERVICE_SERVER_ROOT_CA_PATH") {
+        sc_builder.set_root_ca_path(root_ca_path);
+    }
 
-    let task_complete_limit = std::env::var("AL_SERVICE_TASK_LIMIT").map_or(None, |val| val.parse::<i32>().map_or(None, |v| Some(v)));
+    if let Ok(manifest_dir) = std::env::var("MANIFEST_DIR") {
+        sc_builder.set_manifest_dir(manifest_dir);
+    }
 
-    let config_path = std::env::var("ASSEMBLYLINE_CONFIG_PATH").unwrap_or(DEFAULT_ASSEMBLYLINE_CONFIG_PATH.to_owned());
 
-    let config = load_configuration(config_path).await.expect("Cannot load configuration.");
+    if let Ok(Ok(task_complete_limit)) = std::env::var("AL_SERVICE_TASK_LIMIT").map(|val| {
+        val.parse::<i64>()
+    }) {
+        sc_builder.set_task_complete_limit(task_complete_limit);
+    }
+
+    if std::env::var("CONTAINER_MODE").is_ok_and(|m| matches!(m.to_lowercase().as_str(), "true")) {
+        sc_builder.set_container_mode(true);
+    }
+
+    if std::env::var("REGISTER_ONLY").is_ok_and(|m| matches!(m.to_lowercase().as_str(), "true")) {
+        sc_builder.set_register_only(true);
+    }
+
+    let service_dir = std::env::var("SERVICE_DIR").ok();
+
+    let config_path = std::env::var("ASSEMBLYLINE_CONFIG_PATH")
+        .unwrap_or(DEFAULT_ASSEMBLYLINE_CONFIG_PATH.to_owned());
+
+    let config = load_configuration(config_path)
+        .await
+        .expect("Cannot load configuration.");
     let _log_manager = configure_logging(&config).expect("Cannot configure logging.");
 
     let sc_running = Arc::new(Mutex::new(true));
 
-    let mut sc = ServiceClient::new(
-        register_only,
-        container_mode,
-        sc_running.clone(),
-        container_id,
-        runtime_prefix,
-        default_tmp_folder,
-        tasking_dir,
-        manifest_folder,
-        server_host_string,
-        service_api_key,
-        root_ca_path,
-        task_complete_limit,
-    )
-    .await
-    .expect("Cannot initialize service client.");
+    let mut sc = sc_builder
+        .build_service_client(sc_running.clone())
+        .await
+        .expect("Cannot initialize service client.");
 
     // setup different possible service client modes.
     let mut task_fetcher = SingleThreadTaskFetcher {};
     let task_uploader = TaskUploader {};
-    let service_launcher = DefaultServiceLauncher { service_dir: service_dir };
+    let service_launcher = DefaultServiceLauncher { service_dir };
 
     // handler for termination signals
-    let signals = Signals::new(&[signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]);
+    let signals = Signals::new([signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM]);
 
     info!("Set up signal handlers.");
     let signal_handler = match signals {
@@ -127,18 +141,19 @@ async fn main() {
             let signal_thread_handler = handler.clone();
             tokio::spawn(async move {
                 while !signal_thread_handler.is_closed() {
-                    match sig.pending().next() {
-                        Some(e) => {
-                            if (e == signal_hook::consts::SIGTERM) || (e == signal_hook::consts::SIGINT) || (e == signal_hook::consts::SIGUSR1) {
-                                info!("Termination signal caught: Code {e}.");
-                                *run.lock() = false;
-                                break;
-                            } else {
-                                warn!("Unknown signal caught. Code ({})", e);
-                            }
+                    if let Some(e) = sig.pending().next() {
+                        if (e == signal_hook::consts::SIGTERM)
+                            || (e == signal_hook::consts::SIGINT)
+                            || (e == signal_hook::consts::SIGUSR1)
+                        {
+                            info!("Termination signal caught: Code {e}.");
+                            *run.lock() = false;
+                            break;
+                        } else {
+                            warn!("Unknown signal caught. Code ({})", e);
                         }
-                        None => {}
                     }
+
                     tokio::time::sleep(tokio::time::Duration::from_secs_f64(2.0)).await;
                 }
             });
@@ -154,7 +169,9 @@ async fn main() {
     // run service in a loop
     while *sc_running.lock() {
         info!("Start running service client...");
-        let res = sc.run_service(&mut task_fetcher, &task_uploader, &service_launcher).await;
+        let res = sc
+            .run_service(&mut task_fetcher, &task_uploader, &service_launcher)
+            .await;
 
         if let Err(err) = res {
             error!("Error running service client: {}", err);

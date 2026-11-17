@@ -23,7 +23,10 @@ mod modules;
 
 use std::sync::Arc;
 
-use assemblyline_utilities::{connection::{self, Connection, ServerType}, types::{authentication::Authentication, errors::ApiClientError}};
+use assemblyline_utilities::{
+    connection::{Connection, ConnectionBuilder, ServerType},
+    types::{authentication::Authentication, errors::ApiClientError},
+};
 use modules::alert::Alert;
 use modules::bundle::Bundle;
 use modules::error::Error;
@@ -32,7 +35,7 @@ use modules::help::Help;
 use modules::ingest::Ingest;
 use modules::search::Search;
 use modules::submit::Submit;
-pub use types::{ JsonMap};
+pub use types::JsonMap;
 // pub use connection::{Connection, TLSSettings};
 
 /// A client to communicate with the Assemblyline API
@@ -74,7 +77,14 @@ pub struct Client {
 impl Client {
     /// Connect to an assemblyline system
     pub async fn connect(server: String, auth: Authentication) -> Result<Self, ApiClientError> {
-        let connection = Arc::new(Connection::connect(server, ServerType::AssemblylineUiServer, true, auth, None, connection::TLSSettings::Native, Default::default(), None).await?);
+        let connection = Arc::new(
+            ConnectionBuilder::new(server, ServerType::AssemblylineUiServer)
+                .check_api_version(true)
+                .set_authentication(auth)
+                .build_and_connect()
+                .await?,
+        );
+
         Ok(Self {
             alert: Alert::new(connection.clone()),
             bundle: Bundle::new(connection.clone()),
@@ -105,11 +115,14 @@ impl Client {
 #[cfg(test)]
 mod tests {
 
+    use std::str::FromStr;
     use std::sync::Arc;
 
-    use assemblyline_models::datastore::submission::{ServiceSelection, SubmissionParams, SubmissionState};
-    use assemblyline_models::types::ClassificationString;
-    use assemblyline_utilities::connection::{Connection, ServerType, TLSSettings};
+    use assemblyline_models::datastore::submission::{
+        ServiceSelection, SubmissionParams, SubmissionState,
+    };
+    use assemblyline_models::types::{ClassificationString, ServiceName};
+    use assemblyline_utilities::connection::{ConnectionBuilder, ServerType};
     use assemblyline_utilities::types::authentication::Authentication;
     use rand::RngExt;
 
@@ -125,18 +138,14 @@ mod tests {
         let username = std::env::var("ASSEMBLYLINE_USER").unwrap();
         let key = std::env::var("ASSEMBLYLINE_KEY").unwrap();
 
-        let connection = Connection::connect(
-            url,
-            ServerType::AssemblylineUiServer,
-            true,
-            Authentication::ApiKey { username, key },
-            Some(2),
-            TLSSettings::Native,
-            Default::default(),
-            Some(30.0),
-        )
-        .await
-        .unwrap();
+        let connection = ConnectionBuilder::new(url, ServerType::AssemblylineUiServer)
+            .set_authentication(Authentication::ApiKey { username, key })
+            .set_retry(2)
+            .set_timeout(30.0)
+            .build_and_connect()
+            .await
+            .unwrap();
+
         Client::from_connection(Arc::new(connection)).await.unwrap()
 
         // Client::connect(url, Authentication::ApiKey { username, key }).await.unwrap()
@@ -189,12 +198,13 @@ mod tests {
                 priority: 300,
                 ttl: 1,
                 services: ServiceSelection {
-                    selected: vec!["Characterize".into()],
+                    selected: vec![
+                        ServiceName::from_str("Characterize").unwrap_or(ServiceName::unknown())
+                    ],
                     ..Default::default()
                 },
                 ..SubmissionParams::new(ClassificationString::new_unchecked("U".to_owned()))
             })
-
             .fname("test-file".to_owned())
             .content(random_body())
             .await
@@ -203,7 +213,10 @@ mod tests {
         for _ in 0..100 {
             match client.ingest.get_message(&batch).await.unwrap() {
                 Some(message) => {
-                    assert_eq!(message.submission.metadata.get("testbatch").unwrap(), &batch);
+                    assert_eq!(
+                        message.submission.metadata.get("testbatch").unwrap(),
+                        &batch
+                    );
                     break;
                 }
                 None => {
@@ -213,7 +226,12 @@ mod tests {
         }
 
         for _ in 0..10 {
-            let result = client.search.submission(format!("metadata.testbatch: {batch}")).search().await.unwrap();
+            let result = client
+                .search
+                .submission(format!("metadata.testbatch: {batch}"))
+                .search()
+                .await
+                .unwrap();
 
             if result.items.len() == 1 {
                 return;

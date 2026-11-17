@@ -1,36 +1,41 @@
 #[cfg(feature = "rand")]
-use std::u32;
-
-#[cfg(feature = "rand")]
 use rand::{Rng, RngExt as _};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "rand")]
 use crate::datastore::Service;
 
+
+/// Heuristic model as stored in service manifest
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Heuristic {
+    /// Description of the heuristic
+    #[serde(default)]
+    pub description: String,
+    /// What type of files does this heuristic target?
+    pub filetype: String,
+    /// ID of the Heuristic
+    pub heur_id: u32,
+    /// Name of the heuristic
+    pub name: String,
+    /// Default score of the heuristic
+    pub score: i32,
+}
+
 /// Service Manifest Model
 /// Contains information stored in the service_manifest.yml
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Heuristic {
-    #[serde(default)]
-    description: String,
-    filetype: String,
-    heur_id: u32,
-    name: String,
-    score: i32,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ServiceManifest {
+    /// service body
     #[serde(flatten)]
     pub service: Service,
-
+    /// version of the service tool
     #[serde(default)]
     pub tool_version: Option<String>,
-
+    /// whether or not the file is required for analysis
     #[serde(default = "default_file_required")]
     pub file_required: bool,
-
+    /// list of heuristics
     #[serde(default)]
     pub heuristics: Vec<Heuristic>,
 }

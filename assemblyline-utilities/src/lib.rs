@@ -1,3 +1,6 @@
+//! This is a utility library containing shared functionalities between assemblyline-rust crates.
+
+
 #![warn(
     missing_docs,
     non_ascii_idents,
@@ -20,11 +23,13 @@
     clippy::collapsible_else_if
 )]
 
+use parking_lot as _;
 
 pub mod connection;
 pub mod constants;
 pub mod logging;
 pub mod types;
+
 
 #[cfg(test)]
 pub(crate) mod tests;

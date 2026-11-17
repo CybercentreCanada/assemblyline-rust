@@ -13,10 +13,7 @@ use assemblyline_models::{
     types::{ClassificationString, JsonMap, Sha256, Text},
 };
 
-use assemblyline_utilities::{
-    connection::{Connection, ServerType, TLSSettings},
-    types::authentication::Authentication,
-};
+use assemblyline_utilities::connection::{Connection, ConnectionBuilder, ServerType};
 use log::info;
 use nom::AsBytes;
 use parking_lot::Mutex;
@@ -32,33 +29,34 @@ use reqwest::StatusCode;
 use serde_json::{json, Value};
 
 use crate::{
-    constants::{DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE}, task_uploader::task_uploader::TaskUploader, tests::{
+    constants::{
+        DEFAULT_SERVICE_ERROR_MESSAGE, RECOVERABLE_ERROR_STATUS, UNKNOWN_SERVICE_ERROR_TYPE,
+    },
+    task_uploader::{TaskErrorData, TaskUploader},
+    tests::{
         create_random_service_result, init,
         mock_service_api::{MockServiceServer, RawHeaderMap, TEST_API_VERSION, TEST_AUTH_KEY},
         sha256_data,
-    }, types::{
-        ServiceInfo, errors::ServiceClientError, task::{ErrorBody, ErrorResponse, TaskUploadBody},
+    },
+    types::{
+        errors::ServiceClientError,
+        task::{ErrorBody, ErrorResponse, TaskUploadBody},
+        ServiceInfo,
     },
 };
 
 async fn get_test_connection(port: u16) -> Connection {
     let service_api_address: String = format!("http://localhost:{}", port).to_string();
-    let tls_setting = TLSSettings::Native;
 
     let mut headers: HashMap<String, String> = HashMap::new();
     headers.insert("X-APIKey".to_string(), TEST_AUTH_KEY.to_string());
-    Connection::connect(
-        service_api_address.clone(),
-        ServerType::ServiceServer,
-        false,
-        Authentication::None,
-        None,
-        tls_setting.clone(),
-        headers,
-        Some(1000.0),
-    )
-    .await
-    .unwrap()
+
+    ConnectionBuilder::new(service_api_address.clone(), ServerType::ServiceServer)
+        .set_raw_headers(headers)
+        .set_timeout(1000.0)
+        .build_and_connect()
+        .await
+        .expect("Should be able to connect to service server")
 }
 
 fn initialize_upload_error_test_data() -> (ServiceManifest, ServiceInfo, Task) {
@@ -68,7 +66,7 @@ fn initialize_upload_error_test_data() -> (ServiceManifest, ServiceInfo, Task) {
     let service_name = test_manifest.service.name.clone();
     let service_info = ServiceInfo {
         name: test_manifest.service.name.clone(),
-        version: test_manifest.service.version.clone()
+        version: test_manifest.service.version.clone(),
     };
 
     initial_task.service_name = service_name.clone();
@@ -94,7 +92,12 @@ fn create_upload_task_data(
 
     initial_task.service_name = service_name.clone();
 
-    let mut service_result = create_random_service_result(sha256.clone(), service_name.clone(), service_version.clone(), tool_version.clone());
+    let mut service_result = create_random_service_result(
+        sha256.clone(),
+        service_name.clone(),
+        service_version,
+        tool_version.clone(),
+    );
 
     let mut supplementary_files: Vec<service_api::result::File> = Vec::new();
     let mut extracted_files: Vec<service_api::result::File> = Vec::new();
@@ -148,14 +151,22 @@ fn create_upload_task_data(
 
     let mut files: HashMap<Sha256, service_api::result::File> = HashMap::new();
 
-    files.extend(extracted_files.iter().map(|f| (f.sha256.clone(), f.to_owned())));
-    files.extend(supplementary_files.iter().map(|f| (f.sha256.clone(), f.to_owned())));
+    files.extend(
+        extracted_files
+            .iter()
+            .map(|f| (f.sha256.clone(), f.to_owned())),
+    );
+    files.extend(
+        supplementary_files
+            .iter()
+            .map(|f| (f.sha256.clone(), f.to_owned())),
+    );
 
     (test_manifest, initial_task, service_result, files)
 }
 
 #[derive(Clone, Debug)]
-struct TaskErrorData {
+struct TaskResultErrorData {
     pub task: Task,
     pub error_value: Value,
 }
@@ -172,8 +183,10 @@ struct TaskResultData {
     pub missing_files: Arc<Mutex<HashSet<Sha256>>>,
 }
 
-fn upload_error_api(task_error_data: TaskErrorData) -> impl Endpoint {
-    Route::new().at(format!("/task"), post(upload_error)).with(AddData::new(task_error_data))
+fn upload_error_api(task_error_data: TaskResultErrorData) -> impl Endpoint {
+    Route::new()
+        .at(format!("/task"), post(upload_error))
+        .with(AddData::new(task_error_data))
 }
 
 fn upload_result_api(task_result_data: TaskResultData) -> impl Endpoint {
@@ -184,7 +197,10 @@ fn upload_result_api(task_result_data: TaskResultData) -> impl Endpoint {
 }
 
 #[handler]
-async fn upload_task_result(Json(body): Json<JsonMap>, task_result_data: Data<&TaskResultData>) -> Result<poem::Response, poem::error::Error> {
+async fn upload_task_result(
+    Json(body): Json<JsonMap>,
+    task_result_data: Data<&TaskResultData>,
+) -> Result<poem::Response, poem::error::Error> {
     let upload_task_body: TaskUploadBody = serde_json::from_value(serde_json::Value::Object(body))
         .with_context(|| "deserializer request body to TaskUploadBody")
         .unwrap();
@@ -204,35 +220,60 @@ async fn upload_task_result(Json(body): Json<JsonMap>, task_result_data: Data<&T
         call_value, freshen
     );
 
-    assert_eq!(task_result_data.task, upload_task_body.task, "The uploaded task object is incorrect.");
+    assert_eq!(
+        task_result_data.task, upload_task_body.task,
+        "The uploaded task object is incorrect."
+    );
 
-    assert!(upload_task_body.result.is_some(), "Upload task result should upload Result.");
-    assert!(upload_task_body.error.is_none(), "Only one of Error or Result should be uploaded.");
+    assert!(
+        upload_task_body.result.is_some(),
+        "Upload task result should upload Result."
+    );
+    assert!(
+        upload_task_body.error.is_none(),
+        "Only one of Error or Result should be uploaded."
+    );
 
     let expected_result = task_result_data.result_sequence.get(call_value).unwrap();
     if let Some(result) = upload_task_body.result {
-        assert_eq!(*expected_result, result, "The value of uploaded result is incorrect.");
+        assert_eq!(
+            *expected_result, result,
+            "The value of uploaded result is incorrect."
+        );
     }
 
     let response = task_result_data.response_sequence.get(call_value).unwrap();
-    let status_code = task_result_data.response_code_sequence.get(call_value).unwrap();
+    let status_code = task_result_data
+        .response_code_sequence
+        .get(call_value)
+        .unwrap();
     *task_result_data.call_number.lock() = call_value + 1;
 
     match status_code.to_owned() {
         StatusCode::OK => Ok(MockServiceServer::make_api_response(response)),
-        code => Err(MockServiceServer::make_empty_api_error(code, response.to_string().as_str())),
+        code => Err(MockServiceServer::make_empty_api_error(
+            code,
+            response.to_string().as_str(),
+        )),
     }
 }
 
 #[handler]
-async fn upload_file(body: poem::Body, header: RawHeaderMap, task_result_data: Data<&TaskResultData>) -> Result<poem::Response, poem::error::Error> {
+async fn upload_file(
+    body: poem::Body,
+    header: RawHeaderMap,
+    task_result_data: Data<&TaskResultData>,
+) -> Result<poem::Response, poem::error::Error> {
     let mut call_value = *task_result_data.call_number.clone().lock();
     assert!(
         call_value < task_result_data.response_sequence.len(),
         "Making more calls to API server than expected."
     );
     let response = task_result_data.response_sequence.get(call_value).unwrap();
-    let status_code = task_result_data.response_code_sequence.get(call_value).unwrap();
+    let status_code = task_result_data
+        .response_code_sequence
+        .get(call_value)
+        .unwrap();
     let body_sha: Sha256 = sha256_data(body.into_bytes().await.unwrap().as_bytes())
         .parse()
         .expect("Convert String hash to SHA256");
@@ -251,7 +292,10 @@ async fn upload_file(body: poem::Body, header: RawHeaderMap, task_result_data: D
                 body_sha
             );
 
-            let valid_file = task_result_data.files.get(&body_sha).expect("File sha should exist.");
+            let valid_file = task_result_data
+                .files
+                .get(&body_sha)
+                .expect("File sha should exist.");
 
             let request_sha = header
                 .map
@@ -283,7 +327,12 @@ async fn upload_file(body: poem::Body, header: RawHeaderMap, task_result_data: D
                 request_classification,
                 "Request header value for classification does not match file classification"
             );
-            let request_ttl = header.map.get("Ttl").expect("Request should container header 'ttl'").to_str().unwrap();
+            let request_ttl = header
+                .map
+                .get("Ttl")
+                .expect("Request should container header 'ttl'")
+                .to_str()
+                .unwrap();
             assert_eq!(
                 task_result_data.task.ttl.to_string().as_str(),
                 request_ttl,
@@ -319,7 +368,10 @@ async fn upload_file(body: poem::Body, header: RawHeaderMap, task_result_data: D
             missing_files_mutex.lock().remove(&body_sha);
             Ok(MockServiceServer::make_api_response(response))
         }
-        code => Err(MockServiceServer::make_empty_api_error(code, &response.as_str().unwrap().to_string())),
+        code => Err(MockServiceServer::make_empty_api_error(
+            code,
+            &response.as_str().unwrap().to_string(),
+        )),
     };
 
     *task_result_data.call_number.lock() = call_value + 1;
@@ -328,9 +380,12 @@ async fn upload_file(body: poem::Body, header: RawHeaderMap, task_result_data: D
 }
 
 #[handler]
-async fn upload_error(Json(body): Json<JsonMap>, task_error_data: Data<&TaskErrorData>) -> Result<poem::Response, poem::error::Error> {
-    let upload_task_body: TaskUploadBody =
-        serde_json::from_value(serde_json::Value::Object(body)).expect("deserializer request body to TaskUploadBody");
+async fn upload_error(
+    Json(body): Json<JsonMap>,
+    task_error_data: Data<&TaskResultErrorData>,
+) -> Result<poem::Response, poem::error::Error> {
+    let upload_task_body: TaskUploadBody = serde_json::from_value(serde_json::Value::Object(body))
+        .expect("deserializer request body to TaskUploadBody");
     let expected_task = task_error_data.task.clone();
     let expected_data = task_error_data.error_value.clone();
 
@@ -338,14 +393,18 @@ async fn upload_error(Json(body): Json<JsonMap>, task_error_data: Data<&TaskErro
 
     if let Some(error) = upload_task_body.error {
         let expected_err: ErrorBody = serde_json::from_value(expected_data).unwrap();
-        let cur_err: ErrorBody = serde_json::from_value(error).expect("Deserialize request body to ErrorBody");
+        let cur_err: ErrorBody =
+            serde_json::from_value(error).expect("Deserialize request body to ErrorBody");
         assert_eq!(
             expected_task.fileinfo.sha256, cur_err.sha256,
             "The error sha256 should be the task sha256"
         );
         assert_eq!(expected_err, cur_err, "Uploaded Error data is incorrect.");
 
-        assert!(upload_task_body.result.is_none(), "Only one of Error or Result should be uploaded.");
+        assert!(
+            upload_task_body.result.is_none(),
+            "Only one of Error or Result should be uploaded."
+        );
 
         return Ok(Json(json!({
             "data": "OK",
@@ -369,7 +428,7 @@ async fn upload_error(Json(body): Json<JsonMap>, task_error_data: Data<&TaskErro
 #[tokio::test]
 async fn test_upload_error_default_values() {
     init();
-    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
+    let (_test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
 
@@ -386,20 +445,25 @@ async fn test_upload_error_default_values() {
         },
     };
 
-    let task_error_data = TaskErrorData {
+    let task_error_data = TaskResultErrorData {
         task: initial_task.clone(),
         error_value: serde_json::to_value(task_error).unwrap(),
     };
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
+            .await
+            .unwrap();
     let connection = get_test_connection(port).await;
 
     let task_uploader = TaskUploader {};
 
     let res = task_uploader
-        .upload_task_error(&initial_task, &service_info, &connection, None, None, None, None)
+        .upload_task_error(
+            &initial_task,
+            &connection,
+            TaskErrorData::new(initial_task.fileinfo.sha256.clone(), service_info.clone()),
+        )
         .await;
 
     assert!(res.is_ok(), "Task Uploader should complete with no error.");
@@ -409,7 +473,7 @@ async fn test_upload_error_default_values() {
 #[tokio::test]
 async fn test_upload_error_default_custom_values() {
     init();
-    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
+    let (_test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
 
@@ -434,25 +498,25 @@ async fn test_upload_error_default_custom_values() {
 
     let test_string = "test".to_string();
 
-    let task_error_data = TaskErrorData {
+    let task_error_data = TaskResultErrorData {
         task: initial_task.clone(),
         error_value: task_error.clone(),
     };
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
+            .await
+            .unwrap();
     let connection = get_test_connection(port).await;
     let task_uploader = TaskUploader {};
+    let mut error_data =
+        TaskErrorData::new(initial_task.fileinfo.sha256.clone(), service_info.clone());
+    error_data
+        .set_error_json(task_error.clone())
+        .set_error_type(test_string.clone())
+        .set_message(test_string.clone())
+        .set_status(test_string.clone());
     let _ = task_uploader
-        .upload_task_error(
-            &initial_task,
-            &service_info,
-            &connection,
-            Some(task_error),
-            Some(test_string.clone()),
-            Some(test_string.clone()),
-            Some(test_string.clone()),
-        )
+        .upload_task_error(&initial_task, &connection, error_data)
         .await
         .unwrap();
 
@@ -462,7 +526,7 @@ async fn test_upload_error_default_custom_values() {
 #[tokio::test]
 async fn test_upload_error_json() {
     init();
-    let (test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
+    let (_test_manifest, service_info, initial_task) = initialize_upload_error_test_data();
 
     let sha256: Sha256 = initial_task.fileinfo.sha256.clone();
 
@@ -483,26 +547,25 @@ async fn test_upload_error_json() {
         },
     };
 
-    let task_error_data = TaskErrorData {
+    let task_error_data = TaskResultErrorData {
         task: initial_task.clone(),
         error_value: serde_json::to_value(task_error).unwrap(),
     };
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_error_api(task_error_data))
+            .await
+            .unwrap();
     let connection = get_test_connection(port).await;
     let task_uploader = TaskUploader {};
+    let mut error_data =
+        TaskErrorData::new(initial_task.fileinfo.sha256.clone(), service_info.clone());
+    error_data
+        .set_error_type(error_type.to_string())
+        .set_message(message.to_string())
+        .set_status(status.to_string());
     let res = task_uploader
-        .upload_task_error(
-            &initial_task,
-            &service_info,
-            &connection,
-            None,
-            Some(message.to_string()),
-            Some(error_type.to_string()),
-            Some(status.to_string()),
-        )
+        .upload_task_error(&initial_task, &connection, error_data)
         .await;
 
     assert!(res.is_ok(), "Task Uploader should complete with no error.");
@@ -540,9 +603,10 @@ async fn test_upload_task_result_no_missing_files() {
         missing_files: Arc::new(Mutex::new(HashSet::new())),
     };
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
+            .await
+            .unwrap();
     let connection = get_test_connection(port).await;
 
     // The task upload should be complete successfully. It does not need to call file upload endpoint
@@ -585,8 +649,18 @@ async fn test_upload_task_result_with_missing_files() {
     ];
 
     let freshen_sequence = vec![true, true, true, false];
-    let result_sequence = vec![service_result_value.clone(), Value::Null, Value::Null, service_result_value.clone()];
-    let response_code_sequence = vec![StatusCode::OK, StatusCode::OK, StatusCode::OK, StatusCode::OK];
+    let result_sequence = vec![
+        service_result_value.clone(),
+        Value::Null,
+        Value::Null,
+        service_result_value.clone(),
+    ];
+    let response_code_sequence = vec![
+        StatusCode::OK,
+        StatusCode::OK,
+        StatusCode::OK,
+        StatusCode::OK,
+    ];
     let upload_data = TaskResultData {
         task: initial_task.clone(),
         call_number: call_number.clone(),
@@ -598,9 +672,10 @@ async fn test_upload_task_result_with_missing_files() {
         missing_files: missing_files_ref.clone(),
     };
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
+            .await
+            .unwrap();
 
     let connection = get_test_connection(port).await;
 
@@ -659,13 +734,16 @@ async fn test_upload_task_result_with_task_upload_file_error() {
         missing_files: missing_files_ref.clone(),
     };
 
-    let (port, server) = MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
-        .await
-        .unwrap();
+    let (port, server) =
+        MockServiceServer::launch_with_custom_endpoints(upload_result_api(upload_data))
+            .await
+            .unwrap();
     let connection = get_test_connection(port).await;
 
     // The task upload should be complete successfully. It does not need to call file upload endpoint
-    let res = task_uploader.upload_task_result(&initial_task, service_result.clone(), &connection).await;
+    let res = task_uploader
+        .upload_task_result(&initial_task, service_result.clone(), &connection)
+        .await;
 
     let error = res.expect_err("This task upload should return error.");
 
@@ -681,7 +759,10 @@ async fn test_upload_task_result_with_task_upload_file_error() {
                 StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
                 status_code.expect("Status code should exist.")
             );
-            assert_eq!(server_version.expect("Server version should exist."), TEST_API_VERSION);
+            assert_eq!(
+                server_version.expect("Server version should exist."),
+                TEST_API_VERSION
+            );
         }
         e => {
             panic!("Connection returns the wrong type of error {e}");

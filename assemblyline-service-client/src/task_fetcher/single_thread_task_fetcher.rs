@@ -1,5 +1,8 @@
+//! Single threaded task fetcher
 use assemblyline_models::{messages::task::Task, types::Sha256};
-use assemblyline_utilities::connection::{convert_api_output_map, convert_output_stream, Connection};
+use assemblyline_utilities::connection::{
+    convert_api_output_map, convert_output_stream, Connection,
+};
 
 use std::{
     collections::HashMap,
@@ -14,9 +17,13 @@ use sha2::Digest;
 
 use tokio::{fs::File, io::AsyncWriteExt};
 
-use crate::{constants::DEFAULT_REQUEST_TASK_TIMEOUT, task_fetcher::task_fetcher::TaskFetcher, types::errors::ServiceClientError};
+use crate::{
+    constants::DEFAULT_REQUEST_TASK_TIMEOUT, task_fetcher::TaskFetcher,
+    types::errors::ServiceClientError,
+};
 use std::io::Write;
 
+/// Single threaded task fetcher for getting tasks from service server
 #[derive(Debug, Clone)]
 pub struct SingleThreadTaskFetcher {}
 
@@ -30,16 +37,21 @@ impl SingleThreadTaskFetcher {
 }
 
 impl TaskFetcher for SingleThreadTaskFetcher {
-    async fn get_task(
-        &self,
-        con: &Connection,
-    ) -> Result<Option<Task>, ServiceClientError> {
+    async fn get_task(&self, con: &Connection) -> Result<Option<Task>, ServiceClientError> {
         let mut headers: HashMap<String, String> = HashMap::new();
-        headers.insert("Timeout".to_string(), DEFAULT_REQUEST_TASK_TIMEOUT.to_string());
+        headers.insert(
+            "Timeout".to_string(),
+            DEFAULT_REQUEST_TASK_TIMEOUT.to_string(),
+        );
         let request_task_url = con.get_api_path("task", &[])?;
 
-        info!("Requesting a task with {}s timeout...", DEFAULT_REQUEST_TASK_TIMEOUT);
-        let data = con.get(request_task_url, Some(headers), convert_api_output_map).await?;
+        info!(
+            "Requesting a task with {}s timeout...",
+            DEFAULT_REQUEST_TASK_TIMEOUT
+        );
+        let data = con
+            .get(request_task_url, Some(headers), convert_api_output_map)
+            .await?;
 
         if let Some(value) = data.get("task") {
             if value.is_boolean() {
@@ -50,20 +62,27 @@ impl TaskFetcher for SingleThreadTaskFetcher {
                 return Ok(Some(task));
             }
 
-            return Err(ServiceClientError::Default(
+            Err(ServiceClientError::Default(
                 "Unknown response from get_task. Should be boolean or task.".into(),
-            ));
+            ))
         } else {
-            return Err(ServiceClientError::Default(
+            Err(ServiceClientError::Default(
                 "Error response from get_task. Cannot find key 'task' in response.".into(),
-            ));
+            ))
         }
     }
 
-    async fn download_file(&self, sha256: Sha256, task_dir: PathBuf, con: &Connection) -> Result<PathBuf, ServiceClientError> {
+    async fn download_file(
+        &self,
+        sha256: Sha256,
+        task_dir: PathBuf,
+        con: &Connection,
+    ) -> Result<PathBuf, ServiceClientError> {
         let donwload_file_url = con.get_api_path("file", &[sha256.to_string().as_str()])?;
 
-        let mut data_stream = con.get(donwload_file_url, None, convert_output_stream).await?;
+        let mut data_stream = con
+            .get(donwload_file_url, None, convert_output_stream)
+            .await?;
 
         let file_path = task_dir.join(Path::new(&sha256.to_string()));
 
@@ -78,7 +97,9 @@ impl TaskFetcher for SingleThreadTaskFetcher {
 
         let file_sha256: Sha256 = (&hasher.finalize()[..]).try_into()?;
 
-        debug!("Download task file. File sha requested: {sha256} and content sha is: {file_sha256}");
+        debug!(
+            "Download task file. File sha requested: {sha256} and content sha is: {file_sha256}"
+        );
 
         if file_sha256 != sha256 {
             return Err(ServiceClientError::FileHashMisMatch {

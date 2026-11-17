@@ -1,20 +1,23 @@
+//! Struct relating to tasks
+
 use assemblyline_models::{
-    messages::task::Task,
-    types::{ServiceName, Sha256},
+    messages::task::Task, types::{ServiceName, Sha256, strings::ServiceVersion},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The task error response struct to send to service server
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ErrorResponse {
     pub message: String,
     pub service_name: ServiceName,
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     #[serde(default)]
     pub service_tool_version: Option<String>,
     pub status: String,
 }
 
+/// The body of the task error response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ErrorBody {
     pub sha256: Sha256,
@@ -23,6 +26,7 @@ pub struct ErrorBody {
     pub response: ErrorResponse,
 }
 
+/// The HTTP request body for uploading task results to service server
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct TaskUploadBody {
     pub task: Task,

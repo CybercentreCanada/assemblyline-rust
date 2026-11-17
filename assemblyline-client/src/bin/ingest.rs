@@ -4,17 +4,19 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use assemblyline_models::Sha256;
+use assemblyline_utilities::{
+    connection::{self, Connection, ConnectionBuilder, ServerType},
+    types::{authentication::Authentication, errors::ApiClientError},
+};
 use clap::{Args, Parser};
 use expanduser::expanduser;
 use rand::Rng;
 use serde_json::json;
 use sha2::Digest;
-use assemblyline_utilities::{connection::{self, Connection, ServerType}, types::{authentication::Authentication, errors::ApiClientError}};
-
 
 #[derive(Debug, Parser)]
-#[command(name="ingest")]
-#[command(bin_name="ingest")]
+#[command(name = "ingest")]
+#[command(bin_name = "ingest")]
 struct Cli {
     /// Secure outgoing connections (default true)
     #[arg(long)]
@@ -52,18 +54,17 @@ struct Cli {
     threads: Option<u32>,
 
     /// Always hash files and ingest by sha256 even when the target is a path
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     as_sha256: bool,
 
     /// Set the 'never_drop' submission parameter, disables some safety checks
-    #[arg(long, default_value_t=false)]
+    #[arg(long, default_value_t = false)]
     never_drop: bool,
 
     /// Path to the config file
     #[arg(short, long)]
     config: Option<String>,
 }
-
 
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
@@ -85,7 +86,7 @@ struct Config {
     host: String,
     username: String,
     apikey: String,
-    verify: bool
+    verify: bool,
 }
 
 #[tokio::main]
@@ -98,7 +99,8 @@ async fn main() {
 
     // ----------------------------------------------------
     // Open a config file if we can find one
-    let default_config_path = expanduser("~/.al/submit.cfg").unwrap_or(PathBuf::from("./submit.cfg"));
+    let default_config_path =
+        expanduser("~/.al/submit.cfg").unwrap_or(PathBuf::from("./submit.cfg"));
     let config = if let Some(config) = &args.config {
         let config = expanduser(config).unwrap();
         load_config(&config, &args)
@@ -107,7 +109,10 @@ async fn main() {
     } else {
         Config {
             host: args.host.clone().expect("A server url must be configured"),
-            username: args.username.clone().expect("A username must be configured"),
+            username: args
+                .username
+                .clone()
+                .expect("A username must be configured"),
             apikey: args.apikey.clone().expect("An apikey must be configured"),
             verify: args.secure_connection.unwrap_or(true),
         }
@@ -115,34 +120,41 @@ async fn main() {
 
     // ----------------------------------------------------
     // Connect to the AL server
-    let connection = Connection::connect(
-        config.host,
-        ServerType::AssemblylineUiServer,
-        true,
-        Authentication::ApiKey { username: config.username, key: config.apikey },
-        args.retries,
-        if config.verify {
-            TLSSettings::Native
-        } else {
-            TLSSettings::UnsafeNoVerify
-        },
-        Default::default(),
-        Some(args.timeout.unwrap_or(60.0))
-    ).await.expect("Connection failed");
+    let cb = ConnectionBuilder::new(config.host, ServerType::AssemblylineUiServer)
+        .check_api_version(true);
 
-    let client = Arc::new(assemblyline_client::Client::from_connection(Arc::new(connection)).await.expect("Connection failed"));
+    if let Some(retry) = arg.retries {
+        cb.set_retry(retry);
+    };
+
+    cb.set_authentication(Authentication::ApiKey {
+        username: config.username,
+        key: config.apikey,
+    });
+
+    if config.verify {
+        cb.set_tls_settings(TLSSettings::UnsafeNoVerify);
+    }
+
+    cb.set_timeout(args.timeout.unwrap_or(60.0));
+
+    let connection = cb.build_and_connect().await.expect("Connection failed");
+
+    let client = Arc::new(
+        assemblyline_client::Client::from_connection(Arc::new(connection))
+            .await
+            .expect("Connection failed"),
+    );
 
     // ----------------------------------------------------
     // Ingest the targeted file(s)
     let parallelism = args.threads.unwrap_or(1).max(1) as usize;
     let mut pool = tokio::task::JoinSet::new();
 
-    let handle = |result| {
-        match result {
-            Ok(Ok(id)) => println!("{id}"),
-            Ok(Err(inner_error)) => println!("Error: {inner_error}"),
-            Err(join_error) => panic!("{join_error}"),
-        }
+    let handle = |result| match result {
+        Ok(Ok(id)) => println!("{id}"),
+        Ok(Err(inner_error)) => println!("Error: {inner_error}"),
+        Err(join_error) => panic!("{join_error}"),
     };
 
     let (enqueue, mut dequeue) = tokio::sync::mpsc::channel(100);
@@ -151,22 +163,31 @@ async fn main() {
 
         async move {
             for _ in 0..args.repeats.unwrap_or(1) {
-
                 if let Some(path) = &args.target.file {
-                    enqueue.send(prepare_path(args.as_sha256, path).await.unwrap()).await.unwrap();
+                    enqueue
+                        .send(prepare_path(args.as_sha256, path).await.unwrap())
+                        .await
+                        .unwrap();
                 } else if let Some(hash) = &args.target.sha {
-                    enqueue.send(Target::Hash(hash.parse().expect("sha256 was not parsable"))).await.unwrap();
+                    enqueue
+                        .send(Target::Hash(hash.parse().expect("sha256 was not parsable")))
+                        .await
+                        .unwrap();
                 } else if let Some(path) = &args.target.directory {
                     let mut directories = vec![path.clone()];
                     while let Some(directory) = directories.pop() {
                         let mut listing = tokio::fs::read_dir(directory).await.unwrap();
                         while let Some(item) = listing.next_entry().await.unwrap() {
                             let file_type = item.file_type().await.unwrap();
-                            if file_type.is_symlink() { continue }
+                            if file_type.is_symlink() {
+                                continue;
+                            }
                             if file_type.is_dir() {
                                 directories.push(item.path());
                             } else if file_type.is_file() {
-                                if let Some(target) = prepare_path(args.as_sha256, &item.path()).await {
+                                if let Some(target) =
+                                    prepare_path(args.as_sha256, &item.path()).await
+                                {
                                     enqueue.send(target).await.unwrap();
                                 }
                             }
@@ -181,12 +202,14 @@ async fn main() {
 
     while let Some(target) = dequeue.recv().await {
         pool.spawn(ingest_file(client.clone(), target, args.clone()));
-        if pool.len() < parallelism { continue }
+        if pool.len() < parallelism {
+            continue;
+        }
 
         while pool.len() >= parallelism {
             match pool.join_next().await {
                 Some(value) => handle(value),
-                None => break
+                None => break,
             }
         }
         while let Some(task) = pool.try_join_next() {
@@ -216,9 +239,9 @@ static SHA_CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<Sha256>>>> = OnceLock::
 
 async fn calculate_sha256(path: &Path) -> Option<Sha256> {
     {
-        let cache = SHA_CACHE.get_or_init(|| { Mutex::new(HashMap::default()) });
+        let cache = SHA_CACHE.get_or_init(|| Mutex::new(HashMap::default()));
         if let Some(hash) = cache.lock().unwrap().get(path) {
-            return hash.clone()
+            return hash.clone();
         }
     }
 
@@ -228,67 +251,90 @@ async fn calculate_sha256(path: &Path) -> Option<Sha256> {
         let file = std::fs::read(_path).ok()?;
         hasher.write_all(&file).ok()?;
         Sha256::try_from(hasher.finalize().as_slice()).ok()
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 
     {
-        let cache = SHA_CACHE.get_or_init(|| { Mutex::new(HashMap::default()) });
+        let cache = SHA_CACHE.get_or_init(|| Mutex::new(HashMap::default()));
         cache.lock().unwrap().insert(path.to_owned(), hash.clone());
     }
     hash
 }
 
-
-async fn ingest_file(client: Arc<assemblyline_client::Client>, target: Target, args: Arc<Cli>) -> Result<String, String> {
+async fn ingest_file(
+    client: Arc<assemblyline_client::Client>,
+    target: Target,
+    args: Arc<Cli>,
+) -> Result<String, String> {
     let mut builder = client.ingest.single();
 
     if args.never_drop {
         builder = builder.parameter("never_drop".to_string(), serde_json::Value::Bool(true));
     }
 
-    builder = builder.parameter("service_spec".to_string(), json!({
-        "ServiceName": {
-            "field": rand::rng().random::<u64>().to_string()
-        }
-    }));
+    builder = builder.parameter(
+        "service_spec".to_string(),
+        json!({
+            "ServiceName": {
+                "field": rand::rng().random::<u64>().to_string()
+            }
+        }),
+    );
 
     let result = match target {
         Target::Path(path) => builder.path(&path).await,
         Target::Hash(sha256) => builder.sha256(sha256).await,
     };
 
-    result.map(|result| result.ingest_id).map_err(|err|err.to_string())
+    result
+        .map(|result| result.ingest_id)
+        .map_err(|err| err.to_string())
 }
 
 fn load_config(path: &Path, args: &Cli) -> Config {
     let mut config = configparser::ini::Ini::new();
-    config.load(path).expect("Could not parse configuration file");
+    config
+        .load(path)
+        .expect("Could not parse configuration file");
 
-    let host = args.host.clone()
-        .or_else(||{
+    let host = args
+        .host
+        .clone()
+        .or_else(|| {
             if let Some(url) = config.get("server", "url") {
-                return Some(url)
+                return Some(url);
             }
             let host = match config.get("server", "host") {
                 Some(host) => host,
-                None => return None
+                None => return None,
             };
 
-            let transport = config.get("server", "transport").unwrap_or("https".to_owned());
+            let transport = config
+                .get("server", "transport")
+                .unwrap_or("https".to_owned());
             let port = config.get("server", "port").unwrap_or("443".to_owned());
             Some(format!("{transport}://{host}:{port}"))
         })
         .expect("A server must be configured");
 
-    let username = args.username.clone()
+    let username = args
+        .username
+        .clone()
         .or(config.get("auth", "user"))
         .expect("A username must be configured");
 
-    let apikey = args.apikey.clone()
+    let apikey = args
+        .apikey
+        .clone()
         .or(config.get("auth", "apikey"))
         .expect("An apikey must be configured");
 
-    let verify = args.secure_connection
-        .or(config.get("auth", "insecure").map(|value| !["true", "yes"].contains(&value.to_lowercase().as_str())))
+    let verify = args
+        .secure_connection
+        .or(config
+            .get("auth", "insecure")
+            .map(|value| !["true", "yes"].contains(&value.to_lowercase().as_str())))
         .unwrap_or(true);
 
     Config {

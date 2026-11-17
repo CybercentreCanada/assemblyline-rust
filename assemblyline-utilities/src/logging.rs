@@ -60,6 +60,7 @@ static INIT_LOGGING: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 static HOSTNAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static LOCAL_IP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
+/// Configure logging handler
 pub fn configure_logging(config: &Arc<Config>) -> Result<LoggerHandle> {
     use flexi_logger::writers::{FileLogWriter, SyslogConnection, SyslogWriter};
     use flexi_logger::*;

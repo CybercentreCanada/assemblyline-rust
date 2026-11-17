@@ -1,13 +1,13 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, anyhow};
 use assemblyline_models::types::JsonMap;
-use itertools::Itertools;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use parking_lot::Mutex;
 use poem::{
-    Endpoint, EndpointExt, FromRequest, IntoResponse, Middleware, Request, RequestBody, Response, Route, Server, get, handler,
-    http::{HeaderMap, HeaderName},
+    Endpoint, EndpointExt, FromRequest, IntoResponse, Request, RequestBody, Response, Route,
+    Server, get, handler,
+    http::HeaderMap,
     listener::{Acceptor, TcpAcceptor},
     middleware::{AddData, NormalizePath},
     web::{Data, Json},
@@ -60,7 +60,9 @@ impl MockServerConfig {
 }
 
 impl MockServiceServer {
-    pub async fn launch_with_test_endpoints(config: MockServerConfig) -> Result<(u16, JoinHandle<()>)> {
+    pub async fn launch_with_test_endpoints(
+        config: MockServerConfig,
+    ) -> Result<(u16, JoinHandle<()>)> {
         let listener = TcpListener::bind("0.0.0.0:0").await?;
         let acceptor = TcpAcceptor::from_tokio(listener).unwrap();
         let port = acceptor.local_addr()[0].as_socket_addr().unwrap().port();
@@ -84,7 +86,11 @@ impl MockServiceServer {
         Ok((port, handle))
     }
 
-    pub fn make_api_error(code: poem::http::StatusCode, err: &str, response: impl Serialize + Send) -> poem::error::Error {
+    pub fn make_api_error(
+        code: poem::http::StatusCode,
+        err: &str,
+        response: impl Serialize + Send,
+    ) -> poem::error::Error {
         let mut response = Json(APIResponse {
             api_response: response,
             api_error_message: Some(err.to_owned()),
@@ -127,7 +133,10 @@ async fn index() -> &'static str {
 }
 
 #[handler]
-async fn get_request_data(header: RawHeaderMap, query: poem::web::Query<JsonMap>) -> Result<Response> {
+async fn get_request_data(
+    header: RawHeaderMap,
+    query: poem::web::Query<JsonMap>,
+) -> Result<Response> {
     let mut header_data: HashMap<String, String> = HashMap::new();
     let mut error_data: Vec<String> = Vec::new();
     for (k, v) in header.map {
@@ -168,7 +177,9 @@ async fn test_retry(config: Data<&MockServerConfig>) -> Result<Response> {
         *retry_arc.lock() = retry_value;
         tokio::time::sleep(tokio::time::Duration::from_secs_f64(3.0)).await;
 
-        return Err(anyhow!("Retry will error out for {retry_value} more times."));
+        return Err(anyhow!(
+            "Retry will error out for {retry_value} more times."
+        ));
     }
 
     Ok(Json(json!({
@@ -178,7 +189,9 @@ async fn test_retry(config: Data<&MockServerConfig>) -> Result<Response> {
 }
 
 #[handler]
-async fn test_error_response(config: Data<&MockServerConfig>) -> Result<Response, poem::error::Error> {
+async fn test_error_response(
+    config: Data<&MockServerConfig>,
+) -> Result<Response, poem::error::Error> {
     match &config.error_response {
         Some(data) => {
             let mut response = Json(data.to_owned()).into_response();
@@ -187,7 +200,9 @@ async fn test_error_response(config: Data<&MockServerConfig>) -> Result<Response
             error.set_error_message(format!(
                 "[{}] {}",
                 data.api_status_code.unwrap_or(0),
-                data.api_error_message.to_owned().unwrap_or("no error message.".to_string())
+                data.api_error_message
+                    .to_owned()
+                    .unwrap_or("no error message.".to_string())
             ));
             return Err(error);
         }
@@ -206,7 +221,10 @@ pub struct RawHeaderMap {
 }
 
 impl<'a> FromRequest<'a> for RawHeaderMap {
-    async fn from_request(req: &'a Request, _body: &mut RequestBody) -> Result<Self, poem::error::Error> {
+    async fn from_request(
+        req: &'a Request,
+        _body: &mut RequestBody,
+    ) -> Result<Self, poem::error::Error> {
         let headers: HeaderMap = req.headers().to_owned();
 
         Ok(RawHeaderMap { map: headers })

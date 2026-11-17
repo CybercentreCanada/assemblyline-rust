@@ -1,3 +1,6 @@
+//! The connection module is an interface for creating and communicating with
+//! Assemblyline servers.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,18 +18,27 @@ use serde_json::{Value, json};
 use tokio_util::bytes::Bytes;
 use url::Url;
 
-use crate::constants::{ASSEMBLYLINE_UI_SERVER_SUPPORTED_VERSION, SERVICE_SERVER_SUPPORTED_VERSION};
+use crate::constants::{
+    ASSEMBLYLINE_UI_SERVER_SUPPORTED_VERSION, SERVICE_SERVER_SUPPORTED_VERSION,
+};
 use crate::types::authentication::Authentication;
 use crate::types::errors::ApiClientError;
 use crate::types::response::{APIResponse, ErrorApiResponse};
 
+/// Specify the server type to interface with
+///
 #[derive(Clone)]
 pub enum ServerType {
+    /// Assemblyline service server for facilitating service tasks and results
     ServiceServer,
+    /// Assemblyline API server for user interactions with an Assemblyline system
     AssemblylineUiServer,
 }
 
 impl ServerType {
+    /// Get the server version that is supported by this library
+    ///
+    /// :return: Version string of the supported server version
     pub fn supported_version(&self) -> String {
         match self {
             ServerType::ServiceServer => SERVICE_SERVER_SUPPORTED_VERSION.to_owned(),
@@ -73,9 +85,10 @@ impl rustls::client::ServerCertVerifier for OnlyCAVerify {
 }
 
 /// Specifiy how the client should perform its tls verification
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TLSSettings {
     /// Use the native set of certificates
+    #[default]
     Native,
     /// Use the native set of certificates and the given certificate
     CARoot(String),
@@ -85,12 +98,6 @@ pub enum TLSSettings {
     UnsafeClusterCARoot(String),
     /// Just let any old certificate work
     UnsafeNoVerify,
-}
-
-impl Default for TLSSettings {
-    fn default() -> Self {
-        Self::Native
-    }
 }
 
 async fn unpack_cert_from_path(cert_path: String) -> Result<Vec<u8>, ApiClientError> {
@@ -107,7 +114,9 @@ fn unpack_certs(cert: String) -> Result<Vec<u8>, ApiClientError> {
         match base64::prelude::BASE64_STANDARD.decode(cert) {
             Ok(cert) => cert,
             Err(_) => {
-                return Err(ApiClientError::Configuration(format!("Couldn't understand the ca cert value: {cert}")));
+                return Err(ApiClientError::Configuration(format!(
+                    "Couldn't understand the ca cert value: {cert}"
+                )));
             }
         }
     };
@@ -126,52 +135,109 @@ fn to_rustls_certs(cert: Vec<u8>) -> Result<rustls::RootCertStore, ApiClientErro
 
 /// A connection abstraction to handle queries
 pub struct Connection {
+    /// request client for interacting with the server
     pub client: reqwest::Client,
-    pub server_string: Url,
+    /// URL of the server host
+    pub server_host_url: Url,
     api_version: String,
     max_retries: Option<u32>,
     authentication: Authentication,
-    //     self.debug = debug
-    //     self.is_v4 = False
-    //     self.silence_warnings = silence_warnings
     default_timeout: Option<f64>,
     session_header_label: reqwest::header::HeaderName,
     session_token: tokio::sync::RwLock<Option<reqwest::header::HeaderValue>>,
     tls_setting: TLSSettings,
 }
 
-impl Connection {
-    /// Connect to an assemblyline system
-    pub async fn connect(
-        server: String,
-        server_type: ServerType,
-        check_api_version: bool,
-        auth: Authentication,
-        retry: Option<u32>,
-        verify: TLSSettings,
-        raw_headers: HashMap<String, String>,
-        timeout: Option<f64>,
-    ) -> Result<Self, ApiClientError> {
-        let client = Connection::create_client(&verify, raw_headers).await?;
+/// Configure connection settings to Assemblyline server and create the connection client
+pub struct ConnectionBuilder {
+    server_host: String,
+    server_type: ServerType,
+    check_api_version: bool,
+    authentication: Option<Authentication>,
+    retry: Option<u32>,
+    tls_settings: Option<TLSSettings>,
+    raw_headers: Option<HashMap<String, String>>,
+    timeout: Option<f64>,
+}
 
-        let server_url = Url::parse(&server)?;
+impl ConnectionBuilder {
+    /// create a new connection builder class
+    pub fn new(server_host: String, server_type: ServerType) -> Self {
+        ConnectionBuilder {
+            server_host,
+            server_type,
+            check_api_version: false,
+            authentication: None,
+            retry: None,
+            tls_settings: None,
+            raw_headers: None,
+            timeout: None,
+        }
+    }
+
+    /// whether or not to check assemblyline server API version matches the supported API version
+    pub fn check_api_version(&mut self, check: bool) -> &mut Self {
+        self.check_api_version = check;
+        self
+    }
+
+    /// set the authentication method to the Assemblyline server
+    pub fn set_authentication(&mut self, auth: Authentication) -> &mut Self {
+        self.authentication = Some(auth);
+        self
+    }
+
+    /// set the default raw headers per request
+    pub fn set_raw_headers(&mut self, headers: HashMap<String, String>) -> &mut Self {
+        self.raw_headers = Some(headers);
+        self
+    }
+
+    /// set the tls connection settings
+    pub fn set_tls_settings(&mut self, tls_settings: TLSSettings) -> &mut Self {
+        self.tls_settings = Some(tls_settings);
+        self
+    }
+
+    /// set default connection timeout
+    pub fn set_timeout(&mut self, timeout: f64) -> &mut Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// set default number of request retries
+    pub fn set_retry(&mut self, retry: u32) -> &mut Self {
+        self.retry = Some(retry);
+        self
+    }
+
+    /// Build a Connection object and connect to the Assemblyline server
+    pub async fn build_and_connect(&mut self) -> Result<Connection, ApiClientError> {
+        let tls_settings = self.tls_settings.clone().unwrap_or_default();
+        let raw_headers = self.raw_headers.clone().unwrap_or_default();
+
+        let client = Connection::create_client(&tls_settings, raw_headers).await?;
+
+        let server_url = Url::parse(&self.server_host)?;
+
+        let auth = self.authentication.clone().unwrap_or_default();
 
         let con = Connection {
             client,
-            server_string: server_url,
-            api_version: server_type.supported_version(),
-            max_retries: retry,
+            server_host_url: server_url,
+            api_version: self.server_type.clone().supported_version(),
+            max_retries: self.retry,
             authentication: auth,
-            default_timeout: timeout,
-            tls_setting: verify.to_owned(),
+            default_timeout: self.timeout,
+            tls_setting: tls_settings,
             session_header_label: reqwest::header::HeaderName::from_lowercase(b"x-xsrf-token")?,
             session_token: tokio::sync::RwLock::new(None),
         };
 
         // check API version
-        if check_api_version {
-            debug!("Check API version of {}", server_type);
-            Connection::check_api_version(server_type, &con).await?;
+        if self.check_api_version {
+            debug!("Check API version of {}", self.server_type);
+            Connection::check_api_version(self.server_type.clone(), &con).await?;
         }
 
         // Login
@@ -180,23 +246,36 @@ impl Connection {
 
         return Ok(con);
     }
+}
 
-    pub async fn update_client_default_headers(&mut self, raw_headers: HashMap<String, String>) -> Result<(), ApiClientError> {
+impl Connection {
+    /// update the default headers used for each request
+    pub async fn update_client_default_headers(
+        &mut self,
+        raw_headers: HashMap<String, String>,
+    ) -> Result<(), ApiClientError> {
         self.client = Connection::create_client(&self.tls_setting, raw_headers).await?;
 
         let _ = self.authenticate().await?;
         Ok(())
     }
 
-    async fn create_client(verify: &TLSSettings, raw_headers: HashMap<String, String>) -> Result<Client, ApiClientError> {
+    async fn create_client(
+        verify: &TLSSettings,
+        raw_headers: HashMap<String, String>,
+    ) -> Result<Client, ApiClientError> {
         let builder = match verify {
             TLSSettings::Native => reqwest::Client::builder().use_native_tls(),
             TLSSettings::CARoot(root) => reqwest::Client::builder()
                 .use_rustls_tls()
-                .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(root.to_owned())?)?),
+                .add_root_certificate(reqwest::Certificate::from_pem(&unpack_certs(
+                    root.to_owned(),
+                )?)?),
             TLSSettings::CARootPath(path) => reqwest::Client::builder()
                 .use_rustls_tls()
-                .add_root_certificate(reqwest::Certificate::from_pem(&unpack_cert_from_path(path.to_owned()).await?)?),
+                .add_root_certificate(reqwest::Certificate::from_pem(
+                    &unpack_cert_from_path(path.to_owned()).await?,
+                )?),
             TLSSettings::UnsafeClusterCARoot(root) => {
                 let store = to_rustls_certs(unpack_certs(root.to_owned())?)?;
                 let verify = OnlyCAVerify::new(store);
@@ -208,7 +287,9 @@ impl Connection {
 
                 reqwest::Client::builder().use_preconfigured_tls(connector)
             }
-            TLSSettings::UnsafeNoVerify => reqwest::Client::builder().danger_accept_invalid_certs(true).use_rustls_tls(),
+            TLSSettings::UnsafeNoVerify => reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .use_rustls_tls(),
         };
 
         // build headers
@@ -219,25 +300,40 @@ impl Connection {
         }
 
         // finalize client
-        Ok(builder.cookie_store(true).default_headers(headers).build()?)
+        Ok(builder
+            .cookie_store(true)
+            .default_headers(headers)
+            .build()?)
     }
 
-    async fn check_api_version(server_type: ServerType, con: &Connection) -> Result<(), ApiClientError> {
-        let api_url = con
-            .server_string
-            .join("api/")
-            .map_err(|_e| ApiClientError::Configuration(format!("Failed to create API checking URL.")))?;
+    async fn check_api_version(
+        server_type: ServerType,
+        con: &Connection,
+    ) -> Result<(), ApiClientError> {
+        let mut api_url = con.server_host_url.clone();
+
+        match api_url.path_segments_mut() {
+            Ok(mut u) => u.push("api"),
+            Err(_) => {
+                return Err(ApiClientError::Configuration(
+                    "Failed to create API checking URL.".to_owned(),
+                ));
+            }
+        };
+
         let versions = con.get(api_url, None, convert_api_output_list).await?;
 
         let found = versions.into_iter().any(|version| match version.as_str() {
-            Some(v) if v.to_owned() == server_type.supported_version() => return true,
+            Some(v) if v == server_type.supported_version() => return true,
             _ => return false,
         });
 
         if !found {
             return Err(ApiClientError::ClientError {
-                // message: "Supported APIS (v4) are not available".to_owned(),
-                message: format!("Supported APIS ({}) are not available", server_type.supported_version()),
+                message: format!(
+                    "Supported APIS ({}) are not available",
+                    server_type.supported_version()
+                ),
                 status_code: Some(400),
                 server_version: None,
             });
@@ -267,10 +363,12 @@ impl Connection {
         };
 
         if let Some(data) = body {
-            let login_url = self
-                .get_api_path("auth", &["login"])
-                .map_err(|_e| ApiClientError::Configuration("Cannot create login URL.".to_string()))?;
-            return self.get_with(login_url, Some(data), None, convert_api_output_map).await;
+            let login_url = self.get_api_path("auth", &["login"]).map_err(|_e| {
+                ApiClientError::Configuration("Cannot create login URL.".to_string())
+            })?;
+            return self
+                .get_with(login_url, Some(data), None, convert_api_output_map)
+                .await;
         } else {
             debug!("No authentication.");
             return Ok(JsonMap::default());
@@ -287,6 +385,15 @@ impl Connection {
     //     // return self.request(self.session.get, path, convert_api_output, **kw)
     //     todo!()
     // }
+
+    /// Perform HTTP get request with the specified URL params
+    ///
+    /// :type Resp: response type
+    /// :param path: The request URL
+    /// :param params: URL parameters in key value pairs
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given response type
+    /// :return: Result of response data in the given response type
     pub async fn get_params<Resp, F>(
         &self,
         path: Url,
@@ -297,27 +404,89 @@ impl Connection {
     where
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        let params = if params.is_empty() { None } else { Some(params) };
+        let params = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
 
-        return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, params, headers).await?).await;
+        return con(self
+            .request::<()>(
+                reqwest::Method::GET,
+                path,
+                Body::None,
+                None,
+                params,
+                headers,
+            )
+            .await?)
+        .await;
     }
 
-    pub async fn get<Resp, F>(&self, path: Url, headers: Option<HashMap<String, String>>, con: F) -> Result<Resp, ApiClientError>
+    /// Perform HTTP get request
+    ///
+    /// :type Resp: response type
+    /// :param path: The request URL
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given Type
+    /// :return: Result of response data in the given response type
+    pub async fn get<Resp, F>(
+        &self,
+        path: Url,
+        headers: Option<HashMap<String, String>>,
+        con: F,
+    ) -> Result<Resp, ApiClientError>
     where
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        return con(self.request::<()>(reqwest::Method::GET, path, Body::None, None, None, headers).await?).await;
+        return con(self
+            .request::<()>(reqwest::Method::GET, path, Body::None, None, None, headers)
+            .await?)
+        .await;
     }
 
-    pub async fn get_with<Req, Resp, F>(&self, path: Url, body: Req, headers: Option<HashMap<String, String>>, con: F) -> Result<Resp, ApiClientError>
+    /// Perform HTTP get request with request body
+    ///
+    /// :type Resp: response type
+    /// :type Req: request body type
+    /// :param path: The request URL
+    /// :param body: value of request body
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given Type
+    /// :return: Result of response data in the given response type
+    pub async fn get_with<Req, Resp, F>(
+        &self,
+        path: Url,
+        body: Req,
+        headers: Option<HashMap<String, String>>,
+        con: F,
+    ) -> Result<Resp, ApiClientError>
     where
         Req: serde::Serialize,
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        return con(self.request(reqwest::Method::GET, path, Body::Json(body), None, None, headers).await?).await;
+        return con(self
+            .request(
+                reqwest::Method::GET,
+                path,
+                Body::Json(body),
+                None,
+                None,
+                headers,
+            )
+            .await?)
+        .await;
     }
 
-    // TODO: TEST
+    /// Perform HTTP POST request with the specified URL params
+    ///
+    /// :type Resp: response type
+    /// :type Req: request body type
+    /// :param path: The request URL
+    /// :param body: The request body
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given response type
+    /// :return: Result of response data in the given response type
     pub async fn post<Req, Resp, F>(
         &self,
         path: Url,
@@ -329,10 +498,21 @@ impl Connection {
         Req: serde::Serialize,
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        return con(self.request(reqwest::Method::POST, path, body, None, None, headers).await?).await;
+        return con(self
+            .request(reqwest::Method::POST, path, body, None, None, headers)
+            .await?)
+        .await;
     }
 
-    // TODO: TEST
+    /// Perform HTTP PUT request with the specified URL params
+    ///
+    /// :type Resp: response type
+    /// :type Req: request body type
+    /// :param path: The request URL
+    /// :param body: The request body
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given response type
+    /// :return: Result of response data in the given response type
     pub async fn put<Req, Resp, F>(
         &self,
         path: Url,
@@ -344,9 +524,22 @@ impl Connection {
         Req: serde::Serialize,
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        return con(self.request(reqwest::Method::PUT, path, body, None, None, headers).await?).await;
+        return con(self
+            .request(reqwest::Method::PUT, path, body, None, None, headers)
+            .await?)
+        .await;
     }
 
+    /// Perform HTTP POST request with the specified URL params
+    ///
+    /// :type Resp: response type
+    /// :type Req: request body type
+    /// :param path: The request URL
+    /// :param body: The request body
+    /// :param params: The URL parameters
+    /// :param headers: Optional added header values
+    /// :param con: Conversion function that converts the output of the request to the given response type
+    /// :return: Result of response data in the given response type
     pub async fn post_params<Req, Resp, F>(
         &self,
         path: Url,
@@ -359,36 +552,71 @@ impl Connection {
         Req: serde::Serialize,
         F: Fn(reqwest::Response) -> BoxFuture<'static, Result<Resp, ApiClientError>>,
     {
-        let params = if params.is_empty() { None } else { Some(params) };
+        let params = if params.is_empty() {
+            None
+        } else {
+            Some(params)
+        };
 
-        return con(self.request(reqwest::Method::POST, path, body, None, params, headers).await?).await;
+        return con(self
+            .request(reqwest::Method::POST, path, body, None, params, headers)
+            .await?)
+        .await;
     }
 
     // def put(self, path, **kw):
     //     return self.request(self.session.put, path, convert_api_output, **kw)
 
+    /// Construct the full server URL path with the give prefix and arguments.
+    ///
+    /// :param prefix: the prefix segment before arguments
+    /// :param args: ordered list of arguments to add to the URL
+    /// :return: Result of the full URL path.
     pub fn get_api_path(&self, prefix: &str, args: &[&str]) -> Result<Url, url::ParseError> {
         // Calculate the API path using the prefix as shown:
         //     /api/v1/<prefix>/[arg1/[arg2/[...]]]
 
-        let mut result_url = self
-            .server_string
-            .join("api/")
-            .and_then(|u| u.join(&format!("{}/", self.api_version)))
-            .and_then(|u| u.join(&format!("{prefix}/")));
+        let mut result_url = self.server_host_url.clone();
 
-        for arg in args {
-            result_url = result_url.and_then(|u| u.join(&format!("{}/", *arg)));
-        }
+        match result_url.path_segments_mut() {
+            Ok(mut path_segment) => path_segment
+                .push("api")
+                .push(&self.api_version)
+                .push(prefix)
+                .extend(args),
+            Err(_) => return Err(url::ParseError::SetHostOnCannotBeABaseUrl),
+        };
 
-        Ok(result_url?)
+        Ok(result_url)
     }
 
+    /// Construct the full server URL path extended with the given path.
+    ///
+    /// :param path: the path to append to the server URL
+    /// :return: Result of the full URL path.
     pub fn get_server_path(&self, path: &str) -> Result<Url, url::ParseError> {
-        return self.server_string.clone().join(path);
+        let mut server_path_url = self.server_host_url.clone();
+
+        match server_path_url.path_segments_mut() {
+            Ok(mut u) => {
+                u.push(path);
+            }
+            Err(_) => return Err(url::ParseError::SetHostOnCannotBeABaseUrl),
+        }
+
+        return Ok(server_path_url);
     }
 
     /// Detailed method to make an http request
+    ///
+    /// :type Req: the specified request type
+    /// :param method: HTTP request method
+    /// :param url: URL to send the HTTP request to
+    /// :param body: HTTP request body
+    /// :param timeout: Optional request timeout value
+    /// :param params: Optional URL parameters
+    /// :param headers: Optional additional header values
+    /// :return: Result of HTTP request
     pub(crate) async fn request<Req>(
         &self,
         method: reqwest::Method,
@@ -411,9 +639,12 @@ impl Connection {
             if retries > 0 {
                 let seconds = 2.0_f64.min(2.0_f64.powf(retries as f64 - 7.0));
                 tokio::time::sleep(tokio::time::Duration::from_secs_f64(seconds)).await;
-                debug!("Failed to connect to URL:[{}] {}, retry # {}", &method, &url.to_string(), retries);
+                debug!(
+                    "Failed to connect to URL:[{}] {}, retry # {}",
+                    method, url, retries
+                );
             } else {
-                debug!("Sending request to URL: {} with header: {:?}", &url.to_string(), method.clone());
+                debug!("Sending request to URL: {} with header: {:?}", url, method);
             }
 
             let mut request = self.client.request(method.clone(), url.clone());
@@ -449,8 +680,8 @@ impl Connection {
             }
 
             if let Some(headers) = &headers {
-                let mut header_iter = headers.iter();
-                while let Some((key, value)) = header_iter.next() {
+                let header_iter = headers.iter();
+                for (key, value) in header_iter {
                     if let Ok(v) = HeaderValue::from_str(value) {
                         request = request.header(key, v);
                     }
@@ -495,31 +726,35 @@ impl Connection {
             let body = response.text().await?;
 
             // check if the response body is in the standard service api error response format
-            let error_body = if let Ok(resp) = serde_json::from_str::<ErrorApiResponse>(&body.clone()) {
-                // if we get unauthorized error from the service server, try to authenticate and redo retry.
-                if status == StatusCode::UNAUTHORIZED && self.authentication.need_login() {
-                    if let Some(msg) = &resp.api_error_message {
-                        if is_session_error(msg.as_str()) {
-                            self.authenticate().await?;
-                            continue;
-                        }
+            let error_body =
+                if let Ok(resp) = serde_json::from_str::<ErrorApiResponse>(&body.clone()) {
+                    // if we get unauthorized error from the service server, try to authenticate and redo retry.
+                    if status == StatusCode::UNAUTHORIZED
+                        && self.authentication.need_login()
+                        && let Some(msg) = &resp.api_error_message
+                        && is_session_error(msg.as_str())
+                    {
+                        self.authenticate().await?;
+                        continue;
                     }
-                }
-                ApiClientError::ClientError {
-                    message: resp.api_error_message.unwrap_or("Unknown Error".to_string()),
-                    status_code: resp.api_status_code,
-                    server_version: resp.api_server_version,
-                }
-            } else {
-                ApiClientError::ClientError {
-                    message: body.clone(),
-                    status_code: Some(status.as_u16()),
-                    server_version: None,
-                }
-            };
+
+                    ApiClientError::ClientError {
+                        message: resp
+                            .api_error_message
+                            .unwrap_or("Unknown Error".to_string()),
+                        status_code: resp.api_status_code,
+                        server_version: resp.api_server_version,
+                    }
+                } else {
+                    ApiClientError::ClientError {
+                        message: body.clone(),
+                        status_code: Some(status.as_u16()),
+                        server_version: None,
+                    }
+                };
 
             if status == StatusCode::GATEWAY_TIMEOUT {
-                error!("Status({}): {}", status, &body);
+                error!("Status({}): {}", status, body);
             } else {
                 // return error immediately and we don't need to retry
                 return Err(error_body);
@@ -534,21 +769,36 @@ impl Connection {
     }
 }
 
+/// HTTP Request body type
 pub enum Body<T: serde::Serialize> {
+    /// No request body
     None,
+    /// Json
     Json(T),
+    /// Multipart form format
     Multipart(reqwest::multipart::Form),
+    /// Request already prepared in request::Body format
     Prepared(reqwest::Body),
 }
 
 fn is_session_error(error: &str) -> bool {
     matches!(
         error,
-        "Session rejected" | "Session not found" | "Session expired" | "Invalid source IP for this session" | "Invalid user agent for this session"
+        "Session rejected"
+            | "Session not found"
+            | "Session expired"
+            | "Invalid source IP for this session"
+            | "Invalid user agent for this session"
     )
 }
 
-pub fn convert_api_output_string(resp: reqwest::Response) -> BoxFuture<'static, Result<String, ApiClientError>> {
+/// Helper function that converts the Response object to String
+///
+/// :param resp: The response object to convert
+/// :return: Result of conversion
+pub fn convert_api_output_string(
+    resp: reqwest::Response,
+) -> BoxFuture<'static, Result<String, ApiClientError>> {
     Box::pin(async {
         let body = resp.json::<APIResponse<String>>().await;
         match body {
@@ -558,7 +808,13 @@ pub fn convert_api_output_string(resp: reqwest::Response) -> BoxFuture<'static, 
     })
 }
 
-pub fn convert_api_output_map(resp: reqwest::Response) -> BoxFuture<'static, Result<JsonMap, ApiClientError>> {
+/// Helper function that converts the Response object to a JsonMap
+///
+/// :param resp: The response object to convert
+/// :return: Result of conversion
+pub fn convert_api_output_map(
+    resp: reqwest::Response,
+) -> BoxFuture<'static, Result<JsonMap, ApiClientError>> {
     Box::pin(async {
         let body = resp.json::<APIResponse<JsonMap>>().await;
         match body {
@@ -568,7 +824,14 @@ pub fn convert_api_output_map(resp: reqwest::Response) -> BoxFuture<'static, Res
     })
 }
 
-pub fn convert_api_output_obj<T: DeserializeOwned + Send>(resp: reqwest::Response) -> BoxFuture<'static, Result<T, ApiClientError>> {
+/// Helper function that converts the Response object to a Specified object type
+///
+/// :type T: the type for the response to be convert to
+/// :param resp: The response object to convert
+/// :return: Result of conversion
+pub fn convert_api_output_obj<T: DeserializeOwned + Send>(
+    resp: reqwest::Response,
+) -> BoxFuture<'static, Result<T, ApiClientError>> {
     Box::pin(async {
         let body = resp.json::<APIResponse<T>>().await;
         match body {
@@ -578,7 +841,13 @@ pub fn convert_api_output_obj<T: DeserializeOwned + Send>(resp: reqwest::Respons
     })
 }
 
-pub fn convert_api_output_list(resp: reqwest::Response) -> BoxFuture<'static, Result<Vec<Value>, ApiClientError>> {
+/// Helper function that converts the Response object to a Vec of Value object
+///
+/// :param resp: The response object to convert
+/// :return: Result of conversion
+pub fn convert_api_output_list(
+    resp: reqwest::Response,
+) -> BoxFuture<'static, Result<Vec<Value>, ApiClientError>> {
     Box::pin(async {
         let body = resp.json::<APIResponse<Vec<Value>>>().await;
         match body {
@@ -588,12 +857,29 @@ pub fn convert_api_output_list(resp: reqwest::Response) -> BoxFuture<'static, Re
     })
 }
 
+/// Helper function that converts the Response object to a byte stream
+///
+/// :param resp: The response object to convert
+/// :return: Result of conversion
 pub fn convert_output_stream(
     resp: reqwest::Response,
-) -> BoxFuture<'static, Result<impl futures::Stream<Item = Result<Bytes, reqwest::Error>>, ApiClientError>> {
+) -> BoxFuture<
+    'static,
+    Result<impl futures::Stream<Item = Result<Bytes, reqwest::Error>>, ApiClientError>,
+> {
     Box::pin(async { Ok(resp.bytes_stream()) })
 }
 
-pub fn convert_output_map(resp: reqwest::Response) -> BoxFuture<'static, Result<Value, ApiClientError>> {
-    Box::pin(async { resp.json::<Value>().await.map_err(|_| ApiClientError::MalformedResponse) })
+/// Helper function that converts the Response object to a json Value object
+///
+/// :param resp: The response object to convert
+/// :return: Result of conversion
+pub fn convert_output_map(
+    resp: reqwest::Response,
+) -> BoxFuture<'static, Result<Value, ApiClientError>> {
+    Box::pin(async {
+        resp.json::<Value>()
+            .await
+            .map_err(|_| ApiClientError::MalformedResponse)
+    })
 }

@@ -1,12 +1,17 @@
-use assemblyline_models::types::ServiceName;
+//! Structs library
+
+use assemblyline_models::types::{ServiceName, strings::ServiceVersion};
 use serde::{Deserialize, Serialize};
 
 pub (crate) mod errors;
 pub (crate) mod task;
 
 
+/// basic service information
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ServiceInfo {
+    /// name of service
     pub name: ServiceName,
-    pub version: String,
+    /// service version
+    pub version: ServiceVersion,
 }

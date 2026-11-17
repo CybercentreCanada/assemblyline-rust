@@ -1,15 +1,22 @@
+//! Module for launching Assemblyline service process
+
 use log::debug;
 use tokio::process::{Child, Command};
 
 use crate::types::errors::ServiceClientError;
 
+/// Interface for launching the service process
 pub trait ServiceLauncher {
+    /// Launch service process
+    /// :return: Child struct with process information and control
     fn launch_service(
         &self,
     ) -> impl std::future::Future<Output = Result<Child, ServiceClientError>> + Send;
 }
 
+/// Default service launcher
 pub struct DefaultServiceLauncher {
+    /// the directory that the service is running in
     pub service_dir: Option<String>,
 }
 

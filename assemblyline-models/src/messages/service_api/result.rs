@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::datastore;
 use crate::datastore::error::ErrorTypes;
 use crate::datastore::result::{default_file_parent_relation, BodyFormat, Milestone, PromoteTo};
+use crate::types::strings::ServiceVersion;
 use crate::types::{ClassificationString, JsonMap, ServiceName, Sha256, Text};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -100,7 +101,7 @@ pub struct ResponseBody {
     #[serde(default)]
     pub milestones: Milestone,
     /// Version of the service
-    pub service_version: String,
+    pub service_version: ServiceVersion,
     /// Name of the service that scanned the file
     pub service_name: ServiceName,
     /// Tool version of the service
@@ -170,17 +171,23 @@ pub struct Section {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Heuristic {
+    /// ID of the Heuristic
     pub heur_id: HeuristicId,
+    /// List of all associated ATT&CK IDs
     #[serde(default, deserialize_with = "deserialize_array_or_str")]
     pub attack_ids: Vec<String>,
+    /// Score of signatures for this heuristic
     #[serde(default)]
     pub signatures: HashMap<String, i32>,
+    /// number of times this heuristic appears
     #[serde(default = "default_frequency")]
     pub frequency: i32,
+    /// the scoring map
     #[serde(default)]
     pub score_map: HashMap<String, i32>,
 }
 
+/// Heuristic ID type. Can be string or u64
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum HeuristicId {
