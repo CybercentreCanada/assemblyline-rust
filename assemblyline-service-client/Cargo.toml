@@ -1,0 +1,57 @@
+[package]
+name = "assemblyline-service-client"
+version = "0.1.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/cybercentreCanada/assemblyline-rust"
+homepage = "https://www.cyber.gc.ca/en/tools-services/assemblyline"
+description = """Service client for running each Assemblyline services and communicating with the Assemblyline service API."""
+
+[dependencies]
+# Logging
+log = "0.4"
+
+# Utilities
+tempfile = "3.19"
+rand = "0.10"
+itertools = "0.14"
+anyhow = "1.0"
+bytes = "1.10"
+parking_lot = { version = "0.12", features = [] }
+urlencoding = "2.1"
+environment_template = "0.1"
+hex = "0.4"
+
+# Core framework
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+
+
+# Network libraries
+reqwest = { version = "0.13", features = ["json", "cookies", "multipart", "stream", "gzip", "brotli", "deflate", "query", "rustls", "native-tls"] }
+poem = { version = "3.1", features = ["websocket", "openssl-tls", "anyhow", "multipart"] }
+url = "2.5"
+
+# Crypto/hash libraries
+sha2 = "0.10"
+
+# Data managing
+assemblyline-models = { version = "1.0", path = "../assemblyline-models", features = ["rand"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Assemblyline Utilities
+assemblyline-utilities = { version = "0.1.0", path = "../assemblyline-utilities" }
+
+# data parsing
+nom = "8"
+reqwest-retry = "=0.9.1"
+
+# binding to C library
+libc = "0.2"
+signal-hook = "0.4.4"
+
+[dev-dependencies]
+env_logger = "0"

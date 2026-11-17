@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use assemblyline_utilities::connection::{convert_api_output_map, convert_api_output_string, Connection};
+
 use crate::{types::Error, JsonMap};
-use crate::connection::{Connection, convert_api_output_string, convert_api_output_map};
 
 use super::api_path;
-
 
 const HELP_PATH: &str = "help";
 
@@ -13,14 +13,14 @@ pub struct Help {
 }
 
 impl Help {
-    pub (crate) fn new(connection: Arc<Connection>) -> Self {
+    pub(crate) fn new(connection: Arc<Connection>) -> Self {
         Self { connection }
     }
 
     /// Return the current system classification definition
     pub async fn classification_definition(&self) -> Result<JsonMap, Error> {
-        let url = api_path!(HELP_PATH, "classification_definition");
-        return self.connection.get(&url, convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(HELP_PATH, "classification_definition"))?;
+        return Ok(self.connection.get(url, None, convert_api_output_map).await?);
     }
 
     /// Return the current system configuration:
@@ -29,8 +29,8 @@ impl Help {
     /// * Extraction's max depth
     /// * and many others...
     pub async fn configuration(&self) -> Result<JsonMap, Error> {
-        let url = api_path!(HELP_PATH, "configuration");
-        return self.connection.get(&url, convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(HELP_PATH, "configuration"))?;
+        return Ok(self.connection.get(url, None, convert_api_output_map).await?);
     }
 
     /// Return the current system configuration constants which include:
@@ -39,14 +39,14 @@ impl Help {
     /// * Service tag types
     /// * Service tag contexts
     pub async fn constants(&self) -> Result<JsonMap, Error> {
-        let url = api_path!(HELP_PATH, "constants");
-        return self.connection.get(&url, convert_api_output_map).await
+        let url = self.connection.get_server_path(&api_path!(HELP_PATH, "constants"))?;
+        return Ok(self.connection.get(url, None, convert_api_output_map).await?);
     }
 
     /// Return the current system terms of service
     pub async fn tos(&self) -> Result<String, Error> {
-        let url = api_path!(HELP_PATH, "tos");
-        return self.connection.get(&url, convert_api_output_string).await
+        let url = self.connection.get_server_path(&api_path!(HELP_PATH, "tos"))?;
+        return Ok(self.connection.get(url, None, convert_api_output_string).await?);
     }
 }
 
@@ -83,5 +83,4 @@ mod test {
         let def = client.help.tos().await.unwrap();
         assert!(!def.is_empty())
     }
-
 }

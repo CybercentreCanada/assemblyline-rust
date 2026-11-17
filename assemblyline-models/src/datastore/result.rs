@@ -225,7 +225,7 @@ impl File {
     }
 }
 
-fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
+pub fn default_file_parent_relation() -> Text { Text("EXTRACTED".to_owned()) }
 
 /// Response Body of Result
 #[derive(Serialize, Deserialize, Debug, Described, Clone, PartialEq, Eq)]

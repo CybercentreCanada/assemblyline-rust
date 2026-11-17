@@ -120,6 +120,7 @@ fn build_service() -> Service {
         update_config: Default::default(),
         recursion_prevention: Default::default(),
         auto_update: Default::default(),
+        expected_queue_length: None,
     }
 }
 

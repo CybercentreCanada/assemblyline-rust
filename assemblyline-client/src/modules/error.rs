@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use assemblyline_models::datastore::error::Error as ErrorModel;
+use assemblyline_utilities::connection::{Connection, convert_api_output_obj};
 
-use crate::connection::{Connection, convert_api_output_obj};
 use crate::types::Result;
 
 use super::api_path;
@@ -25,8 +25,8 @@ impl Error {
     // error_key:  Error key to get the details for (string)
     // Throws a Client exception if the error does not exist.
     pub async fn get(&self, error_key: &str) -> Result<ErrorModel> {
-        let path = api_path!(ERROR_PATH, error_key);
-        self.connection.get(&path, convert_api_output_obj).await
+        let url = self.connection.get_server_path(&api_path!(ERROR_PATH, error_key))?;
+        Ok(self.connection.get(url, None,  convert_api_output_obj).await?)
     }
 
     /// List all errors in the system (per page)
@@ -105,8 +105,9 @@ impl<Type> ListingBuilder<Type> {
         if let Some(hits) = self.track_total_hits {
             params.push(("track_total_hits".to_string(), hits.to_string()));
         }
-        let path = api_path!(ERROR_PATH, "list");
-        self.connection.get_params(&path, params, convert_api_output_obj).await
+
+        let url = self.connection.get_server_path(&api_path!(ERROR_PATH, "list"))?;
+        Ok(self.connection.get_params(url, params, None, convert_api_output_obj).await?)
     }
 
 

@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::config::TLSConfig;
 use crate::ingester::IngestTask;
-use crate::logging::LoggerMiddleware;
 
 use super::Ingester;
 
 use anyhow::{Context, Result};
+use assemblyline_utilities::logging::LoggerMiddleware;
 use log::{error, info};
 use poem::listener::{Listener, OpensslTlsConfig, TcpListener};
 use poem::web::{Data, Json};
@@ -57,4 +57,3 @@ async fn _start(bind_address: std::net::SocketAddr, tls: Option<TLSConfig>, inge
     info!("HTTP interface stopped");
     Ok(())
 }
-
