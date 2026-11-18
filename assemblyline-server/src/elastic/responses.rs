@@ -51,13 +51,26 @@ pub struct Multiget<Source, Field> {
 
 #[derive(Deserialize)]
 pub struct OpenPit {
+    #[serde(alias = "pit_id")]
     pub id: String,
 }
 
 #[derive(Deserialize)]
-pub struct ClosePit {
-    pub succeeded: bool,
-    pub num_freed: u32,
+#[serde(untagged)]
+pub enum ClosePit {
+    Elasticsearch {
+        succeeded: bool,
+        num_freed: u32,
+    },
+    Opensearch {
+        pits: Vec<ClosedOpenSearchPit>,
+    },
+}
+
+#[derive(Deserialize)]
+pub struct ClosedOpenSearchPit {
+    pub successful: bool,
+    pub pit_id: String,
 }
 
 /// json response for command queries
@@ -487,4 +500,3 @@ pub struct CreateIndex {
     pub shards_acknowledged: bool,
     pub acknowledged: bool,    
 }
-
