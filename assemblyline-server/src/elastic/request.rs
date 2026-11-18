@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use reqwest::Method;
-use super::{CopyMethod, ElasticError, Result};
+use super::{Backend, CopyMethod, ElasticError, Result};
 
 /// The header section and local parameters to a request to elasticsearch.
 ///
@@ -204,8 +204,11 @@ impl Request {
         Ok(Self::new(Method::POST, Self::build_url(host, &["_bulk"])?, None))
     }
 
-    pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str) -> Result<Self> {
-        let mut url = Self::build_url(host, &[index, "_pit"])?;
+    pub fn create_pit(host: &reqwest::Url, index: &str, keep_alive: &str, backend: Backend) -> Result<Self> {
+        let mut url = match backend {
+            Backend::Elasticsearch => Self::build_url(host, &[index, "_pit"])?,
+            Backend::Opensearch => Self::build_url(host, &[index, "_search", "point_in_time"])?,
+        };
         url.query_pairs_mut().append_pair("keep_alive", keep_alive);
         Ok(Self::new(Method::POST, url, Some(index.to_owned())))
     }
@@ -242,8 +245,12 @@ impl Request {
         Ok(Self::new(Method::POST, url, None))
     }
 
-    pub fn delete_pit(host: &reqwest::Url) -> Result<Self> {
-        Ok(Self::new(Method::DELETE, Self::build_url(host, &["_pit"])?, None))
+    pub fn delete_pit(host: &reqwest::Url, backend: Backend) -> Result<Self> {
+        let url = match backend {
+            Backend::Elasticsearch => Self::build_url(host, &["_pit"])?,
+            Backend::Opensearch => Self::build_url(host, &["_search", "point_in_time"])?,
+        };
+        Ok(Self::new(Method::DELETE, url, None))
     }
 
     pub fn with_raise_conflict(method: reqwest::Method, url: reqwest::Url, index: String) -> Self {

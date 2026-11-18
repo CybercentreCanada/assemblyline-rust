@@ -1057,13 +1057,17 @@ impl Default for Archive {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all="lowercase")]
 pub enum DatastoreType {
-    Elasticsearch
+    Elasticsearch,
+    Opensearch,
+    Auto,
 }
 
 #[test]
 fn test_datastore_type_serialization() {
     assert_eq!(serde_json::to_string(&DatastoreType::Elasticsearch).unwrap(), "\"elasticsearch\"");
     assert_eq!(serde_json::from_str::<DatastoreType>("\"elasticsearch\"").unwrap(), DatastoreType::Elasticsearch);
+    assert_eq!(serde_json::from_str::<DatastoreType>("\"opensearch\"").unwrap(), DatastoreType::Opensearch);
+    assert_eq!(serde_json::from_str::<DatastoreType>("\"auto\"").unwrap(), DatastoreType::Auto);
     assert_eq!(serde_json::to_value(DatastoreType::Elasticsearch).unwrap(), serde_json::json!("elasticsearch"));
     // assert_eq!(serde_json::from_str::<DatastoreType>("\"Elasticsearch\"").unwrap(), DatastoreType::Elasticsearch);
 
