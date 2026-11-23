@@ -10,6 +10,15 @@ schedules:
     - main
   always: true
 
+resources:
+  repositories:
+    - repository: PipelineTemplates
+      type: github
+      name: CybercentreCanada/assemblyline
+      ref: refs/heads/main
+      endpoint: github-repo-sa
+      trigger: none
+
 jobs:
   - job: build_nightly
     dependsOn: []
@@ -21,12 +30,7 @@ jobs:
         inputs:
           command: login
           containerRegistry: cccstemp
-      - script: |
-          df -h /
-          sudo mkdir /usr/local/.trash
-          sudo mv /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/.trash/ 2>/dev/null || true
-          sudo nohup rm -rf /usr/local/.trash >/dev/null 2>&1 &
-        displayName: Free agent disk space
+      - template: pipelines/templates/steps/init-agent.yaml@PipelineTemplates
       - script: |
           set -e
           docker build . -f test.Dockerfile --build-arg release='--release' -t cccstemp.azurecr.io/assemblyline-rust-builder:stable

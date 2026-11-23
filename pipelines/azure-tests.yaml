@@ -24,6 +24,12 @@ resources:
       type: github
       endpoint: github-repo-sa
       name: CybercentreCanada/assemblyline-base
+    - repository: PipelineTemplates
+      type: github
+      name: CybercentreCanada/assemblyline
+      ref: refs/heads/main
+      endpoint: github-repo-sa
+      trigger: none
 jobs:
   # - job: test_client
   #   dependsOn: []
@@ -49,12 +55,7 @@ jobs:
         inputs:
           command: login
           containerRegistry: cccstemp
-      - script: |
-          df -h /
-          sudo mkdir /usr/local/.trash
-          sudo mv /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/.trash/ 2>/dev/null || true
-          sudo nohup rm -rf /usr/local/.trash >/dev/null 2>&1 &
-        displayName: Free agent disk space
+      - template: pipelines/templates/steps/init-agent.yaml@PipelineTemplates
       - script: |
           set -e
           # Start all services except cargo test
@@ -132,12 +133,7 @@ jobs:
         inputs:
           command: login
           containerRegistry: cccstemp
-      - script: |
-          df -h /
-          sudo mkdir /usr/local/.trash
-          sudo mv /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/.trash/ 2>/dev/null || true
-          sudo nohup rm -rf /usr/local/.trash >/dev/null 2>&1 &
-        displayName: Free agent disk space
+      - template: pipelines/templates/steps/init-agent.yaml@PipelineTemplates
       - script: |
           set -e
           # Start all services except cargo test
