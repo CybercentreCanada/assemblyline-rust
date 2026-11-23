@@ -27,7 +27,7 @@ resources:
     - repository: PipelineTemplates
       type: github
       name: CybercentreCanada/assemblyline
-      ref: refs/heads/main
+      ref: refs/heads/master
       endpoint: github-repo-sa
       trigger: none
 jobs:
