@@ -10,6 +10,15 @@ schedules:
     - dev
   always: true
 
+resources:
+  repositories:
+    - repository: PipelineTemplates
+      type: github
+      name: CybercentreCanada/assemblyline
+      ref: refs/heads/master
+      endpoint: github-repo-sa
+      trigger: none
+
 jobs:
   - job: build_nightly
     dependsOn: []
@@ -21,10 +30,7 @@ jobs:
         inputs:
           command: login
           containerRegistry: cccstemp
-      - script: |
-          echo "Cleaning up disk..."
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
-        displayName: Free agent disk space
+      - template: pipelines/templates/steps/init-agent.yaml@PipelineTemplates
       - script: |
           set -e
           docker build . -f test.Dockerfile -t cccstemp.azurecr.io/assemblyline-rust-builder:latest
