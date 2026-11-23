@@ -142,3 +142,35 @@ pub fn generate_certificate() -> Result<poem::listener::OpensslTlsConfig> {
         .cert_from_data(cert.to_pem().context("Could not extract self signed certificate")?)
         .key_from_data(pkey.rsa()?.private_key_to_pem()?))
 }
+
+#[test]
+fn test_cert_loading() {
+    use rcgen::generate_simple_self_signed;
+    use base64::prelude::BASE64_STANDARD;
+    use base64::Engine;
+
+    {
+        // fail when a path to a corrupt file is given
+        let mut cert: Vec<u8> = vec![];
+        for _ in 0..128 {
+            cert.push(rand::random());
+        }
+        assert!(reqwest::Certificate::from_pem(&cert).is_err());
+    }
+
+    {
+        // okay when a pem actually has a cert
+        let cert = generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem();
+        let cert = cert.as_bytes();
+        reqwest::Certificate::from_pem(cert).unwrap();
+    }
+
+    {
+        // okay when multiple certs are in the pem
+        let mut cert: Vec<u8> = vec![];
+        cert.extend(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem().as_bytes());
+        cert.extend(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem().as_bytes());
+        reqwest::Certificate::from_pem(&cert).unwrap();
+    }
+
+}

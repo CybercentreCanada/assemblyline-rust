@@ -159,6 +159,16 @@ async fn test_s3_cert_loading() {
     }
 
     {
+        // okay when multiple certs are in the pem
+        let mut dir = tempfile::NamedTempFile::new().unwrap();
+        dir.write_all(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem().as_bytes()).unwrap();
+        dir.write_all(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.pem().as_bytes()).unwrap();
+        let url = format!("{url}&certificate_path={}", dir.path().to_string_lossy());
+        let fs = FileStore::with_limit_retries(&url).await;
+        assert!(fs.is_ok());
+    }
+
+    {
         // Okay when a file has raw der data
         let mut dir = tempfile::NamedTempFile::new().unwrap();
         dir.write_all(generate_simple_self_signed(&["localhost".to_owned()]).unwrap().cert.der()).unwrap();
