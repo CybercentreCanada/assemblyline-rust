@@ -12,6 +12,7 @@ use aws_credential_types::provider::ProvideCredentials;
 use bytes::Bytes;
 use legacy_rustls::ClientConfig;
 use log::{debug, info, warn};
+use rustls_pki_types::pem::SectionKind;
 
 use super::Transport;
 
@@ -53,6 +54,21 @@ const DEFAULT_HOST: &str = "s3.amazonaws.com";
 const MIN_BACKOFF: Duration = Duration::ZERO;
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
 
+// Some errors we want to raise as descrete types to catch later
+
+#[derive(Debug, thiserror::Error)]
+#[error("Could not read a certificate from file at {0}")]
+pub struct CertificateMissingError(String);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Could not read certificate file")]
+pub struct CertificateReadError;
+
+#[derive(Debug, thiserror::Error)]
+#[error("Could not parse certificate data")]
+pub struct CertificateParseError;
+
+
 
 #[derive(Debug)]
 pub struct S3Parameters {
@@ -63,6 +79,7 @@ pub struct S3Parameters {
     pub boto_defaults: bool,
     pub compatability: bool,
     pub debug: bool,
+    pub certificate_path: Option<String>,
 }
 
 impl Default for S3Parameters {
@@ -72,6 +89,7 @@ impl Default for S3Parameters {
             s3_bucket: "al-storage".to_string(),
             use_ssl: true,
             verify: true,
+            certificate_path: None,
             boto_defaults: false,
             compatability: true,
             debug: false,
@@ -160,26 +178,49 @@ impl TransportS3 {
 
                 let mut root_store = with_native_roots()?;
 
-                let ca_path = match std::env::var(CA_PATH_ENV_NAME) {
-                    // if a path is configured it is required
-                    Ok(path) => Some(path),
-                    // if no path is configured, the default file is used if found, if found it must be valid
-                    Err(std::env::VarError::NotPresent) => {
-                        if std::fs::exists(DEFAULT_ROOT_CA_PATH).unwrap_or(false) {
-                            Some(DEFAULT_ROOT_CA_PATH.to_string())
-                        } else {
-                            None
+                let ca_path = match &parameters.certificate_path {
+                    Some(path) => Some(path.clone()),
+                    None => match std::env::var(CA_PATH_ENV_NAME) {
+                        // if a path is configured it is required
+                        Ok(path) => Some(path),
+                        // if no path is configured, the default file is used if found, if found it must be valid
+                        Err(std::env::VarError::NotPresent) => {
+                            if std::fs::exists(DEFAULT_ROOT_CA_PATH).unwrap_or(false) {
+                                Some(DEFAULT_ROOT_CA_PATH.to_string())
+                            } else {
+                                None
+                            }
+                        },
+                        Err(std::env::VarError::NotUnicode(_)) => {
+                            anyhow::bail!("Could not read environment variable: {CA_PATH_ENV_NAME}")
                         }
                     },
-                    Err(std::env::VarError::NotUnicode(_)) => {
-                        anyhow::bail!("Could not read environment variable: {CA_PATH_ENV_NAME}")
-                    }
                 };
 
                 if let Some(ca_path) = ca_path {
-                    let cert_body = tokio::fs::read(ca_path).await?;
-                    let cert = rustls::Certificate(cert_body);
-                    root_store.add(&cert).context("Could not add configured root CA")?;
+                    let cert_body = tokio::fs::read(&ca_path).await
+                        .map_err(|e| anyhow::anyhow!(CertificateReadError).context(e))?;
+
+                    // probe the body, see if it looks like pem
+                    let body = String::from_utf8_lossy(&cert_body);
+                    let body = body.trim_ascii();
+                    if body.starts_with("-----") || body.ends_with("-----") {
+                        // Does look like pem, try to parse out all the certs in the file
+                        let pem_segments = rustls_pki_types::pem::SliceIter::new(&cert_body);
+                        for seg in pem_segments {
+                            let (kind, segment) = seg?;
+                            if matches!(kind, SectionKind::Certificate) {
+                                let cert = rustls::Certificate(segment);
+                                root_store.add(&cert).map_err(|e| anyhow::anyhow!(CertificateParseError).context(e))?;
+                            }
+                        }
+                    } else if !body.is_empty() {
+                        // doesn't look like pem, just drop the data in, it might be der
+                        let cert = rustls::Certificate(cert_body);
+                        root_store.add(&cert).map_err(|e| anyhow::anyhow!(CertificateParseError).context(e))?;
+                    } else {
+                        return Err(CertificateMissingError(ca_path).into())
+                    }
                 }
 
                 let tls_config = ClientConfig::builder()
@@ -704,4 +745,3 @@ macro_rules! retry {
     };
 }
 pub (crate) use retry;
-
