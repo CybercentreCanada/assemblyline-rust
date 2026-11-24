@@ -20,6 +20,7 @@ use poem::EndpointExt;
 use rand::RngExt;
 use serde_json::json;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinSet;
 
 use crate::dispatcher::client::{DispatchCapable, DispatchClient};
 use crate::dispatcher::{Dispatcher, SubmissionTask};
@@ -772,4 +773,65 @@ async fn test_create_submission_task() {
     }
 
 
+}
+
+// MARK: make sure guard timeout exit is prompt
+#[tokio::test]
+async fn test_guard_timeout() {
+    let extract_name: ServiceName = "extract".parse().unwrap();
+    let wrench_name: ServiceName = "wrench".parse().unwrap();
+
+    let (core, _guard) = setup().await;
+    debug!("Core setup");
+
+    // create a test file to dispatch
+    let mut file: File = rand::rng().random();
+    let file_hash = file.sha256.clone();
+    file.file_type = "unknown".to_string();
+    core.datastore.file.save(&file_hash, &file, None, None).await.unwrap();
+    debug!("File created");
+
+    // create a user who will submit the file
+    let user: User = User::create_test_user();
+    core.datastore.user.save(&user.uname, &user, None, None).await.unwrap();
+    debug!("User created");
+
+    // create the submission to dispatch
+    let mut sub: Submission = rand::rng().random();
+    let sid = sub.sid;
+    sub.params.ignore_cache = false;
+    sub.params.max_extracted = 5;
+    sub.to_be_deleted = false;
+    sub.params.classification = ClassificationString::unrestricted(&core.classification_parser);
+    sub.params.initial_data = Some(serde_json::to_string(&serde_json::json!({"cats": "big"})).unwrap().into());
+    sub.params.submitter = user.uname.clone();
+    sub.files = vec![submission::File{ sha256: file_hash.clone(), name: "file".to_string(), size: None }];
+
+    // start up dispatcher
+    // Bind the HTTP interface
+    let bind_address: SocketAddr = "0.0.0.0:0".parse().unwrap();
+    let tls_config = crate::config::TLSConfig::load().await.unwrap();
+    let tcp = crate::http::create_tls_binding(bind_address, tls_config).await.unwrap();
+
+    // Launch a full dispatcher instance
+    let disp = Dispatcher::new(core.clone(), tcp).await.unwrap();
+    let mut tasks = JoinSet::new();
+    disp.start(&mut tasks);
+
+    // Submit a problem, and check that it gets added to the dispatch hash and the right service queues
+    let task = SubmissionDispatchMessage::new(sub.clone(), Some("some-completion-queue".to_string()));
+    disp.dispatch_submission(SubmissionTask::new(task, None, &core.services, &core.config)).await.unwrap();
+    let task = disp.get_test_report(sid).await.unwrap();
+
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), extract_name)));
+    assert!(task.queue_keys.contains_key(&(file_hash.clone(), wrench_name)));
+    assert_eq!(core.get_service_queue("extract").length().await.unwrap(), 1);
+    assert_eq!(core.get_service_queue("wrench").length().await.unwrap(), 1);
+
+    // Kill the heartbeat record so this instance exits
+    let id = disp.instance_id.to_string();
+    disp.dispatchers_directory.set(&id, &0).await.unwrap();
+
+    // Expect the tasks join set to clear out fairly promptly (the longest poll timeout should be 30 seconds)
+    tokio::time::timeout(Duration::from_secs(60), tasks.join_all()).await.unwrap();
 }
