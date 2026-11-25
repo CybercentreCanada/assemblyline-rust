@@ -207,7 +207,7 @@ pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     ("text/x-bytecode.python", "resource/pyc"),
     // AppleScript
     ("application/x-applescript", "code/applescript"),
-    ("text/x-applescript", "code/applescript")
+    ("text/x-applescript", "code/applescript"),
     // PHP
     ("text/x-php", "code/php"),
     // XML file
