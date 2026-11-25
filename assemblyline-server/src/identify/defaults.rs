@@ -155,7 +155,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 102] = [
 
 
 /// LibMagic mimetypes that we blindly trust to assign an Assemblyline type
-pub const TRUSTED_MIMES: [(&str, &str); 146] = [
+pub const TRUSTED_MIMES: [(&str, &str); 148] = [
     // Mpeg Audio
     ("audio/mp2", "audio/mp2"),
     ("audio/x-mp2", "audio/mp2"),
@@ -205,6 +205,9 @@ pub const TRUSTED_MIMES: [(&str, &str); 146] = [
     ("text/x-script.python", "code/python"),
     ("application/x-bytecode.python", "resource/pyc"),
     ("text/x-bytecode.python", "resource/pyc"),
+    // AppleScript
+    ("application/x-applescript", "code/applescript"),
+    ("text/x-applescript", "code/applescript")
     // PHP
     ("text/x-php", "code/php"),
     // XML file
