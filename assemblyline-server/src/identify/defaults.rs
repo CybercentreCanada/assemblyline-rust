@@ -6,7 +6,7 @@ use uuid::uuid;
 
 /// Regex patterns used to find Assemblyline type in the reported magic labels
 /// Magic bytes translated to possible libmagic labels: https://en.wikipedia.org/wiki/List_of_file_signatures
-pub const MAGIC_PATTERNS: [(&str, &str); 102] = [
+pub const MAGIC_PATTERNS: [(&str, &str); 103] = [
     ("network/tnef", "Transport Neutral Encapsulation Format"),
     ("archive/chm", "MS Windows HtmlHelp Data"),
     ("executable/web/wasm", "WebAssembly \\(wasm\\) binary module"),
@@ -62,6 +62,7 @@ pub const MAGIC_PATTERNS: [(&str, &str); 102] = [
     ("archive/gzip", "^gzip compressed data"),
     ("archive/iso", "ISO 9660"),
     ("archive/lzma", "^LZMA compressed data"),
+    {"archive/mpq", "^MoPaQ \(MPQ\) archive"},
     // Supported by https://github.com/EmersonElectricCo/fsf/blob/15303aa298414397f9aa5d19ca343040a0fe0bbd/fsf-server/yara/ft_rar.yara
     // Supported by https://github.com/mitre/multiscanner/blob/86e0145ba3c4a34611f257dc78cd2482ed6358db/multiscanner/modules/Metadata/fileextensions.py#L179
     ("archive/rar", "^rar archive data"),
