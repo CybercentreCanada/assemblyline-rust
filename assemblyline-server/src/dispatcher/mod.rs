@@ -798,6 +798,9 @@ pub struct Dispatcher {
     instance_id: String,
     instance_address: String,
 
+    // The finalizing flag (unlike the core 'running') flag is a soft exit, where we keep running
+    // most dispatcher functions (expressly NOT fetching more work from the submission queue or the work theif)
+    // and keep running until we finish currently assigned tasks (or hit a finilazing deadline defined by shutdown_grace)
     finalizing: Arc<Flag>,
     finalizing_start: Mutex<Option<Instant>>,
     shutdown_grace: u64,
@@ -967,8 +970,19 @@ impl Dispatcher {
     }
 
     async fn on_terminate(self: Arc<Self>) {
-        self.finalizing.wait_for(true).await;
-        _ = self.dispatchers_directory_finalize.set(&self.instance_id, &chrono::Utc::now().timestamp()).await;
+        tokio::select! {
+            // handle a terminate with a soft exit, set the flag for it so other instances know we are exiting
+            _ = self.finalizing.wait_for(true) => {
+                _ = self.dispatchers_directory_finalize.set(&self.instance_id, &chrono::Utc::now().timestamp()).await;
+            }
+            // Something has ordered this instance to stop NOW, try to flush our directory entries so peers can start
+            // work stealing sooner. (on a soft exit this will be handled by the guard)
+            _ = self.core.running.wait_for(false) => {
+                let id = self.instance_id.to_string();
+                _ = self.dispatchers_directory.pop(&id).await;
+                _ = self.dispatchers_directory_finalize.pop(&id).await;
+            }
+        }
     }
 
     async fn handle_metrics(self: Arc<Self>) -> Result<()> {
@@ -1163,6 +1177,10 @@ impl Dispatcher {
         let mut last_seen: HashMap<String, i64> = Default::default();
 
         while self.core.sleep(Duration::from_secs(GUARD_TIMEOUT as u64 / 4)).await {
+            // if we are in a soft shutdown situation we don't want to participate in stealing
+            if self.finalizing.read() {
+                return Ok(())
+            }
 
             // Load guards
             let finalizing = self.dispatchers_directory_finalize.items().await?;
@@ -1196,6 +1214,11 @@ impl Dispatcher {
             // Check if it has gone missing
             if let Some((oldest, last)) = oldest {
                 if chrono::Utc::now().timestamp() - last > GUARD_TIMEOUT {
+                    // check if we are the problem
+                    if oldest == &self.instance_id {
+                        break
+                    }
+
                     self.steal_work(oldest).await?;
                     last_seen.remove(&oldest.clone());
                 }
@@ -1214,6 +1237,11 @@ impl Dispatcher {
 
         let mut keys = target_jobs.keys().await?;
         while !keys.is_empty() {
+            // if we are exiting, halt this process without letting this function finish
+            if !self.core.is_running() || self.finalizing.read() {
+                return Ok(())
+            }
+
             let key: String = match keys.pop() {
                 Some(key) => key,
                 None => {
@@ -2576,7 +2604,7 @@ impl Dispatcher {
                 task.dropped_files.insert(extracted_sha256.clone());
                 let error_message = format!("{service_name} has extracted a file {extracted_sha256} beyond the depth limits");
                 let error = error::Error::from_submission(&task.submission)
-                    .service(service_name, service_version.clone())
+                    .service(service_name, service_version)
                     .maybe_tool_version(service_tool_version.clone())
                     .sha256(extracted_sha256)
                     .error_type(error::ErrorTypes::MaxDepthReached)
